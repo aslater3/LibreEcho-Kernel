@@ -1,0 +1,29 @@
+# Kernel build artifacts (do NOT commit)
+.config
+.config.old
+*.o
+*.o.*
+*.a
+*.ko
+*.mod.c
+*.cmd
+*.d
+.tmp_*
+*.symversions
+System.map
+vmlinux
+vmlinux.o
+/arch/*/boot/Image
+/arch/*/boot/Image.gz
+/arch/*/boot/zImage
+/arch/*/boot/Image.*
+/modules.builtin
+/modules.order
+Module.symvers
+/Kernel: arch/
+!.gitignore
+
+# Generated version / syscall tracking files
+.missing-syscalls.d
+.version
+.version.old
