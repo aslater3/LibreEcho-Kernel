@@ -634,7 +634,6 @@ static void WIFI_exit(void)
 	WIFI_INFO_FUNC("%s driver removed.\n", WIFI_DRIVER_NAME);
 }
 
-#ifdef MTK_WCN_REMOVE_KERNEL_MODULE
 INT32 mtk_wcn_wmt_wifi_soc_init(VOID)
 {
 	return WIFI_init();
@@ -646,7 +645,5 @@ VOID mtk_wcn_wmt_wifi_soc_exit(VOID)
 	return WIFI_exit();
 }
 EXPORT_SYMBOL(mtk_wcn_wmt_wifi_soc_exit);
-#else
 module_init(WIFI_init);
 module_exit(WIFI_exit);
-#endif

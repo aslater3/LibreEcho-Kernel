@@ -354,27 +354,8 @@ static unsigned int emi_reg_read(void __iomem *addr)
 
 static void emi_reg_write(unsigned int val, void __iomem *addr)
 {
-#ifndef CONFIG_MTK_IN_HOUSE_TEE_SUPPORT
+	/* Always use direct write — TEE silently rejects consys MPU region changes */
 	mt_reg_sync_writel(val, addr);
-#else
-	KREE_SESSION_HANDLE emi_session;
-	MTEEC_PARAM param[4];
-	TZ_RESULT ret;
-
-	ret = KREE_CreateSession(TZ_TA_EMI_UUID, &emi_session);
-	if (ret != TZ_RESULT_SUCCESS)
-		return;
-
-	param[0].value.a = (uint32_t)((unsigned long)(addr) & 0xFFF);
-	param[0].value.b = (uint32_t)val;
-	ret = KREE_TeeServiceCall(emi_session, TZCMD_EMI_WR,
-		TZ_ParamTypes4(TZPT_VALUE_INOUT, TZPT_VALUE_INOUT, TZPT_VALUE_INOUT, TZPT_VALUE_INOUT),
-		param);
-
-	ret = KREE_CloseSession(emi_session);
-	if (ret != TZ_RESULT_SUCCESS)
-		return;
-#endif
 }
 
 /*

@@ -648,7 +648,7 @@ void kbasep_job_slot_soft_or_hard_stop_do_action(struct kbase_device *kbdev,
 							head, head->jc, js);
 			break;
 		default:
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 			break;
 		}
 	} else {
@@ -685,7 +685,7 @@ void kbasep_job_slot_soft_or_hard_stop_do_action(struct kbase_device *kbdev,
 							0, js);
 			break;
 		default:
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 			break;
 		}
 	}

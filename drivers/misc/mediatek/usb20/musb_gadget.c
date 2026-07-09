@@ -54,6 +54,20 @@
 #include <linux/usb/composite.h>
 
 #include "musb_core.h"
+
+/* Amazon debug symbols - declared extern in musb_core.h but never defined
+ * in the open-source tree. Define as zeros to satisfy the linker. */
+struct usb_ep *ep_in;
+struct usb_ep *ep_out;
+int bitdebug_enabled;
+unsigned bitdebug_writeCnt;
+unsigned bitdebug_readCnt;
+
+/* AUXADC IMM stubs - missing from non-Android build */
+int IMM_IsAdcInitReady(void) { return 0; }
+int IMM_GetOneChannelValue(int dwChannel, int data[4], int *rawdata) { return 0; }
+int IMM_GetOneChannelValue_Cali(int Channel, int *voltage) { *voltage = 0; return 0; }
+
 /*Don't enable gadget CMDQ for MP branch*/
 #undef CONFIG_MTK_MUSB_QMU_SUPPORT
 

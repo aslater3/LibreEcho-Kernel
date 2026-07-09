@@ -1,5 +1,6 @@
 #ifdef WIN32
 #include "win_test.h"
+#include <linux/pinctrl/consumer.h>
 #include "stdio.h"
 #include "kd_flashlight.h"
 #else

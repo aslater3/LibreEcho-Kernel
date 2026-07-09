@@ -46,8 +46,8 @@ u16 pmic_set_register_value(u32 flagname, u32 val)
 }
 #endif
 
-#if 0
-static int disp_bls_set_backlight(int level_1024)
+#ifndef CONFIG_MTK_VIDEOX
+int disp_bls_set_backlight(int level_1024)
 {
 	return 0;
 }

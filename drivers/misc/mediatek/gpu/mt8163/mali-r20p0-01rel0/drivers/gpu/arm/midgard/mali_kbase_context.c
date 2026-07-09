@@ -280,7 +280,7 @@ void kbase_destroy_context(struct kbase_context *kctx)
 	while (pending_regions_to_clean) {
 		unsigned int cookie = __ffs(pending_regions_to_clean);
 
-		BUG_ON(!kctx->pending_regions[cookie]);
+		if (!kctx->pending_regions[cookie]) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 		kbase_reg_pending_dtor(kctx->pending_regions[cookie]);
 

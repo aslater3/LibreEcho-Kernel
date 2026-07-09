@@ -422,7 +422,7 @@ static int mfg_device_probe(struct platform_device *pdev)
 		/* clk_set_rate(parent, 520000000); */
 	} else {
 		pr_err("Failed to select mfg\n");
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 	pm_runtime_enable(&pdev->dev);

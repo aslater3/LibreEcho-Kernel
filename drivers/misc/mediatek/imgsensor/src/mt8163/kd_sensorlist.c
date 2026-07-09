@@ -2277,20 +2277,20 @@ static inline void Get_ccf_clk(struct platform_device *pdev)
 	}
 	/* get all possible using clocks */
 	g_camclk_camtg_sel = devm_clk_get(&pdev->dev, "TOP_CAMTG_SEL");
-	BUG_ON(IS_ERR(g_camclk_camtg_sel));
+	if (IS_ERR(g_camclk_camtg_sel)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	g_camclk_univpll_d26 = devm_clk_get(&pdev->dev, "TOP_UNIVPLL_D26");
-	BUG_ON(IS_ERR(g_camclk_univpll_d26));
+	if (IS_ERR(g_camclk_univpll_d26)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	g_camclk_univpll2_d2 = devm_clk_get(&pdev->dev, "TOP_UNIVPLL2_D2");
-	BUG_ON(IS_ERR(g_camclk_univpll2_d2));
+	if (IS_ERR(g_camclk_univpll2_d2)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	return;
 }
 
 static inline void Check_ccf_clk(void)
 {
-	BUG_ON(IS_ERR(g_camclk_camtg_sel));
-	BUG_ON(IS_ERR(g_camclk_univpll_d26));
-	BUG_ON(IS_ERR(g_camclk_univpll2_d2));
+	if (IS_ERR(g_camclk_camtg_sel)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (IS_ERR(g_camclk_univpll_d26)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (IS_ERR(g_camclk_univpll2_d2)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	return;
 }

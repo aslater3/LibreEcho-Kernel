@@ -638,8 +638,6 @@ static void BT_exit(void)
 	BT_INFO_FUNC("%s driver removed\n", BT_DRIVER_NAME);
 }
 
-#ifdef MTK_WCN_REMOVE_KERNEL_MODULE
-
 int mtk_wcn_stpbt_drv_init(void)
 {
 #ifdef CONFIG_AMAZON_A2DP_TS
@@ -658,9 +656,6 @@ void mtk_wcn_stpbt_drv_exit(void)
 }
 EXPORT_SYMBOL(mtk_wcn_stpbt_drv_exit);
 
-#else
-
 module_init(BT_init);
 module_exit(BT_exit);
 
-#endif

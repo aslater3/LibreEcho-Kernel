@@ -13,6 +13,7 @@
 */
 
 #include "wmt_gpio.h"
+#include <linux/pinctrl/consumer.h>
 
 /*******************************************************************************
 *                         C O M P I L E R   F L A G S

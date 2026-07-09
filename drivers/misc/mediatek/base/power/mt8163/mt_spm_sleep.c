@@ -401,7 +401,7 @@ static int dt_scan_memory(unsigned long node, const char *uname, int depth, void
 		spm_suspend_flag |= SPM_DRAM_RANK1_ADDR_SEL2;
 	else if (dram_info->rank_info[1].size != 0x0) {
 		spm_err("dram rank1_info_error: 0x%llx\n", dram_info->rank_info[1].start);
-		BUG_ON(1);
+		if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		/* return false; */
 	}
 
@@ -545,12 +545,12 @@ static wake_reason_t spm_output_wake_reason(struct wake_status *wakesta, struct 
 #if 0
 	if (wakesta->debug_flag & (1 << 18)) {
 		spm_crit2("MD32 suspned pmic wrapper error");
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 	if (wakesta->debug_flag & (1 << 19)) {
 		spm_crit2("MD32 resume pmic wrapper error");
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 #endif
 
@@ -772,7 +772,7 @@ bool spm_set_suspned_pcm_init_flag(u32 *suspend_flags)
 	node = of_scan_flat_dt(dt_scan_memory, NULL);
 #else
 	spm_err("dram rank1_info_error: no rank info\n");
-	BUG_ON(1);
+	if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	/* return false; */
 #endif
 

@@ -93,12 +93,12 @@ void kds_callback_term(struct kds_callback *cb)
 {
 	if (!cb->direct)
 	{
-		BUG_ON(!cb->wq);
+		if (!cb->wq) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		destroy_workqueue(cb->wq);
 	}
 	else
 	{
-		BUG_ON(cb->wq);
+		if (cb->wq) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	}
 }
 
@@ -137,7 +137,7 @@ static void kds_callback_perform(struct kds_resource_set *rset)
 
 void kds_resource_init(struct kds_resource * const res)
 {
-	BUG_ON(!res);
+	if (!res) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	INIT_LIST_HEAD(&res->waiters.link);
 	res->waiters.parent = KDS_RESOURCE;
 }
@@ -146,7 +146,7 @@ EXPORT_SYMBOL(kds_resource_init);
 int kds_resource_term(struct kds_resource *res)
 {
 	unsigned long lflags;
-	BUG_ON(!res);
+	if (!res) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	spin_lock_irqsave(&kds_lock, lflags);
 	if (!list_empty(&res->waiters.link))
 	{
@@ -175,9 +175,9 @@ int kds_async_waitall(
 	int triggered;
 	int err = -EFAULT;
 
-	BUG_ON(!pprset);
-	BUG_ON(!resource_list);
-	BUG_ON(!cb);
+	if (!pprset) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!resource_list) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!cb) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	WARN_ONCE(number_resources > 10, "Waiting on a high numbers of resources may increase latency, see documentation.");
 
@@ -523,7 +523,7 @@ void kds_resource_set_release(struct kds_resource_set **pprset)
 	 * pending (i.e. its running or completed) prior to calling release.
 	 */
 	queued = atomic_read(&rset->cb_queued);
-	BUG_ON(queued);
+	if (queued) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	kref_put(&rset->refcount, &__resource_set_release);
 }

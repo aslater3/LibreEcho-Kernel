@@ -2,6 +2,7 @@
 #ifdef CONFIG_ACCDET_EINT
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 #endif
 #include <upmu_common.h>
 #include <linux/timer.h>

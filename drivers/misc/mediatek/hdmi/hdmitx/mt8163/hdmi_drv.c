@@ -1267,7 +1267,7 @@ void hdmi_clock_probe(struct platform_device *pdev)
 
 	for (i = 0; i < HDMI_SEL_CLOCK_NUM; i++) {
 		hdmi_ref_clock[i] = devm_clk_get(&pdev->dev, hdmi_use_clock_name_spy(i));
-		BUG_ON(IS_ERR(hdmi_ref_clock[i]));
+		if (IS_ERR(hdmi_ref_clock[i])) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 		HDMI_DRV_LOG("Get Clock %s\n", hdmi_use_clock_name_spy(i));
 	}

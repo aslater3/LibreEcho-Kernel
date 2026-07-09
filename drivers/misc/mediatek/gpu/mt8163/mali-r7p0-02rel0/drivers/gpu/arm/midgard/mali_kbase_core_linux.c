@@ -1559,8 +1559,8 @@ found:
 found_highest:
 		gap_end -= len;
 
-		VM_BUG_ON(gap_end < PAGE_SIZE);
-		VM_BUG_ON(gap_end < gap_start);
+		VM_if (gap_end < PAGE_SIZE) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+		VM_if (gap_end < gap_start) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		return gap_end;
 	}
 #endif

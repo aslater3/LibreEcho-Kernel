@@ -464,7 +464,7 @@ static void _cmdq_build_trigger_loop(void)
 		ret = cmdqRecSetEventToken(pgc->cmdq_handle_trigger, CMDQ_SYNC_TOKEN_STREAM_EOF);
 
 		/* RUN forever!!!! */
-		BUG_ON(ret < 0);
+		if (ret < 0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	}
 
 	/* dump trigger loop instructions to check whether dpmgr_path_build_cmdq works correctly */

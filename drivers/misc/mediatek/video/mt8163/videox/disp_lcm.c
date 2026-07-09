@@ -582,7 +582,7 @@ int disp_lcm_is_video_mode(disp_lcm_handle *plcm)
 	if (_is_lcm_inited(plcm))
 		lcm_param = plcm->params;
 	else
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 
 	switch (lcm_param->type) {
 	case LCM_TYPE_DBI:
@@ -610,7 +610,7 @@ int disp_lcm_is_video_mode(disp_lcm_handle *plcm)
 		}
 	}
 
-	BUG();
+	pr_warn("stub: BUG avoided in %s\n", __func__);
 	return 0;
 }
 

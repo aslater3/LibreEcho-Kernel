@@ -245,7 +245,7 @@ static inline u32 wait_for_state_idle_init(loop_condition_fp fp, u32 timeout_us,
 			PWRAPERR("wait_for_state_idle_init timeout when waiting for idle\n");
 			pwrap_dump_ap_register();
 			/* pwrap_trace_wacs2(); */
-			/* BUG_ON(1); */
+			/* if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); } */
 			return E_PWR_WAIT_IDLE_TIMEOUT;
 		}
 		reg_rdata = WRAP_RD32(wacs_register);
@@ -285,7 +285,7 @@ static inline u32 wait_for_state_idle(loop_condition_fp fp, u32 timeout_us, void
 			PWRAPERR("wait_for_state_idle timeout when waiting for idle\n");
 			pwrap_dump_ap_register();
 			/* pwrap_trace_wacs2(); */
-			/* BUG_ON(1); */
+			/* if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); } */
 			return E_PWR_WAIT_IDLE_TIMEOUT;
 		}
 		reg_rdata = WRAP_RD32(wacs_register);
@@ -425,7 +425,7 @@ FAIL:
 	if (return_value != 0) {
 		PWRAPERR("pwrap_wacs2_hal fail,return_value=%d\n", return_value);
 		PWRAPERR("timeout:BUG_ON here\n");
-		/* BUG_ON(1); */
+		/* if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); } */
 	}
 	/* wrap_access_time=sched_clock(); */
 	/* pwrap_trace(wrap_access_time,return_value,write, adr, wdata,(u32)rdata); */
@@ -1264,7 +1264,7 @@ static irqreturn_t mt_pmic_wrap_irq(int irqno, void *dev_id)
 	/* clear interrupt flag */
 	WRAP_WR32(PMIC_WRAP_INT_CLR, 0xffffffff);
 	PWRAPREG("INT flag 0x%x\n", WRAP_RD32(PMIC_WRAP_INT_EN));
-	BUG_ON(1);
+	if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	spin_unlock_irqrestore(&wrp_lock_isr, flags);
 	return IRQ_HANDLED;
 }

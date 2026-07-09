@@ -518,8 +518,6 @@ static void GPS_exit(void)
 	pr_alert("%s driver removed.\n", GPS_DRIVER_NAME);
 }
 
-#ifdef MTK_WCN_REMOVE_KERNEL_MODULE
-
 int mtk_wcn_stpgps_drv_init(void)
 {
 	return GPS_init();
@@ -531,9 +529,6 @@ void mtk_wcn_stpgps_drv_exit(void)
 	return GPS_exit();
 }
 EXPORT_SYMBOL(mtk_wcn_stpgps_drv_exit);
-#else
-
 module_init(GPS_init);
 module_exit(GPS_exit);
 
-#endif

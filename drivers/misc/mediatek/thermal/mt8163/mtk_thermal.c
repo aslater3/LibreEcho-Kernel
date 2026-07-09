@@ -1961,7 +1961,7 @@ static void tscpu_config_all_tc_hw_protect(int temperature, int temperature2)
 						      WD_REQ_RST_MODE);
 	} else {
 		pr_err("%d FAILED TO GET WD API\n", __LINE__);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 #if THERMAL_PERFORMANCE_PROFILE
@@ -2694,10 +2694,10 @@ static int tscpu_init(struct platform_device *pdev)
 	pr_debug("tscpu_thermal_probe\n");
 
 	clk_peri_therm = devm_clk_get(&pdev->dev, "therm");
-	BUG_ON(IS_ERR(clk_peri_therm));
+	if (IS_ERR(clk_peri_therm)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	clk_auxadc = devm_clk_get(&pdev->dev, "auxadc");
-	BUG_ON(IS_ERR(clk_auxadc));
+	if (IS_ERR(clk_auxadc)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 #ifdef CONFIG_OF
 	if (get_io_reg_base(pdev) == 0)

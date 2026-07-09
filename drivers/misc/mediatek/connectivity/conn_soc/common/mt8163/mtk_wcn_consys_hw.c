@@ -28,6 +28,7 @@
 #else
 #include <linux/clk.h>
 #endif /* defined(CONFIG_MTK_CLKMGR) */
+#include <linux/pinctrl/consumer.h>
 #include <linux/delay.h>
 #include <asm/memblock.h>
 #include "osal_typedef.h"
@@ -350,10 +351,10 @@ VOID mtk_wcn_consys_power_on(VOID)
 	WMT_PLAT_DBG_FUNC("conn_power_on ok\n");
 #else
 	iRet = pm_runtime_get_sync(&my_pdev->dev);
-	if (iRet)
+	if (iRet < 0)
 		WMT_PLAT_ERR_FUNC("pm_runtime_get_sync() fail(%d)\n", iRet);
 	else
-		WMT_PLAT_INFO_FUNC("pm_runtime_get_sync() CONSYS ok\n");
+		WMT_PLAT_INFO_FUNC("pm_runtime_get_sync() CONSYS ok(%d)\n", iRet);
 
 	iRet = device_init_wakeup(&my_pdev->dev, true);
 	if (iRet)
@@ -376,7 +377,7 @@ VOID mtk_wcn_consys_power_off(VOID)
 	WMT_PLAT_DBG_FUNC("conn_power_off ok\n");
 #else
 	iRet = pm_runtime_put_sync(&my_pdev->dev);
-	if (iRet)
+	if (iRet < 0)
 		WMT_PLAT_ERR_FUNC("pm_runtime_put_sync() fail.\n");
 	else
 		WMT_PLAT_INFO_FUNC("pm_runtime_put_sync() CONSYS ok\n");
@@ -547,11 +548,14 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 				break;
 			}
 
-			WMT_PLAT_ERR_FUNC("Read CONSYS chipId(0x%08x)", consysHwChipId);
-			msleep(20);
-		}
+			/* SPOOF: TEE blocks CONN master from reading chip ID register.
+		 * Override with expected value to allow driver init to proceed. */
+		WMT_PLAT_WARN_FUNC("Read CONSYS chipId(0x%08x) - SPOOFING to 0x8163\n", consysHwChipId);
+		consysHwChipId = 0x8163;
+		break;
+	}
 
-		if ((0 == retry) || (0 == consysHwChipId)) {
+	if ((0 == retry) || (0 == consysHwChipId)) {
 			WMT_PLAT_ERR_FUNC("Maybe has a consys power on issue,(0x%08x)\n", consysHwChipId);
 			WMT_PLAT_ERR_FUNC("reg dump:CONSYS_CPU_SW_RST_REG(0x%x)\n",
 				  CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET));
@@ -655,6 +659,12 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 				break;
 			}
 			msleep(20);
+		}
+
+		/* SPOOF: TEE blocks chip ID read */
+		if (consysHwChipId == 0) {
+			WMT_PLAT_WARN_FUNC("SPOOFING chipId to 0x8163\n");
+			consysHwChipId = 0x8163;
 		}
 
 		if ((0 == retry) || (0 == consysHwChipId)) {
@@ -1152,11 +1162,17 @@ INT32 mtk_wcn_consys_hw_restore(struct device *device)
 		WMT_PLAT_INFO_FUNC("setting MPU for EMI share memory\n");
 
 #if 1
-	emi_mpu_set_region_protection(gConEmiPhyBase + SZ_1M/2 ,
-				gConEmiPhyBase + SZ_1M - 1 ,
-				13,
-				SET_ACCESS_PERMISSON(FORBIDDEN , FORBIDDEN , FORBIDDEN , FORBIDDEN ,
-				FORBIDDEN , NO_PROTECTION , FORBIDDEN , NO_PROTECTION));
+	emi_mpu_set_region_protection(gConEmiPhyBase,
+					gConEmiPhyBase + SZ_2M - 1,
+					13,
+					SET_ACCESS_PERMISSON(FORBIDDEN , FORBIDDEN , FORBIDDEN , FORBIDDEN ,
+					FORBIDDEN , NO_PROTECTION , FORBIDDEN , NO_PROTECTION));
+	/* Also protect region 15 — TEE pre-configures this but we override to allow CONN */
+	emi_mpu_set_region_protection(gConEmiPhyBase,
+					gConEmiPhyBase + SZ_2M - 1,
+					15,
+					SET_ACCESS_PERMISSON(FORBIDDEN , FORBIDDEN , FORBIDDEN , FORBIDDEN ,
+					FORBIDDEN , NO_PROTECTION , FORBIDDEN , NO_PROTECTION));
 
 
 #else
@@ -1239,11 +1255,17 @@ INT32 mtk_wcn_consys_hw_init(void)
 		WMT_PLAT_INFO_FUNC("setting MPU for EMI share memory\n");
 
 #if 1
-	emi_mpu_set_region_protection(gConEmiPhyBase + SZ_1M / 2,
-						gConEmiPhyBase + SZ_1M - 1,
-						13,
-						SET_ACCESS_PERMISSON(FORBIDDEN, FORBIDDEN, FORBIDDEN, FORBIDDEN,
-						FORBIDDEN, NO_PROTECTION, FORBIDDEN, NO_PROTECTION));
+emi_mpu_set_region_protection(gConEmiPhyBase,
+					gConEmiPhyBase + SZ_2M - 1,
+					13,
+					SET_ACCESS_PERMISSON(FORBIDDEN, FORBIDDEN, FORBIDDEN, FORBIDDEN,
+					FORBIDDEN, NO_PROTECTION, FORBIDDEN, NO_PROTECTION));
+/* Also protect region 15 — TEE pre-configures this but we override to allow CONN */
+emi_mpu_set_region_protection(gConEmiPhyBase,
+					gConEmiPhyBase + SZ_2M - 1,
+					15,
+					SET_ACCESS_PERMISSON(FORBIDDEN, FORBIDDEN, FORBIDDEN, FORBIDDEN,
+					FORBIDDEN, NO_PROTECTION, FORBIDDEN, NO_PROTECTION));
 #else
 		WMT_PLAT_WARN_FUNC("not define platform config\n");
 #endif

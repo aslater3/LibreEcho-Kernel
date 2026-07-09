@@ -9,7 +9,7 @@ ifneq ($(CONFIG_MTK_COMBO),)
 	subdir-ccflags-y += -D WMT_IDC_SUPPORT=0
 	endif
 	subdir-ccflags-y += -D MTK_WCN_WMT_STP_EXP_SYMBOL_ABSTRACT
-	subdir-ccflags-y += -D MTK_WCN_REMOVE_KERNEL_MODULE
+	subdir-ccflags-y += -D WMT_CREATE_NODE_DYNAMIC=1
 	ifeq ($(CONFIG_ARM64), y)
 	subdir-ccflags-y += -D CONFIG_MTK_WCN_ARM64
 	endif

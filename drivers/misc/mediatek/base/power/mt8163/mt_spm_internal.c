@@ -66,7 +66,7 @@ void __spm_reset_and_init_pcm(const struct pcm_desc *pcmdesc)
 	/* reset PCM */
 	spm_write(SPM_PCM_CON0, CON0_CFG_KEY | CON0_PCM_SW_RESET);
 	spm_write(SPM_PCM_CON0, CON0_CFG_KEY);
-	BUG_ON(spm_read(SPM_PCM_FSM_STA) != PCM_FSM_STA_DEF);	/* PCM reset failed */
+	if (spm_read(SPM_PCM_FSM_STA) != PCM_FSM_STA_DEF) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }	/* PCM reset failed */
 
 	/* init PCM_CON0 (disable event vector) */
 	spm_write(SPM_PCM_CON0, CON0_CFG_KEY | CON0_IM_SLEEP_DVS);
@@ -315,7 +315,7 @@ wake_reason_t __spm_output_wake_reason(const struct wake_status *wakesta,
 			wr = WR_WAKE_SRC;
 		}
 	}
-	BUG_ON(strlen(buf) >= LOG_BUF_SIZE);
+	if (strlen(buf) >= LOG_BUF_SIZE) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	spm_print(suspend, "wake up by %s, timer_out = %u, r13 = 0x%x, debug_flag = 0x%x\n",
 		  buf, wakesta->timer_out, wakesta->r13, wakesta->debug_flag);

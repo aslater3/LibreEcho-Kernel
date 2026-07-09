@@ -169,7 +169,7 @@ static void hal_dma_set_default_setting(ENUM_DMA_DIR dma_dir)
 				mtk_btif_rx_dma.p_irq->irq_flags);
 		}
 
-		if (of_property_read_u32_index(node, "reg", 0, &phy_base)) {
+		if (of_property_read_u32_index(node, "reg", 1, &phy_base)) {
 			BTIF_ERR_FUNC("get register phy base from DTS fail,dma_dir(%d)\n",
 				dma_dir);
 	    } else {
@@ -198,7 +198,7 @@ static void hal_dma_set_default_setting(ENUM_DMA_DIR dma_dir)
 				mtk_btif_tx_dma.p_irq->irq_flags);
 		}
 
-		if (of_property_read_u32_index(node, "reg", 0, &phy_base)) {
+		if (of_property_read_u32_index(node, "reg", 1, &phy_base)) {
 			BTIF_ERR_FUNC("get register phy base from DTS fail,dma_dir(%d)\n",
 				dma_dir);
 	    } else {

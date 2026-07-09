@@ -1388,7 +1388,13 @@ static int WMT_init(void)
 	ret = wmt_lib_init();
 	if (ret) {
 		WMT_ERR_FUNC("wmt_lib_init() fails (%d)\n", ret);
-		goto error;
+		/* wmt_lib_init() already called wmt_lib_deinit() internally on failure,
+		 * so skip the error: label which would double-free. Just clean up chrdev. */
+		if (cdevErr == 0)
+			cdev_del(&gWmtCdev);
+		unregister_chrdev_region(devID, WMT_DEV_NUM);
+		gWmtMajor = -1;
+		return -1;
 	}
 #if CFG_WMT_DBG_SUPPORT
 	wmt_dev_dbg_setup();

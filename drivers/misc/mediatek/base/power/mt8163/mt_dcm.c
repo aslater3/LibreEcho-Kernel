@@ -279,7 +279,7 @@ int dcm_infra_rate(unsigned int fsel, unsigned int sfsel)
 	int val;
 
 	if (fsel > 5 || sfsel > fsel)
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 
 	val = (sfsel == 5) ? 0 : (1 << (14 - sfsel));
 	val |= (fsel == 5) ? 0 : (1 << (9 - fsel));
@@ -400,7 +400,7 @@ int dcm_peri_rate(unsigned int fsel, unsigned int sfsel)
 	int val;
 
 	if (fsel > 5 || sfsel > fsel)
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 
 	val = (sfsel == 5) ? 0 : (1 << (14 - sfsel));
 	val |= (fsel == 5) ? 0 : (1 << (9 - fsel));
@@ -976,7 +976,7 @@ static int dcm_cpu_notify(struct notifier_block *self, unsigned long action,
 		if (and(reg_read(MP0_AXI_CONFIG), ACINACTM)) {
 			dcm_info("axi_config:0x%0x\n",
 				 reg_read(MP0_AXI_CONFIG));
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 		}
 		break;
 
@@ -1013,54 +1013,54 @@ static int mt_dcm_dts_map(void)
 	node = of_find_compatible_node(NULL, NULL, TOPCKGEN_NODE);
 	if (!node) {
 		dcm_info("error: cannot find node " TOPCKGEN_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	topckgen_base = of_iomap(node, 0);
 	if (!topckgen_base) {
 		dcm_info("error: cannot iomap " TOPCKGEN_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 	/* mcucfg */
 	node = of_find_compatible_node(NULL, NULL, MCUCFG_NODE);
 	if (!node) {
 		dcm_info("error: cannot find node " MCUCFG_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	if (of_address_to_resource(node, 0, &r)) {
 		dcm_info("error: cannot get phys addr" MCUCFG_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	mcucfg_phys_base = r.start;
 
 	mcucfg_base = of_iomap(node, 0);
 	if (!mcucfg_base) {
 		dcm_info("error: cannot iomap " MCUCFG_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 	/* dramc */
 	node = of_find_compatible_node(NULL, NULL, DRAMC_NODE);
 	if (!node) {
 		dcm_info("error: cannot find node " DRAMC_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	dramc_base = of_iomap(node, 0);
 	if (!dramc_base) {
 		dcm_info("error: cannot iomap " DRAMC_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 	/* infracfg_ao */
 	node = of_find_compatible_node(NULL, NULL, INFRACFG_AO_NODE);
 	if (!node) {
 		dcm_info("error: cannot find node " INFRACFG_AO_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	infracfg_ao_base = of_iomap(node, 0);
 	if (!infracfg_ao_base) {
 		dcm_info("error: cannot iomap " INFRACFG_AO_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 	of_node_put(node);

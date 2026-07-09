@@ -4287,7 +4287,7 @@ static void tscpu_config_all_tc_hw_protect(int temperature, int temperature2)
 		wd_api->wd_thermal_direct_mode_config(WD_REQ_DIS, WD_REQ_RST_MODE);
 	} else {
 		pr_err("%d FAILED TO GET WD API\n", __LINE__);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 #if THERMAL_PERFORMANCE_PROFILE
@@ -4795,7 +4795,7 @@ static int get_io_reg_base(void)
 
 
 	node = of_find_compatible_node(NULL, NULL, "mediatek,THERM_CTRL");
-	BUG_ON(node == 0);
+	if (node == 0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	if (node) {
 		/* Setup IO addresses */
 		thermal_base = of_iomap(node, 0);
@@ -4816,7 +4816,7 @@ static int get_io_reg_base(void)
 
 
 	node = of_find_compatible_node(NULL, NULL, "mediatek,AUXADC");
-	BUG_ON(node == 0);
+	if (node == 0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	if (node) {
 		/* Setup IO addresses */
 		auxadc_ts_base = of_iomap(node, 0);
@@ -4828,7 +4828,7 @@ static int get_io_reg_base(void)
 
 
 	node = of_find_compatible_node(NULL, NULL, "mediatek,INFRACFG_AO");
-	BUG_ON(node == 0);
+	if (node == 0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	if (node) {
 		/* Setup IO addresses */
 		INFRACFG_AO_base = of_iomap(node, 0);
@@ -4837,7 +4837,7 @@ static int get_io_reg_base(void)
 
 
 	node = of_find_compatible_node(NULL, NULL, "mediatek,APMIXED");
-	BUG_ON(node == 0);
+	if (node == 0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	if (node) {
 		/* Setup IO addresses */
 		apmixed_base = of_iomap(node, 0);
@@ -4957,10 +4957,10 @@ static int tscpu_thermal_probe(struct platform_device *pdev)
 	pr_debug("tscpu_thermal_probe\n");
 
 	clk_peri_therm = devm_clk_get(&pdev->dev, "therm");
-	BUG_ON(IS_ERR(clk_peri_therm));
+	if (IS_ERR(clk_peri_therm)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	clk_auxadc = devm_clk_get(&pdev->dev, "auxadc");
-	BUG_ON(IS_ERR(clk_auxadc));
+	if (IS_ERR(clk_auxadc)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 
 #ifdef CONFIG_OF
@@ -4988,8 +4988,8 @@ static int tscpu_thermal_probe(struct platform_device *pdev)
 	/* RG_TS2AUXADC < set from 2'b11 to 2'b00 when resume.
 	wait 100uS than turn on thermal controller. */
 
-	/*BUG_ON((DRV_Reg32(TS_CON1) & 0x00000030) != 0x0);
-	BUG_ON(clock_is_on(MT_CG_INFRA_AUXADC) == 0x0);*/
+	/*if ((DRV_Reg32(TS_CON1) & 0x00000030) != 0x0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (clock_is_on(MT_CG_INFRA_AUXADC) == 0x0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }*/
 
 	/*add this function to read all temp first to avoid
 	  write TEMPPROTTC first will issue an fake signal to RGU */

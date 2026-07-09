@@ -1,4 +1,5 @@
 #include <linux/types.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/init.h>		/* For init/exit macros */
 #include <linux/module.h>	/* For MODULE_ marcros  */
 #include <linux/platform_device.h>

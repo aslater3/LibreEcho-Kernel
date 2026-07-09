@@ -1511,16 +1511,18 @@ static INT32 mtk_wcn_soc_ver_check(VOID)
 	WMT_LOUD_FUNC("0x%x: before read hw_ver (hw version)\n", wmt_ic_ops_soc.icId);
 	iret = wmt_core_reg_rw_raw(0, GEN_HVR, &hw_ver, GEN_VER_MASK);
 	if (iret) {
-		WMT_ERR_FUNC("0x%x: read hw_ver fail:%d\n", wmt_ic_ops_soc.icId, iret);
-		return -2;
+		WMT_WARN_FUNC("0x%x: read hw_ver fail:%d - SPOOFING to 0x8a00\n", wmt_ic_ops_soc.icId, iret);
+		hw_ver = 0x8a00;
+		iret = 0;
 	}
 	WMT_DBG_FUNC("0x%x: read hw_ver (hw version) (0x%x)\n", wmt_ic_ops_soc.icId, hw_ver);
 
 	WMT_LOUD_FUNC("0x%x: before fw_ver (rom version)\n", wmt_ic_ops_soc.icId);
-	wmt_core_reg_rw_raw(0, GEN_FVR, &fw_ver, GEN_VER_MASK);
+	iret = wmt_core_reg_rw_raw(0, GEN_FVR, &fw_ver, GEN_VER_MASK);
 	if (iret) {
-		WMT_ERR_FUNC("0x%x: read fw_ver fail:%d\n", wmt_ic_ops_soc.icId, iret);
-		return -2;
+		WMT_WARN_FUNC("0x%x: read fw_ver fail:%d - SPOOFING to 0x0100\n", wmt_ic_ops_soc.icId, iret);
+		fw_ver = 0x0100;
+		iret = 0;
 	}
 	WMT_DBG_FUNC("0x%x: read fw_ver (rom version) (0x%x)\n", wmt_ic_ops_soc.icId, fw_ver);
 

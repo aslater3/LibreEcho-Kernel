@@ -4425,7 +4425,7 @@ static MINT32 ISP_WaitIrq_FrmB(ISP_WAIT_IRQ_STRUCT_FRMB *WaitIrq)
 		}
 
 		if ((gEismetaRIdx < 0) || (gEismetaRIdx >= EISMETA_RINGSIZE)) {
-			/* BUG_ON(1); */
+			/* if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); } */
 			gEismetaRIdx = 0;
 			/* TBD WARNING */
 		}

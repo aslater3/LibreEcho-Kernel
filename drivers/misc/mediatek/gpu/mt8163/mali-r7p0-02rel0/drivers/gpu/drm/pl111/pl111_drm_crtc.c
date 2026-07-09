@@ -250,7 +250,7 @@ int show_framebuffer_on_crtc(struct drm_crtc *crtc,
 		err = kds_async_waitall(&flip_res->kds_res_set,
 					&priv.kds_cb, flip_res, fb, 1, shared,
 					resource_list);
-		BUG_ON(err);
+		if (err) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	} else {
 		struct pl111_drm_crtc *pl111_crtc = to_pl111_crtc(crtc);
 

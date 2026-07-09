@@ -105,7 +105,7 @@ static u32 core_type_to_reg(enum kbase_pm_core_type core_type,
 		case ACTION_PWRTRANS:
 			return STACK_PWRTRANS_LO;
 		default:
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 		}
 	}
 #endif /* CONFIG_MALI_CORESTACK */
@@ -859,7 +859,7 @@ MOCKABLE(kbase_pm_check_transitions_nolock) (struct kbase_device *kbdev)
 		(prev_l2_available_bitmap == desired_l2_state) &&
 		!(kbase_pm_ca_get_core_mask(kbdev) &
 		kbdev->gpu_props.props.coherency_info.group[0].core_mask))
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 
 	/* The core availability policy is allowed to keep core group 1 off,
 	 * but all jobs specifically targeting CG1 must fail */

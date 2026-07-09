@@ -1,4 +1,5 @@
 #include "accdet_amzn.h"
+#include <linux/pinctrl/consumer.h>
 
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>

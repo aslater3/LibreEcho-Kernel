@@ -373,7 +373,7 @@ DAL_STATUS DAL_Printf(const char *fmt, ...)
 
 	va_start(args, fmt);
 	i = vsprintf(dal_print_buffer, fmt, args);
-	BUG_ON(i >= ARRAY_SIZE(dal_print_buffer));
+	if (i >= ARRAY_SIZE(dal_print_buffer)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	va_end(args);
 	DAL_CHECK_MFC_RET(MFC_Print(mfc_handle, dal_print_buffer));
 

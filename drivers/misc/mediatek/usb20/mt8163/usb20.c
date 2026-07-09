@@ -425,43 +425,13 @@ void mt_usb_check_reconnect(void)
 
 bool usb_cable_connected(void)
 {
-#ifdef FPGA_PLATFORM
+	/*
+	 * Amazon Echo (radar_puffin) has no battery/charger IC.
+	 * Hardcoding to true to force RNDIS gadget initialization.
+	 * The mt_get_charger_type() path requires headers that don't
+	 * compile cleanly with our defconfig changes.
+	 */
 	return true;
-#else
-
-	int charge_type;
-#ifdef CONFIG_USB_MTK_OTG
-/*ALPS00775710*/
-#ifdef CONFIG_CMD_MODE_CHANGE
-	int iddig_state = 1;
-	if (mtk_musb->force_mode == USB_FORCE_HOST) {
-		pr_info("[USB]%s:%d is_host:%d\n",
-			__FUNCTION__, __LINE__, mtk_musb->is_host);
-		iddig_state = 0;
-	} else if (mtk_musb->force_mode == USB_FORCE_DEVICE) {
-		pr_info("[USB]%s:%d is_host:%d\n",
-			__FUNCTION__, __LINE__, mtk_musb->is_host);
-		iddig_state = 1;
-	} else {
-		pr_info("[USB]%s:%d error !!!!! is_host:%d\n",
-			__FUNCTION__, __LINE__, mtk_musb->is_host);
-	}
-
-	DBG(0, "iddig_state = %d\n", iddig_state);
-
-	if (!iddig_state)
-		return false;
-#endif
-#endif
-
-	charge_type = mt_get_charger_type();
-
-	if ((charge_type == STANDARD_HOST) || (charge_type == CHARGING_HOST))
-		return true;
-	else
-		return false;
-
-#endif /* end FPGA_PLATFORM */
 }
 
 void musb_platform_reset(struct musb *musb)

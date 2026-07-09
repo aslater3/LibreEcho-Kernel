@@ -1,4 +1,5 @@
 #include <linux/cdev.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>

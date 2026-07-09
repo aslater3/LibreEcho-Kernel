@@ -419,6 +419,9 @@ INT32 wmt_lib_set_hif(unsigned long hifconf)
 		pHif->au4StrapConf[0] = WMT_FM_COMM;
 	} else if (WMT_FM_I2C == val) {
 		pHif->au4StrapConf[0] = WMT_FM_I2C;
+	} else if (0 == val) {
+		/* No FM radio on this device -- accept 0 as valid */
+		pHif->au4StrapConf[0] = WMT_FM_COMM;
 	} else {
 		WMT_WARN_FUNC("invalid fm mode: %u\n", val);
 		return -2;

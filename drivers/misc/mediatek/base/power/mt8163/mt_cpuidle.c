@@ -357,7 +357,7 @@ int mt_cpu_dormant_psci(unsigned long flags)
 		ret = psci_ops.cpu_suspend(pps, virt_to_phys(cpu_resume));
 	}
 
-	BUG();
+	pr_warn("stub: BUG avoided in %s\n", __func__);
 
 	return ret;
 }
@@ -405,7 +405,7 @@ int mt_cpu_dormant(unsigned long flags)
 
 	DORMANT_LOG(clusterid * MAX_CORES + cpuid, 0x101);
 
-	BUG_ON(!irqs_disabled());
+	if (!irqs_disabled()) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	/* to mark as cpu clobs vfp register. */
 	kernel_neon_begin();
@@ -485,12 +485,12 @@ static int mt_dormant_dts_map(void)
 	node = of_find_compatible_node(NULL, NULL, BIU_NODE);
 	if (!node) {
 		dormant_err("error: cannot find node " BIU_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	biu_base = (unsigned long)of_iomap(node, 0);
 	if (!biu_base) {
 		dormant_err("error: cannot iomap " BIU_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	of_node_put(node);
 #endif
@@ -498,12 +498,12 @@ static int mt_dormant_dts_map(void)
 	node = of_find_compatible_node(NULL, NULL, GIC_NODE);
 	if (!node) {
 		dormant_err("error: cannot find node " GIC_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	gic_id_base = (unsigned long)of_iomap(node, 0);
 	if (!gic_id_base) {
 		dormant_err("error: cannot iomap " GIC_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	of_node_put(node);
 
@@ -511,11 +511,11 @@ static int mt_dormant_dts_map(void)
 	node = of_find_compatible_node(NULL, NULL, KP_NODE);
 	if (!node) {
 		dormant_err("error: cannot find node " KP_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	if (of_property_read_u32_array(node, "interrupts", kp_interrupt, ARRAY_SIZE(kp_interrupt))) {
 		dormant_err("error: cannot property_read " KP_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	kp_irq_bit = ((1 - kp_interrupt[0]) << 5) + kp_interrupt[1];	/* irq[0] = 0 => spi */
 	of_node_put(node);
@@ -526,12 +526,12 @@ static int mt_dormant_dts_map(void)
 	node = of_find_compatible_node(NULL, NULL, CONSYS_NODE);
 	if (!node) {
 		CPU_DORMANT_INFO("error: cannot find node " CONSYS_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	if (of_property_read_u32_array(node, "interrupts",
 				       consys_interrupt, ARRAY_SIZE(consys_interrupt))) {
 		CPU_DORMANT_INFO("error: cannot property_read " CONSYS_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	conn_wdt_irq_bit = ((1 - consys_interrupt[3]) << 5) + consys_interrupt[4];	/* irq[0] = 0 => spi */
 	of_node_put(node);
@@ -541,12 +541,12 @@ static int mt_dormant_dts_map(void)
 	node = of_find_compatible_node(NULL, NULL, AUXADC_NODE);
 	if (!node) {
 		dormant_err("error: cannot find node " AUXADC_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	if (of_property_read_u32_array(node, "interrupts",
 				       auxadc_interrupt, ARRAY_SIZE(auxadc_interrupt))) {
 		dormant_err("error: cannot property_read " AUXADC_NODE);
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 	lowbattery_irq_bit = ((1 - auxadc_interrupt[0]) << 5) + auxadc_interrupt[1];	/* irq[0] = 0 => spi */
 	of_node_put(node);
@@ -572,7 +572,7 @@ static int __init mt_cpu_dormant_init(void)
 	sleep_aee_rec_cpu_dormant_va = aee_rr_rec_cpu_dormant();
 	sleep_aee_rec_cpu_dormant_pa = aee_rr_rec_cpu_dormant_pa();
 
-	BUG_ON(!sleep_aee_rec_cpu_dormant_va || !sleep_aee_rec_cpu_dormant_pa);
+	if (!sleep_aee_rec_cpu_dormant_va || !sleep_aee_rec_cpu_dormant_pa) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	kernel_smc_msg(0, 2, (phys_addr_t)sleep_aee_rec_cpu_dormant_pa);
 

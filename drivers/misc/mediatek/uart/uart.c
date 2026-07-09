@@ -24,6 +24,7 @@
 #endif
 /*---------------------------------------------------------------------------*/
 #include <generated/autoconf.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/module.h>
 #include <linux/ioport.h>

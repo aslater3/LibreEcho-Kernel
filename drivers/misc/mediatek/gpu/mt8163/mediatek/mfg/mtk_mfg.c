@@ -104,7 +104,7 @@ static int mfg_device_probe(struct platform_device *pdev)
 		pr_info("MFG is now selected to %s, parent rate %lu\n", parent->name, freq);
 	} else {
 		pr_err("Failed to select mfg\n");
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 	clk_disable_unprepare(clk_topck);

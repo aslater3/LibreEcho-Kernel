@@ -18,6 +18,7 @@
  */
 
 #include "cust_gyro.h"
+#include <linux/pinctrl/consumer.h>
 #include "ITG1010.h"
 #include "gyroscope.h"
 

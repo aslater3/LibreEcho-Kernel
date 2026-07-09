@@ -43,7 +43,7 @@ static void algo_hmp_limit(
 			if (--val == 0)
 				break;
 		}
-		BUG_ON(val);
+		if (val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.action |= BIT(ACTION_LIMIT_BIG);
 	}
 
@@ -60,7 +60,7 @@ static void algo_hmp_limit(
 			if (--val == 0)
 				break;
 		}
-		BUG_ON(val);
+		if (val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.action |= BIT(ACTION_LIMIT_LITTLE);
 	}
 }
@@ -79,8 +79,8 @@ static void algo_hmp_base(
 	unsigned int val;
 	unsigned int num_online = lo + bo;
 
-	BUG_ON(bo > bl);
-	BUG_ON(lo > ll);
+	if (bo > bl) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (lo > ll) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (bo < bb && bo < bl && hps_ctxt.state == STATE_LATE_RESUME) {
 		val = min(bb, bl) - bo;
@@ -95,7 +95,7 @@ static void algo_hmp_base(
 			if (--val == 0)
 				break;
 		}
-		BUG_ON(val);
+		if (val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.action |= BIT(ACTION_BASE_BIG);
 	}
 
@@ -118,7 +118,7 @@ static void algo_hmp_base(
 				if (--val == 0)
 					break;
 			}
-			BUG_ON(val);
+			if (val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 			hps_ctxt.action |= BIT(ACTION_BASE_LITTLE);
 		}
 	}
@@ -151,7 +151,7 @@ static void algo_hmp_rush_boost(
 		return;
 
 	val = hps_ctxt.tlp_avg / 100 + (hps_ctxt.tlp_avg % 100 ? 1 : 0);
-	BUG_ON(!(val > num_online));
+	if (!(val > num_online)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	if (val > num_possible_cpus())
 		val = num_possible_cpus();
 
@@ -218,7 +218,7 @@ static void algo_hmp_up(
 	++hps_ctxt.up_loads_count;
 
 	if (hps_ctxt.up_loads_count > hps_ctxt.up_times) {
-		BUG_ON(hps_ctxt.up_loads_sum < val);
+		if (hps_ctxt.up_loads_sum < val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.up_loads_sum -= val;
 	}
 
@@ -289,7 +289,7 @@ static void algo_hmp_down(
 	++hps_ctxt.down_loads_count;
 
 	if (hps_ctxt.down_loads_count > hps_ctxt.down_times) {
-		BUG_ON(hps_ctxt.down_loads_sum < val);
+		if (hps_ctxt.down_loads_sum < val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.down_loads_sum -= val;
 	}
 
@@ -366,7 +366,7 @@ static void algo_hmp_big_to_little(
 		if (cpumask_test_cpu(val, big_online_cpumask))
 			break;
 	}
-	BUG_ON(val < hps_ctxt.big_cpu_id_min);
+	if (val < hps_ctxt.big_cpu_id_min) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	/* verify whether b2L will open 1 little */
 	load = per_cpu(hps_percpu_ctxt, val).load * CPU_DMIPS_BIG_LITTLE_DIFF;
@@ -523,7 +523,7 @@ void hps_algo_hmp(void)
 			0 : hps_ctxt.tlp_history_index + 1;
 	++hps_ctxt.tlp_count;
 	if (hps_ctxt.tlp_count > hps_ctxt.tlp_times) {
-		BUG_ON(hps_ctxt.tlp_sum < val);
+		if (hps_ctxt.tlp_sum < val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.tlp_sum -= val;
 		hps_ctxt.tlp_avg = hps_ctxt.tlp_sum / hps_ctxt.tlp_times;
 	} else
@@ -631,7 +631,7 @@ static void algo_smp_limit(
 			break;
 	}
 
-	BUG_ON(val);
+	if (val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	hps_ctxt.action |= BIT(ACTION_LIMIT_LITTLE);
 }
 
@@ -644,7 +644,7 @@ static void algo_smp_base(
 	unsigned int cpu;
 	unsigned int val;
 
-	BUG_ON(little_num_online > little_num_limit);
+	if (little_num_online > little_num_limit) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	if (little_num_online >= little_num_base ||
 		little_num_online >= little_num_limit)
 		return;
@@ -665,7 +665,7 @@ static void algo_smp_base(
 			break;
 	}
 
-	BUG_ON(val);
+	if (val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	hps_ctxt.action |= BIT(ACTION_BASE_LITTLE);
 }
 
@@ -692,7 +692,7 @@ static void algo_smp_rush_boost(
 		return;
 
 	val = hps_ctxt.tlp_avg / 100 + (hps_ctxt.tlp_avg % 100 ? 1 : 0);
-	BUG_ON(!(val > little_num_online));
+	if (!(val > little_num_online)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	if (val > num_possible_cpus())
 		val = num_possible_cpus();
 
@@ -742,7 +742,7 @@ static void algo_smp_up(
 	++hps_ctxt.up_loads_count;
 
 	if (hps_ctxt.up_loads_count > hps_ctxt.up_times) {
-		BUG_ON(hps_ctxt.up_loads_sum < val);
+		if (hps_ctxt.up_loads_sum < val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.up_loads_sum -= val;
 	}
 
@@ -799,7 +799,7 @@ static void algo_smp_down(
 	++hps_ctxt.down_loads_count;
 
 	if (hps_ctxt.down_loads_count > hps_ctxt.down_times) {
-		BUG_ON(hps_ctxt.down_loads_sum < val);
+		if (hps_ctxt.down_loads_sum < val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.down_loads_sum -= val;
 	}
 
@@ -945,7 +945,7 @@ void hps_algo_smp(void)
 			0 : hps_ctxt.tlp_history_index + 1;
 	++hps_ctxt.tlp_count;
 	if (hps_ctxt.tlp_count > hps_ctxt.tlp_times) {
-		BUG_ON(hps_ctxt.tlp_sum < val);
+		if (hps_ctxt.tlp_sum < val) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		hps_ctxt.tlp_sum -= val;
 		hps_ctxt.tlp_avg = hps_ctxt.tlp_sum / hps_ctxt.tlp_times;
 	} else

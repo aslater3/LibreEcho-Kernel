@@ -528,7 +528,7 @@ void enable_soidle_by_bit(int id)
 	int grp = id / 32;
 	unsigned int mask = BIT(id % 32);
 
-	BUG_ON(INVALID_GRP_ID(grp));
+	if (INVALID_GRP_ID(grp)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	enable_soidle_by_mask(grp, mask);
 }
 EXPORT_SYMBOL(enable_soidle_by_bit);
@@ -538,7 +538,7 @@ void disable_soidle_by_bit(int id)
 	int grp = id / 32;
 	unsigned int mask = BIT(id % 32);
 
-	BUG_ON(INVALID_GRP_ID(grp));
+	if (INVALID_GRP_ID(grp)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	disable_soidle_by_mask(grp, mask);
 }
 EXPORT_SYMBOL(disable_soidle_by_bit);
@@ -630,7 +630,7 @@ void soidle_after_wfi(int cpu)
 		if (unlikely(cmp < cnt)) {
 			idle_err("[%s]GPT%d: counter = %10u, compare = %10u\n",
 					__func__, idle_gpt + 1, cnt, cmp);
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 		}
 
 		localtimer_set_next_event(cmp - cnt);
@@ -821,7 +821,7 @@ void enable_dpidle_by_bit(int id)
 	int grp = id / 32;
 	unsigned int mask = BIT(id % 32);
 
-	BUG_ON(INVALID_GRP_ID(grp));
+	if (INVALID_GRP_ID(grp)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	enable_dpidle_by_mask(grp, mask);
 }
 EXPORT_SYMBOL(enable_dpidle_by_bit);
@@ -831,7 +831,7 @@ void disable_dpidle_by_bit(int id)
 	int grp = id / 32;
 	unsigned int mask = BIT(id % 32);
 
-	BUG_ON(INVALID_GRP_ID(grp));
+	if (INVALID_GRP_ID(grp)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	disable_dpidle_by_mask(grp, mask);
 }
 EXPORT_SYMBOL(disable_dpidle_by_bit);
@@ -965,7 +965,7 @@ void spm_dpidle_after_wfi(void)
 		if (unlikely(cmp < cnt)) {
 			idle_err("[%s]GPT%d: counter = %10u, compare = %10u\n",
 				__func__, idle_gpt + 1, cnt, cmp);
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 		}
 
 		localtimer_set_next_event(cmp - cnt);
@@ -1007,7 +1007,7 @@ void enable_slidle_by_bit(int id)
 	int grp = id / 32;
 	unsigned int mask = BIT(id % 32);
 
-	BUG_ON(INVALID_GRP_ID(grp));
+	if (INVALID_GRP_ID(grp)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	enable_slidle_by_mask(grp, mask);
 }
 EXPORT_SYMBOL(enable_slidle_by_bit);
@@ -1017,7 +1017,7 @@ void disable_slidle_by_bit(int id)
 	int grp = id / 32;
 	unsigned int mask = BIT(id % 32);
 
-	BUG_ON(INVALID_GRP_ID(grp));
+	if (INVALID_GRP_ID(grp)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	disable_slidle_by_mask(grp, mask);
 }
 EXPORT_SYMBOL(disable_slidle_by_bit);

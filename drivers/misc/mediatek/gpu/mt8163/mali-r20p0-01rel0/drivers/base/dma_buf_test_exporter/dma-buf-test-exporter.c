@@ -205,7 +205,7 @@ static void dma_buf_te_mmap_close(struct vm_area_struct *vma)
 	dma_buf = vma->vm_private_data;
 	alloc = dma_buf->priv;
 
-	BUG_ON(alloc->nr_cpu_mappings <= 0);
+	if (alloc->nr_cpu_mappings <= 0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	mutex_lock(&dma_buf->lock);
 	alloc->nr_cpu_mappings--;
 	mutex_unlock(&dma_buf->lock);
@@ -225,7 +225,7 @@ static int dma_buf_te_mmap_fault(struct vm_area_struct *vma, struct vm_fault *vm
 
 	pageptr = alloc->pages[vmf->pgoff];
 
-	BUG_ON(!pageptr);
+	if (!pageptr) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	get_page(pageptr);
 	vmf->page = pageptr;

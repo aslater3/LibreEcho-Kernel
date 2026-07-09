@@ -9,6 +9,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/init.h>

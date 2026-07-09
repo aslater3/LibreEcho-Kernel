@@ -2323,6 +2323,29 @@ static int WMT_close(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/*
+ * WMT_compat_ioctl - translate 32-bit ioctl commands to 64-bit equivalents.
+ */
+static long WMT_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+#define WMT_IOC_MAGIC_COMPAT 0xa0
+	unsigned int nr = _IOC_NR(cmd);
+	unsigned int dir = _IOC_DIR(cmd);
+	unsigned int magic = _IOC_TYPE(cmd);
+
+	if (magic != WMT_IOC_MAGIC_COMPAT)
+		return WMT_unlocked_ioctl(filp, cmd, arg);
+
+	/* For char* commands, re-encode with 64-bit pointer size (8 bytes) */
+	if (nr == 4 || nr == 8 || nr == 15 || nr == 25 || nr == 26) {
+		unsigned int new_cmd = _IOC(dir, WMT_IOC_MAGIC_COMPAT, nr, sizeof(char*));
+		return WMT_unlocked_ioctl(filp, new_cmd, arg);
+	}
+
+	/* int-sized commands encode the same on both sides */
+	return WMT_unlocked_ioctl(filp, cmd, arg);
+}
+
 const struct file_operations gWmtFops = {
 	.open = WMT_open,
 	.release = WMT_close,
@@ -2330,6 +2353,7 @@ const struct file_operations gWmtFops = {
 	.write = WMT_write,
 /* .ioctl = WMT_ioctl, */
 	.unlocked_ioctl = WMT_unlocked_ioctl,
+	.compat_ioctl = WMT_compat_ioctl,
 	.poll = WMT_poll,
 };
 
@@ -2353,6 +2377,12 @@ static int WMT_init(void)
 	dev_t devID = MKDEV(gWmtMajor, 0);
 	INT32 cdevErr = -1;
 	INT32 ret = -1;
+
+	/* Guard against double-init from module_init + chip detection */
+	static int already_called = 0;
+	if (already_called)
+		return 0;
+	already_called = 1;
 
 	WMT_INFO_FUNC("WMT Version= %s DATE=%s\n", MTK_WMT_VERSION, MTK_WMT_DATE);
 	/* Prepare a UINT8 device */
@@ -2517,8 +2547,7 @@ static void WMT_exit(void)
 	WMT_INFO_FUNC("done\n");
 }
 
-#ifdef MTK_WCN_REMOVE_KERNEL_MODULE
-
+/* Always expose soc_common_drv_init for common_drv_init.c */
 int mtk_wcn_soc_common_drv_init(void)
 {
 	return WMT_init();
@@ -2531,10 +2560,9 @@ void mtk_wcn_soc_common_drv_exit(void)
 }
 EXPORT_SYMBOL(mtk_wcn_soc_common_drv_exit);
 
-#else
-module_init(WMT_init);
+late_initcall(WMT_init);
 module_exit(WMT_exit);
-#endif
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("MediaTek Inc WCN");
 MODULE_DESCRIPTION("MTK WCN combo driver for WMT function");

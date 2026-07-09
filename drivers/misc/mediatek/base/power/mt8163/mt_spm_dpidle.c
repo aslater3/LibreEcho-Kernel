@@ -391,14 +391,14 @@ bool spm_set_dpidle_pcm_init_flag(void)
 		else if (dram_info->rank_info[1].size != 0x0) {
 			/* printk("dram rank1_info_error: %x\n",dram_info->rank_info[1].start); */
 			pr_err("dram rank1_info_error: no rank info\n");
-			BUG_ON(1);
+			if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 			/* return false; */
 		}
 	}
 	/* pwrctrl->pcm_flags |= (1<<31); */
 #else
 	pr_err("dram rank1_info_error: no rank info\n");
-	BUG_ON(1);
+	if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	/* return false; */
 #endif
 

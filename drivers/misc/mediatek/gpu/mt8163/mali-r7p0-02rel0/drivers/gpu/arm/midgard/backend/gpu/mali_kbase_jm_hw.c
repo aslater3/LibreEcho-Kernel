@@ -643,7 +643,7 @@ void kbasep_job_slot_soft_or_hard_stop_do_action(struct kbase_device *kbdev,
 							head, head->jc, js);
 			break;
 		default:
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 			break;
 		}
 	} else {
@@ -680,7 +680,7 @@ void kbasep_job_slot_soft_or_hard_stop_do_action(struct kbase_device *kbdev,
 							0, js);
 			break;
 		default:
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 			break;
 		}
 	}
@@ -1358,7 +1358,7 @@ static void kbasep_reset_timeout_worker(struct work_struct *data)
 	/* Unhandled cases */
 	case KBASE_INSTR_STATE_RESETTING:
 	default:
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 		break;
 	}
 	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);

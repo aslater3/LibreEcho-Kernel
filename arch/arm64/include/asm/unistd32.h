@@ -795,3 +795,33 @@ __SYSCALL(__NR_getrandom, sys_getrandom)
 __SYSCALL(__NR_memfd_create, sys_memfd_create)
 #define __NR_bpf 386
 __SYSCALL(__NR_bpf, sys_bpf)
+
+/* syscall stubs for newer syscalls not supported in 3.18 */
+#define __NR_execveat 387
+__SYSCALL(__NR_execveat, sys_ni_syscall)
+#define __NR_userfaultfd 388
+__SYSCALL(__NR_userfaultfd, sys_ni_syscall)
+#define __NR_membarrier 389
+__SYSCALL(__NR_membarrier, sys_ni_syscall)
+#define __NR_mlock2 390
+__SYSCALL(__NR_mlock2, sys_ni_syscall)
+#define __NR_copy_file_range 391
+__SYSCALL(__NR_copy_file_range, sys_ni_syscall)
+#define __NR_preadv2 392
+__SYSCALL(__NR_preadv2, sys_ni_syscall)
+#define __NR_pwritev2 393
+__SYSCALL(__NR_pwritev2, sys_ni_syscall)
+#define __NR_pkey_mprotect 394
+__SYSCALL(__NR_pkey_mprotect, sys_ni_syscall)
+#define __NR_pkey_alloc 395
+__SYSCALL(__NR_pkey_alloc, sys_ni_syscall)
+#define __NR_pkey_free 396
+__SYSCALL(__NR_pkey_free, sys_ni_syscall)
+#define __NR_statx 397
+__SYSCALL(__NR_statx, compat_sys_statx_stub)
+#define __NR_rseq 398
+__SYSCALL(__NR_rseq, sys_ni_syscall)
+#define __NR_io_pgetevents 399
+__SYSCALL(__NR_io_pgetevents, sys_ni_syscall)
+#define __NR_migrate_pages 400
+__SYSCALL(__NR_migrate_pages, sys_ni_syscall)

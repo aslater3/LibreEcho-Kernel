@@ -489,7 +489,7 @@ void umpp_import_handlers_term(umpp_session * session)
 		{
 			/* if session_beging succeeded the handler
 			 * should not have unregistered with us */
-			BUG_ON(!import_handlers[i]);
+			if (!import_handlers[i]) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 			import_handlers[i]->session_end(session->import_handler_data[i]);
 			session->import_handler_data[i] = NULL;
 		}
@@ -502,12 +502,12 @@ int ump_import_module_register(enum ump_external_memory_type type, struct ump_im
 	int res = -EEXIST;
 
 	/* validate input */
-	BUG_ON(type == 0 || type >= UMPP_EXTERNAL_MEM_COUNT);
-	BUG_ON(!handler);
-	BUG_ON(!handler->linux_module);
-	BUG_ON(!handler->session_begin);
-	BUG_ON(!handler->session_end);
-	BUG_ON(!handler->import);
+	if (type == 0 || type >= UMPP_EXTERNAL_MEM_COUNT) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!handler) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!handler->linux_module) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!handler->session_begin) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!handler->session_end) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!handler->import) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	mutex_lock(&import_list_lock);
 
@@ -524,11 +524,11 @@ int ump_import_module_register(enum ump_external_memory_type type, struct ump_im
 
 void ump_import_module_unregister(enum ump_external_memory_type type)
 {
-	BUG_ON(type == 0 || type >= UMPP_EXTERNAL_MEM_COUNT);
+	if (type == 0 || type >= UMPP_EXTERNAL_MEM_COUNT) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	mutex_lock(&import_list_lock);
 	/* an error to call this if ump_import_module_register didn't succeed */
-	BUG_ON(!import_handlers[type]);
+	if (!import_handlers[type]) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	import_handlers[type] = NULL;
 	mutex_unlock(&import_list_lock);
 }

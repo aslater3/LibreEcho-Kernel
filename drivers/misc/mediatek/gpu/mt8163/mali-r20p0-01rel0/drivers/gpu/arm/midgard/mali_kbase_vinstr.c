@@ -1268,9 +1268,9 @@ static int kbasep_vinstr_service_task(void *data)
 		list_for_each_entry_safe(cli, tmp, &expired_requests, list) {
 			/* Ensure that legacy buffer will not be used from
 			 * this kthread context. */
-			BUG_ON(0 == cli->buffer_count);
+			if (0 == cli->buffer_count) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 			/* Expect only periodically sampled clients. */
-			BUG_ON(0 == cli->dump_interval);
+			if (0 == cli->dump_interval) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 			if (!rcode)
 				kbasep_vinstr_update_client(
@@ -2006,7 +2006,7 @@ int kbase_vinstr_try_suspend(struct kbase_vinstr_context *vinstr_ctx)
 	case VINSTR_SUSPENDED:
 		vinstr_ctx->suspend_cnt++;
 		/* overflow shall not happen */
-		BUG_ON(0 == vinstr_ctx->suspend_cnt);
+		if (0 == vinstr_ctx->suspend_cnt) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		ret = 0;
 		break;
 
@@ -2034,7 +2034,7 @@ int kbase_vinstr_try_suspend(struct kbase_vinstr_context *vinstr_ctx)
 		break;
 
 	default:
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 		break;
 	}
 	spin_unlock_irqrestore(&vinstr_ctx->state_lock, flags);
@@ -2055,9 +2055,9 @@ void kbase_vinstr_resume(struct kbase_vinstr_context *vinstr_ctx)
 	KBASE_DEBUG_ASSERT(vinstr_ctx);
 
 	spin_lock_irqsave(&vinstr_ctx->state_lock, flags);
-	BUG_ON(VINSTR_SUSPENDING == vinstr_ctx->state);
+	if (VINSTR_SUSPENDING == vinstr_ctx->state) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	if (VINSTR_SUSPENDED == vinstr_ctx->state) {
-		BUG_ON(0 == vinstr_ctx->suspend_cnt);
+		if (0 == vinstr_ctx->suspend_cnt) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		vinstr_ctx->suspend_cnt--;
 		if (0 == vinstr_ctx->suspend_cnt) {
 			if (vinstr_ctx->clients_present) {

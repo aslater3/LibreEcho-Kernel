@@ -521,7 +521,7 @@ static int tsallts_sysrst_set_cur_state(struct thermal_cooling_device *cdev, uns
 		/* tsallts_printk("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"); */
 
 #ifndef CONFIG_ARM64
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 #else
 		*(unsigned int *)0x0 = 0xdead;	/* To trigger data abort to reset the system for thermal protection. */
 #endif

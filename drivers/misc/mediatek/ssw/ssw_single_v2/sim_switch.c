@@ -1,5 +1,6 @@
 
 #include <ssw.h>
+#include <linux/pinctrl/consumer.h>
 #include <mt-plat/mt_ccci_common.h>
 /*--------------Feature option---------------*/
 #define __ENABLE_SSW_SYSFS 1

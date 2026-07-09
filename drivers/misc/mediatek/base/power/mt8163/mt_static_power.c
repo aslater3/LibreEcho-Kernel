@@ -72,7 +72,7 @@ int devinfo_table[] = {
 
 int interpolate(int x1, int x2, int x3, int y1, int y2)
 {
-	/* BUG_ON(x1==x2); */
+	/* if (x1==x2) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); } */
 	if (x1 == x2)
 		return (y1+y2)/2;
 
@@ -199,7 +199,7 @@ int mt_spower_make_table(sptbl_t *spt, spower_raw_t *spower_raw, int wat, int vo
 	/* voltage = 1150; */
 	/* degree = 30; */
 
-	BUG_ON(spower_raw->table_size < 3);
+	if (spower_raw->table_size < 3) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	/** structurize the raw data **/
 	spower_tab_construct(&tab, spower_raw);
@@ -431,7 +431,7 @@ int mt_spower_init(void)
 /** return 0, means sptab is not yet ready. **/
 int mt_spower_get_leakage(int dev, int vol, int deg)
 {
-	BUG_ON(!(dev < MT_SPOWER_MAX));
+	if (!(dev < MT_SPOWER_MAX)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (!tab_validate(&sptab[dev]))
 		return 0;

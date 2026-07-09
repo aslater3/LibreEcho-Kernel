@@ -1,4 +1,5 @@
 #include <linux/videodev2.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>

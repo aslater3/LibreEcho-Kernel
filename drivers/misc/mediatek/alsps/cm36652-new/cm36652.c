@@ -13,6 +13,7 @@
  */
 
 #include <linux/of.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/gpio.h>

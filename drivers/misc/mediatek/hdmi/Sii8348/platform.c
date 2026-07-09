@@ -12,6 +12,7 @@ of MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE or NON-INFRINGEMENT.  See
 the GNU General Public License for more details at http://www.gnu.org/licenses/gpl-2.0.html.             
 */
 #include <linux/init.h>
+#include <linux/pinctrl/consumer.h>
 //#include <linux/string.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>

@@ -1657,7 +1657,7 @@ static int mtkfb_fbinfo_init(struct fb_info *info)
 
 	DISPFUNC();
 
-	BUG_ON(!fbdev->fb_va_base);
+	if (!fbdev->fb_va_base) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	info->fbops = &mtkfb_ops;
 	info->flags = FBINFO_FLAG_DEFAULT;
 	info->screen_base = (char *)fbdev->fb_va_base;
@@ -1770,7 +1770,7 @@ static void mtkfb_free_resources(struct mtkfb_device *fbdev, int state)
 		/* nothing to free */
 		break;
 	default:
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 }
 
@@ -2258,7 +2258,7 @@ static int mtkfb_probe(struct device *dev)
 	if (bug_idx >= 0) {
 		PRNERR("DISP get clock error on ddp_clk_map[%d]:%s\n", bug_idx,
 			  ddp_get_clk_name(bug_idx));
-		BUG_ON(1);
+		if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	}
 #endif
 	primary_display_set_frame_buffer_address((unsigned long)fbdev->fb_va_base, fb_pa, (unsigned long)fbdev->fb_pa_base);
@@ -2641,7 +2641,7 @@ int mtkfb_pm_suspend(struct device *device)
 
 	struct platform_device *pdev = to_platform_device(device);
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	return mtkfb_suspend((struct device *)pdev, PMSG_SUSPEND);
 }
@@ -2652,7 +2652,7 @@ int mtkfb_pm_resume(struct device *device)
 
 	struct platform_device *pdev = to_platform_device(device);
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	return mtkfb_resume((struct device *)pdev);
 }

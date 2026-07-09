@@ -57,7 +57,7 @@ void kutf_add_result(struct kutf_mempool *mempool,
 	/* Create the new result */
 	struct kutf_result *new_result;
 
-	BUG_ON(set == NULL);
+	if (set == NULL) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	new_result = kutf_mempool_alloc(mempool, sizeof(*new_result));
 	if (!new_result) {

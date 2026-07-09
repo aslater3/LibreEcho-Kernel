@@ -149,7 +149,7 @@ struct kbase_va_region *kbase_mem_alloc(struct kbase_context *kctx, u64 va_pages
 		/* return a cookie */
 		*gpu_va = __ffs(kctx->cookies);
 		kctx->cookies &= ~(1UL << *gpu_va);
-		BUG_ON(kctx->pending_regions[*gpu_va]);
+		if (kctx->pending_regions[*gpu_va]) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		kctx->pending_regions[*gpu_va] = reg;
 
 		/* relocate to correct base */
@@ -692,7 +692,7 @@ u64 kbase_mem_alias(struct kbase_context *kctx, u64 *flags, u64 stride,
 		/* return a cookie */
 		gpu_va = __ffs(kctx->cookies);
 		kctx->cookies &= ~(1UL << gpu_va);
-		BUG_ON(kctx->pending_regions[gpu_va]);
+		if (kctx->pending_regions[gpu_va]) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		kctx->pending_regions[gpu_va] = reg;
 
 		/* relocate to correct base */
@@ -786,7 +786,7 @@ int kbase_mem_import(struct kbase_context *kctx, enum base_mem_import_type type,
 		/* return a cookie */
 		*gpu_va = __ffs(kctx->cookies);
 		kctx->cookies &= ~(1UL << *gpu_va);
-		BUG_ON(kctx->pending_regions[*gpu_va]);
+		if (kctx->pending_regions[*gpu_va]) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		kctx->pending_regions[*gpu_va] = reg;
 
 		/* relocate to correct base */
@@ -1147,7 +1147,7 @@ static int kbase_cpu_mmap(struct kbase_va_region *reg, struct vm_area_struct *vm
 		 * kbase_mem_pool which would be
 		 * suitable for mapping uncached.
 		 */
-		BUG_ON(kaddr);
+		if (kaddr) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 	}
 

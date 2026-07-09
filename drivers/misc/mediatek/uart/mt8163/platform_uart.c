@@ -17,6 +17,7 @@
  */
 /*---------------------------------------------------------------------------*/
 #include <linux/tty.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/tty_flip.h>
 #include <linux/serial_core.h>
 #include <linux/serial.h>

@@ -1982,7 +1982,7 @@ static int m4u_pm_suspend(struct device *device)
 {
 	struct platform_device *pdev = to_platform_device(device);
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	return m4u_suspend(pdev, PMSG_SUSPEND);
 }
@@ -1991,7 +1991,7 @@ static int m4u_pm_resume(struct device *device)
 {
 	struct platform_device *pdev = to_platform_device(device);
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	return m4u_resume(pdev);
 }

@@ -18,6 +18,13 @@
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 #include <linux/types.h>
+
+#ifndef FALSE
+#define FALSE 0
+#endif
+#ifndef TRUE
+#define TRUE 1
+#endif
 #ifdef CONFIG_MTK_HIBERNATION
 #include <mtk_hibernate_dpm.h>
 #endif

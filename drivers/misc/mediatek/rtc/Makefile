@@ -39,6 +39,7 @@ obj-$(CONFIG_MTK_RTC) += mtk_rtc_common.o mtk_rtc_hal_common.o
 MTK_MDI_IP_SRC:= $(MDI_IP_FOLDER)/
 
 #IP dependent part
-obj-y += \
+obj-$(CONFIG_MTK_RTC) += \
     $(MTK_MDI_IP_SRC)
 
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include -I$(srctree)/drivers/misc/mediatek/include/mt-plat -I$(srctree)/drivers/misc/mediatek/include/mt-plat/mt8163/include

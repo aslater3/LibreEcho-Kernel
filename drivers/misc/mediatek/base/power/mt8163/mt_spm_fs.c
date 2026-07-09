@@ -54,7 +54,7 @@ static ssize_t show_pcm_desc(const struct pcm_desc *pcmdesc, char *buf)
 	p += sprintf(p, "vec6 = 0x%x\n", pcmdesc->vec6);
 	p += sprintf(p, "vec7 = 0x%x\n", pcmdesc->vec7);
 
-	BUG_ON(p - buf >= PAGE_SIZE);
+	if (p - buf >= PAGE_SIZE) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	return p - buf;
 }
 
@@ -135,7 +135,7 @@ static ssize_t show_pwr_ctrl(const struct pwr_ctrl *pwrctrl, char *buf)
 	p += sprintf(p, "param2 = 0x%x\n", pwrctrl->param2);
 	p += sprintf(p, "param3 = 0x%x\n", pwrctrl->param3);
 
-	BUG_ON(p - buf >= PAGE_SIZE);
+	if (p - buf >= PAGE_SIZE) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	return p - buf;
 }
 
@@ -323,7 +323,7 @@ static ssize_t auto_suspend_resume_show(struct kobject *kobj, struct kobj_attrib
 
 	slp_set_auto_suspend_wakelock(0);
 
-	BUG_ON(p - buf >= PAGE_SIZE);
+	if (p - buf >= PAGE_SIZE) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	return p - buf;
 }
 

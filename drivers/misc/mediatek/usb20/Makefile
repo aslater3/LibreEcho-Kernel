@@ -12,6 +12,7 @@ subdir-ccflags-$(CONFIG_ARCH_MT8163) += -DMUSB_QMU_LIMIT_SUPPORT -DMUSB_QMU_LIMI
 endif
 
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 
 #Platform
 obj-$(CONFIG_ARCH_MT2601) += $(subst ",,$(CONFIG_MTK_PLATFORM))/

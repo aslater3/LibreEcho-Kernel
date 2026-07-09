@@ -22,6 +22,7 @@
 /* #include <linux/pm_wakeup.h> */
 #else
 #include <linux/wakelock.h>
+#include <linux/pinctrl/consumer.h>
 #endif
 #define CFG_WMT_WAKELOCK_SUPPORT 1
 

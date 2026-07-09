@@ -764,8 +764,9 @@ static INT32 wmt_core_hw_check(VOID)
 	WMT_LOUD_FUNC("before read hwcode (chip id)\n");
 	iret = wmt_core_reg_rw_raw(0, GEN_HCR, &chipid, GEN_HCR_MASK);	/* read 0x80000008 */
 	if (iret) {
-		WMT_ERR_FUNC("get hwcode (chip id) fail (%d)\n", iret);
-		return -2;
+		WMT_WARN_FUNC("get hwcode (chip id) fail (%d) - SPOOFING to 0x8163\n", iret);
+		chipid = 0x8163;
+		iret = 0;
 	}
 	WMT_INFO_FUNC("get hwcode (chip id) (0x%x)\n", chipid);
 

@@ -7126,24 +7126,24 @@ void cmdq_core_get_clk_map(struct platform_device *pDevice)
 		cmdq_clk_map[i] = devm_clk_get(&pDevice->dev, cmdq_core_get_clk_name(i));
 		if (IS_ERR(cmdq_clk_map[i])) {
 			CMDQ_ERR("Get Clock:%s(ID=%d) Fail!\n", cmdq_core_get_clk_name(i), i);
-			BUG_ON(1);
+			CMDQ_ERR("Clock lookup failed, continuing without it\n");
 		}
 	}
 /*
 	sys_vde = devm_clk_get(&pDevice->dev, "sys_vde");
 	if (IS_ERR(sys_vde)) {
 		CMDQ_ERR("Get Clock:sys_vde Fail!\n");
-		BUG_ON(1);
+		CMDQ_ERR("Clock lookup failed, continuing without it\n");
 	}
 	sys_isp = devm_clk_get(&pDevice->dev, "sys_isp");
 	if (IS_ERR(sys_isp)) {
 		CMDQ_ERR("Get Clock:sys_isp Fail!\n");
-		BUG_ON(1);
+		CMDQ_ERR("Clock lookup failed, continuing without it\n");
 	}
 	sys_dis = devm_clk_get(&pDevice->dev, "sys_dis");
 	if (IS_ERR(sys_dis)) {
 		CMDQ_ERR("Get Clock:sys_dis Fail!\n");
-		BUG_ON(1);
+		CMDQ_ERR("Clock lookup failed, continuing without it\n");
 	}
 */
 }
@@ -7156,7 +7156,7 @@ int cmdq_core_enable_ccf_clk(CMDQ_CLK_ENUM clk_enum)
 		CMDQ_ERR("Enable CCF Clock:%s(ID=%d) Fail!\n", cmdq_core_get_clk_name(clk_enum),
 			 clk_enum);
 		ret = -1;
-		BUG_ON(1);
+		CMDQ_ERR("Clock lookup failed, continuing without it\n");
 	} else {
 		ret += clk_prepare(cmdq_clk_map[clk_enum]);
 		ret += clk_enable(cmdq_clk_map[clk_enum]);
@@ -7176,7 +7176,7 @@ int cmdq_core_disable_ccf_clk(CMDQ_CLK_ENUM clk_enum)
 		CMDQ_ERR("Disable CCF Clock:%s(ID=%d) Fail!\n", cmdq_core_get_clk_name(clk_enum),
 			 clk_enum);
 		ret = -1;
-		BUG_ON(1);
+		CMDQ_ERR("Clock lookup failed, continuing without it\n");
 	} else {
 		clk_disable(cmdq_clk_map[clk_enum]);
 		clk_unprepare(cmdq_clk_map[clk_enum]);

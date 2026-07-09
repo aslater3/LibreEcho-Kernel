@@ -1210,7 +1210,7 @@ static irqreturn_t mt6323_irq(int irq, void *d)
 		       mt6323_get_event_mask_locked(chip), mt6323_get_events(chip));
 		pr_err("int ctrl: %08x, status: %08x\n",
 		       mt6323_get_event_mask_locked(chip), mt6323_get_events(chip));
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 	}
 
 	mt6323_do_handle_events(chip, events);

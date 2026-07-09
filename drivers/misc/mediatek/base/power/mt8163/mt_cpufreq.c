@@ -727,7 +727,7 @@ void mt_cpufreq_set_pmic_phase(enum pmic_wrap_phase_id phase)
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(phase >= NR_PMIC_WRAP_PHASE);
+	if (phase >= NR_PMIC_WRAP_PHASE) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 #if 0   /* TODO: FIXME, check IPO-H case */
 
@@ -763,8 +763,8 @@ void mt_cpufreq_set_pmic_cmd(enum pmic_wrap_phase_id phase, int idx, unsigned in
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(phase >= NR_PMIC_WRAP_PHASE);
-	BUG_ON(idx >= pw.set[phase].nr_idx);
+	if (phase >= NR_PMIC_WRAP_PHASE) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (idx >= pw.set[phase].nr_idx) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	/* Turbo Dram/GPU B */
 	if (GPU800MHz_DRAM1866MHz_Flag) {
@@ -795,7 +795,7 @@ void mt_cpufreq_apply_pmic_cmd(int idx) /* kick spm */
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(idx >= pw.set[pw.phase].nr_idx);
+	if (idx >= pw.set[pw.phase].nr_idx) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	/* cpufreq_dbg("@%s: idx = %d\n", __func__, idx); */
 
@@ -1281,7 +1281,7 @@ static int _set_cur_volt_locked(struct mt_cpu_dvfs *p, unsigned int volt)  /* vo
 
 	FUNC_ENTER(FUNC_LV_HELP);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (!cpu_dvfs_is_available(p)) {
 		FUNC_EXIT(FUNC_LV_HELP);
@@ -1304,7 +1304,7 @@ static int _restore_default_volt(struct mt_cpu_dvfs *p)
 
 	FUNC_ENTER(FUNC_LV_HELP);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (!cpu_dvfs_is_available(p)) {
 		FUNC_EXIT(FUNC_LV_HELP);
@@ -1334,14 +1334,14 @@ unsigned int mt_cpufreq_get_freq_by_idx(enum mt_cpu_dvfs_id id, int idx)
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (!cpu_dvfs_is_available(p)) {
 		FUNC_EXIT(FUNC_LV_API);
 		return 0;
 	}
 
-	BUG_ON(idx >= p->nr_opp_tbl);
+	if (idx >= p->nr_opp_tbl) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	FUNC_EXIT(FUNC_LV_API);
 
@@ -1358,14 +1358,14 @@ int mt_cpufreq_update_volt(enum mt_cpu_dvfs_id id, unsigned int *volt_tbl, int n
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (!cpu_dvfs_is_available(p)) {
 		FUNC_EXIT(FUNC_LV_API);
 		return 0;
 	}
 
-	BUG_ON(nr_volt_tbl > p->nr_opp_tbl);
+	if (nr_volt_tbl > p->nr_opp_tbl) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	cpufreq_lock(flags);
 
@@ -1392,7 +1392,7 @@ void mt_cpufreq_restore_default_volt(enum mt_cpu_dvfs_id id)
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (!cpu_dvfs_is_available(p)) {
 		FUNC_EXIT(FUNC_LV_API);
@@ -1560,7 +1560,7 @@ static unsigned int get_cur_phy_freq(struct mt_cpu_dvfs *p)
 
 	FUNC_ENTER(FUNC_LV_LOCAL);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 #if 0
 	/* read from freq meter */
@@ -1587,7 +1587,7 @@ static unsigned int _mt_cpufreq_get_cur_phy_freq(enum mt_cpu_dvfs_id id)
 
 	FUNC_ENTER(FUNC_LV_LOCAL);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	FUNC_EXIT(FUNC_LV_LOCAL);
 
@@ -1609,7 +1609,7 @@ static unsigned int _cpu_dds_calc(unsigned int khz) /* XXX: NOT OK FOR 1007.5MHz
 	else if (khz >= PLL_DIV8_FREQ)
 		dds = DDS_DIV8_FREQ + ((khz - PLL_DIV8_FREQ) * 8 / PLL_FREQ_STEP) * 0x2000;
 	else
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 
 	FUNC_EXIT(FUNC_LV_HELP);
 
@@ -1635,7 +1635,7 @@ static void _cpu_clock_switch(struct mt_cpu_dvfs *p, enum top_ckmuxsel sel)
 		cpufreq_write_mask(TOP_CKMUXSEL, 1 : 0, sel);
 		break;
 	default:
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 		break;
 	}
 
@@ -1771,7 +1771,7 @@ static void set_cur_freq(struct mt_cpu_dvfs *p, unsigned int cur_khz, unsigned i
 			sel = 10;    /* 2/4 */
 			break;
 		default:
-			BUG();
+			pr_warn("stub: BUG avoided in %s\n", __func__);
 		}
 
 		/* adjust Vproc since MAINPLL is 1092 MHz (~= CPU_DVFS_FREQ7) */
@@ -1807,7 +1807,7 @@ static void set_cur_freq(struct mt_cpu_dvfs *p, unsigned int cur_khz, unsigned i
 			p->ops->set_cur_volt(p, cur_volt);
 	} else {
 		dds = _cpu_dds_calc(target_khz);
-		BUG_ON(dds & _BITMASK_(26 : 24)); /* should not use posdiv */
+		if (dds & _BITMASK_(26 : 24)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); } /* should not use posdiv */
 
 #if !defined(__KERNEL__) && defined(MTKDRV_FREQHOP)
 		fhdrv_dvt_dvfs_enable(ARMCA7PLL_ID, dds);
@@ -1909,8 +1909,8 @@ unsigned int mt_cpufreq_get_cur_volt(enum mt_cpu_dvfs_id id)
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(NULL == p);
-	BUG_ON(NULL == p->ops);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (NULL == p->ops) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	FUNC_EXIT(FUNC_LV_API);
 
@@ -2078,7 +2078,7 @@ static unsigned int _search_available_volt(struct mt_cpu_dvfs *p, unsigned int t
 
 	FUNC_ENTER(FUNC_LV_HELP);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	/* search available voltage */
 	for (i = p->nr_opp_tbl - 1; i >= 0; i--) {
@@ -2086,7 +2086,7 @@ static unsigned int _search_available_volt(struct mt_cpu_dvfs *p, unsigned int t
 			break;
 	}
 
-	BUG_ON(i < 0); /* i.e. target_khz > p->opp_tbl[0].cpufreq_khz */
+	if (i < 0) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); } /* i.e. target_khz > p->opp_tbl[0].cpufreq_khz */
 
 	FUNC_EXIT(FUNC_LV_HELP);
 
@@ -2192,8 +2192,8 @@ static int _cpufreq_set_locked(struct mt_cpu_dvfs *p, unsigned int cur_khz
 
 	/* trigger exception if freq/volt not correct during stress */
 	if (do_dvfs_stress_test) {
-		BUG_ON(p->ops->get_cur_volt(p) < volt);
-		BUG_ON(p->ops->get_cur_phy_freq(p) != target_khz);
+		if (p->ops->get_cur_volt(p) < volt) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+		if (p->ops->get_cur_phy_freq(p) != target_khz) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	}
 
 	FUNC_EXIT(FUNC_LV_HELP);
@@ -2215,8 +2215,8 @@ static void _mt_cpufreq_set(enum mt_cpu_dvfs_id id, int new_opp_idx)
 
 	FUNC_ENTER(FUNC_LV_LOCAL);
 
-	BUG_ON(NULL == p);
-	BUG_ON(new_opp_idx >= p->nr_opp_tbl);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (new_opp_idx >= p->nr_opp_tbl) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 #ifdef CONFIG_CPU_FREQ
 	policy = cpufreq_cpu_get(p->cpu_id);
@@ -2354,7 +2354,7 @@ static void _set_no_limited(struct mt_cpu_dvfs *p)
 {
 	FUNC_ENTER(FUNC_LV_HELP);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	p->limited_max_freq = cpu_dvfs_get_max_freq(p);
 	p->limited_max_ncpu = max_cpu_num;
@@ -2371,7 +2371,7 @@ static void _downgrade_freq_check(enum mt_cpu_dvfs_id id)
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	/* if not CPU_LEVEL0 */
 	if (p->cpu_level != CPU_LEVEL_0)
@@ -2512,9 +2512,9 @@ static int _sync_opp_tbl_idx(struct mt_cpu_dvfs *p)
 
 	FUNC_ENTER(FUNC_LV_HELP);
 
-	BUG_ON(NULL == p);
-	BUG_ON(NULL == p->opp_tbl);
-	BUG_ON(NULL == p->ops);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (NULL == p->opp_tbl) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (NULL == p->ops) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	freq = p->ops->get_cur_phy_freq(p);
 
@@ -2572,7 +2572,7 @@ static enum mt_cpu_dvfs_id _get_cpu_dvfs_id(unsigned int cpu_id)
 			break;
 	}
 
-	BUG_ON(i >= NR_MT_CPU_DVFS);
+	if (i >= NR_MT_CPU_DVFS) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	return i;
 #endif	/* TODO: FIXME, just for E1 */
@@ -2754,7 +2754,7 @@ static int setup_power_table(struct mt_cpu_dvfs *p)
 
 	FUNC_ENTER(FUNC_LV_LOCAL);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (p->power_tbl)
 		goto out;
@@ -2902,7 +2902,7 @@ static int setup_power_table(struct mt_cpu_dvfs *p)
 
 	FUNC_ENTER(FUNC_LV_LOCAL);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (p->power_tbl)
 		goto out;
@@ -2992,8 +2992,8 @@ static int _mt_cpufreq_setup_freqs_table(struct cpufreq_policy *policy
 
 	FUNC_ENTER(FUNC_LV_LOCAL);
 
-	BUG_ON(NULL == policy);
-	BUG_ON(NULL == freqs);
+	if (NULL == policy) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (NULL == freqs) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	p = id_to_cpu_dvfs(_get_cpu_dvfs_id(policy->cpu));
 
@@ -3045,7 +3045,7 @@ void mt_cpufreq_enable_by_ptpod(enum mt_cpu_dvfs_id id)
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	p->dvfs_disable_by_ptpod = false;
 
@@ -3066,7 +3066,7 @@ unsigned int mt_cpufreq_disable_by_ptpod(enum mt_cpu_dvfs_id id)
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	p->dvfs_disable_by_ptpod = true;
 
@@ -3121,7 +3121,7 @@ void mt_cpufreq_thermal_protect(unsigned int limited_power)
 
 	p = id_to_cpu_dvfs(_get_cpu_dvfs_id(policy->cpu));
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	cpufreq_lock(flag);                                     /* <- lock */
 
@@ -3181,7 +3181,7 @@ void mt_cpufreq_set_ramp_down_count_const(enum mt_cpu_dvfs_id id, int count)
 {
 	struct mt_cpu_dvfs *p = id_to_cpu_dvfs(id);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	p->ramp_down_count_const = count;
 }
@@ -3310,7 +3310,7 @@ static unsigned int _calc_new_opp_idx(struct mt_cpu_dvfs *p, int new_opp_idx)
 
 	FUNC_ENTER(FUNC_LV_HELP);
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	/* for ramp down */
 #ifdef CONFIG_CPU_DVFS_RAMP_DOWN
@@ -3654,7 +3654,7 @@ static int _mt_cpufreq_verify(struct cpufreq_policy *policy)
 
 	p = id_to_cpu_dvfs(_get_cpu_dvfs_id(policy->cpu));
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 #ifdef CONFIG_CPU_FREQ
 	ret = cpufreq_frequency_table_verify(policy, p->freq_tbl_for_cpufreq);
@@ -3756,8 +3756,8 @@ static int _mt_cpufreq_init(struct cpufreq_policy *policy)
 	unsigned int lv = _mt_cpufreq_get_cpu_level();
 	struct opp_tbl_info *opp_tbl_info = &opp_tbls[CPU_LV_TO_OPP_IDX(lv)];
 
-	BUG_ON(NULL == p);
-	BUG_ON(!(lv == CPU_LEVEL_0 || lv == CPU_LEVEL_1));
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!(lv == CPU_LEVEL_0 || lv == CPU_LEVEL_1)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	p->cpu_level = lv;
 
@@ -3858,7 +3858,7 @@ static unsigned int _mt_cpufreq_get(unsigned int cpu)
 
 	p = id_to_cpu_dvfs(_get_cpu_dvfs_id(cpu));
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	FUNC_EXIT(FUNC_LV_MODULE);
 
@@ -5058,7 +5058,7 @@ static ssize_t cpufreq_oppidx_proc_write(struct file *file, const char __user *b
 	if (!buf)
 		return -EINVAL;
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (!kstrtoint(buf, 10, &oppidx)
 		&& 0 <= oppidx && oppidx < p->nr_opp_tbl) {
@@ -5097,7 +5097,7 @@ static ssize_t cpufreq_freq_proc_write(struct file *file, const char __user *buf
 	if (!buf)
 		return -EINVAL;
 
-	BUG_ON(NULL == p);
+	if (NULL == p) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	if (!kstrtoint(buf, 10, &freq)) {
 		if (freq < CPUFREQ_LAST_FREQ_LEVEL) {

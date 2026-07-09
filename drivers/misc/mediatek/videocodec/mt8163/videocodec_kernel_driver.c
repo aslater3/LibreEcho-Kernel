@@ -2306,17 +2306,17 @@ static int vcodec_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_OF
 	/*clk_venc_larb = devm_clk_get(&pdev->dev, "MT_CG_VENC_SMI_LARB3");
-	BUG_ON(IS_ERR(clk_venc_larb));
+	if (IS_ERR(clk_venc_larb)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	clk_venc_clk = devm_clk_get(&pdev->dev, "MT_CG_VENC_CKE1");
-	BUG_ON(IS_ERR(clk_venc_clk));
+	if (IS_ERR(clk_venc_clk)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	clk_venc_lt_larb = devm_clk_get(&pdev->dev, "MT_CG_VENCLT_LARB");
-	BUG_ON(IS_ERR(clk_venc_lt_larb));
+	if (IS_ERR(clk_venc_lt_larb)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	clk_venc_lt_clk = devm_clk_get(&pdev->dev, "MT_CG_VENCLT_CKE");
-	BUG_ON(IS_ERR(clk_venc_lt_clk));*/
+	if (IS_ERR(clk_venc_lt_clk)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }*/
 
 #if 0
 	clk_vdecpwr = devm_clk_get(&pdev->dev, "MT_VDEC_POWER");
-	BUG_ON(IS_ERR(clk_vdecpwr));
+	if (IS_ERR(clk_vdecpwr)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	clk_venc_pwr  = devm_clk_get(&pdev->dev, "MT_VENC_POWER");
 	clk_venc_pwr2  = devm_clk_get(&pdev->dev, "MT_VENC_POWER2");
 

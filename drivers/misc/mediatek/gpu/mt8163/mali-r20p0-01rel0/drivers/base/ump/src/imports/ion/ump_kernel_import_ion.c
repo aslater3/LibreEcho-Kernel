@@ -57,7 +57,7 @@ static void import_ion_client_destroy(void* custom_session_data)
 	struct ion_client * ion_client;
 
 	ion_client = (struct ion_client*)custom_session_data;
-	BUG_ON(!ion_client);
+	if (!ion_client) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	ion_client_destroy(ion_client);
 }
@@ -67,7 +67,7 @@ static void import_ion_final_release_callback(const ump_dd_handle handle, void *
 {
 	struct ion_wrapping_info * ion_info;
 
-	BUG_ON(!info);
+	if (!info) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	(void)handle;
 	ion_info = (struct ion_wrapping_info*)info;
@@ -91,8 +91,8 @@ static ump_dd_handle import_ion_import(void * custom_session_data, void * pfd, u
 
 	struct ion_wrapping_info * ion_info;
 
-	BUG_ON(!custom_session_data);
-	BUG_ON(!pfd);
+	if (!custom_session_data) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!pfd) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	ion_info = kzalloc(GFP_KERNEL, sizeof(*ion_info));
 	if (NULL == ion_info)
