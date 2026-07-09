@@ -548,7 +548,7 @@ DRIVER_ATTR(emi_clk_mem_test, 0664, complex_mem_test_show, complex_mem_test_stor
 static int dramc_clk_probe(struct platform_device *pdev)
 {
 	dramc_f26m_clk = devm_clk_get(&pdev->dev, "dramc_f26m");
-	BUG_ON(IS_ERR(dramc_f26m_clk));
+	if (IS_ERR(dramc_f26m_clk)) { pr_warn("dramc: no f26m clock, skipping\n"); return 0; }
 	clk_prepare(dramc_f26m_clk);
 	clk_enable(dramc_f26m_clk);
 

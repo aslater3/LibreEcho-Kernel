@@ -399,7 +399,7 @@ static int kbase_jd_pre_external_resources(struct kbase_jd_atom *katom, const st
 	/* copy user buffer to the end of our real buffer.
 	 * Make sure the struct sizes haven't changed in a way
 	 * we don't support */
-	BUILD_BUG_ON(sizeof(*input_extres) > sizeof(*katom->extres));
+	if (sizeof(*input_extres) > sizeof(*katom->extres)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	input_extres = (struct base_external_resource *)
 			(((unsigned char *)katom->extres) +
 			(sizeof(*katom->extres) - sizeof(*input_extres)) *

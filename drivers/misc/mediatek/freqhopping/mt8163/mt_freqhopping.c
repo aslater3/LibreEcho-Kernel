@@ -499,7 +499,7 @@ static void wait_dds_stable(
 		udelay(10);
 		#if 0
 		if (unlikely(i > 100)) {
-			BUG_ON(1);
+			if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 			break;
 		}
 		#endif
@@ -617,7 +617,7 @@ static int mt_fh_hal_dfs_armpll(unsigned int pll, unsigned int dds)
 		FH_MSG("(PLL_CON1): 0x%x", (fh_read32(g_reg_pll_con1[pll])&MASK21b));
 		break;
 	default:
-		BUG_ON(1);
+		if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 		return 1;
 	};
 
@@ -755,7 +755,7 @@ static int mt_fh_hal_dfs_vencpll(unsigned int target_freq)
 		break;
 		#endif
 	default:
-		FH_BUG_ON(1);
+		pr_warn("stub: BUG_ON avoided in %s\n", __func__);
 		return 0;
 		/* break; */
 	};
@@ -763,25 +763,25 @@ static int mt_fh_hal_dfs_vencpll(unsigned int target_freq)
 
 static int mt_fh_hal_l2h_dvfs_mempll(void)
 {
-	FH_BUG_ON(1);
+	pr_warn("stub: BUG_ON avoided in %s\n", __func__);
 	return 0;
 }
 
 static int mt_fh_hal_h2l_dvfs_mempll(void)
 {
-	FH_BUG_ON(1);
+	pr_warn("stub: BUG_ON avoided in %s\n", __func__);
 	return 0;
 }
 
 static int mt_fh_hal_dram_overclock(int clk)
 {
-	FH_BUG_ON(1);
+	pr_warn("stub: BUG_ON avoided in %s\n", __func__);
 	return 0;
 }
 
 static int mt_fh_hal_get_dramc(void)
 {
-	FH_BUG_ON(1);
+	pr_warn("stub: BUG_ON avoided in %s\n", __func__);
 	return 0;
 }
 

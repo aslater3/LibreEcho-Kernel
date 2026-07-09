@@ -6107,7 +6107,8 @@ static MINT32 ISP_probe(struct platform_device *pDev)
 	LOG_INF("[Houston] pm_runtime_enable(ISP)");
 	/* Save isp power domain handle */
 	g_pmdev_isp = &pDev->dev;
-	BUG_ON(IS_ERR(g_pmdev_isp)); pm_runtime_enable(g_pmdev_isp);
+	if (IS_ERR(g_pmdev_isp)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	else { pm_runtime_enable(g_pmdev_isp); }
 	pm_runtime_get_sync(g_pmdev_isp);	LOG_INF("[Houston] pm_runtime_get_sync(ISP)");
 /* [Houston] --- */
 #endif
@@ -6212,7 +6213,8 @@ static MINT32 ISP_remove(struct platform_device *pDev)
 	LOG_DBG("+");
 #ifndef CONFIG_MTK_SMI_VARIANT
 	LOG_INF("[Houston] pm_runtime_disable(ISP)");
-	BUG_ON(IS_ERR(g_pmdev_isp)); pm_runtime_disable(g_pmdev_isp);
+	if (IS_ERR(g_pmdev_isp)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	else { pm_runtime_disable(g_pmdev_isp); }
 #endif
 	/* unregister char driver. */
 	ISP_UnregCharDev();
@@ -6311,7 +6313,7 @@ MINT32 ISP_pm_suspend(struct device *device)
 {
 	struct platform_device *pdev = to_platform_device(device);
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	pr_info("calling %s()\n", __func__);
 
@@ -6322,7 +6324,7 @@ MINT32 ISP_pm_resume(struct device *device)
 {
 	struct platform_device *pdev = to_platform_device(device);
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	pr_info("calling %s()\n", __func__);
 

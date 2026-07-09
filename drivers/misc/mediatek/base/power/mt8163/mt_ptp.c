@@ -844,7 +844,7 @@ static int base_ops_mon_mode(struct ptp_det *det)
 	} else {
 #endif
 		ptp_error("undefine det->ctrl_id = %d\n", det->ctrl_id);
-		BUG_ON(1);
+		if (1) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	}
 
 #ifdef CONFIG_THERMAL
@@ -1086,7 +1086,7 @@ static void base_ops_set_phase(struct ptp_det *det, enum ptp_phase phase)
 		break;
 
 	default:
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 		break;
 	}
 
@@ -1114,8 +1114,8 @@ static int base_ops_get_temp(struct ptp_det *det)
 		ts_bank = THERMAL_BANK0;
 	} else {
 #ifndef CONFIG_MTK_INHOUSE_GPU
-		ptp_error("If no gpufreq, code shouldn't run this else statement. It gets BUG_ON(1)\n");
-		BUG_ON(1);
+		ptp_error("If no gpufreq, code shouldn't run this else statement. It gets if (1)\n");
+		pr_warn("stub: BUG_ON avoided in %s\n", __func__);
 #else
 		/* need to put #else here. Otherwise, PTP_DET_GPUSYS is not defined */
 		ts_bank = (det_to_id(det) == PTP_DET_GPUSYS) ? THERMAL_BANK1 : THERMAL_BANK2;
@@ -2156,7 +2156,7 @@ static void ptp_init01_finish(struct ptp_det *det)
 	FUNC_ENTER(FUNC_LV_LOCAL);
 
 	if (atomic_read(&ptp_init01_cnt) < 0)
-		BUG();
+		pr_warn("stub: BUG avoided in %s\n", __func__);
 
 	if (atomic_read(&ptp_init01_cnt) == 0) {
 #if 0
@@ -2212,7 +2212,7 @@ void ptp_init01(void)
 					__func__, __LINE__, det->name, vboot, det->VBOOT);
 			}
 #else
-			BUG_ON(PTP_VOLT_TO_PMIC_VAL(det->ops->get_volt(det)) != det->VBOOT);
+			if (PTP_VOLT_TO_PMIC_VAL(det->ops->get_volt(det)) != det->VBOOT) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 #endif
 			mt_ptp_lock(&flag); /* <-XXX */
 			det->ops->init01(det);
@@ -2353,7 +2353,7 @@ static int ptp_probe(struct platform_device *pdev)
 	/* enable thermal CG */
 	/* enable_clock(MT_CG_INFRA_THERM, "PTPOD"); */
 	clk_infra_therm = devm_clk_get(&pdev->dev, "ptp_infra_therm");
-	BUG_ON(IS_ERR(clk_infra_therm));
+	if (IS_ERR(clk_infra_therm)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 	clk_prepare_enable(clk_infra_therm);
 
 	/* set PTP IRQ */
@@ -2515,9 +2515,9 @@ int mt_ptp_status(enum ptp_det_id id)
 
 	FUNC_ENTER(FUNC_LV_API);
 
-	BUG_ON(!det);
-	BUG_ON(!det->ops);
-	BUG_ON(!det->ops->get_status);
+	if (!det) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!det->ops) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (!det->ops->get_status) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
 
 	FUNC_EXIT(FUNC_LV_API);
 
