@@ -27,3 +27,27 @@ Module.symvers
 .missing-syscalls.d
 .version
 .version.old
+
+# Per-subtree build metadata
+modules.order
+Module.markers
+
+# Generated headers / offsets / linkers scripts
+include/generated/
+arch/*/include/generated/
+arch/*/kernel/asm-offsets.s
+arch/*/kernel/vdso/vdso-offsets.h
+arch/*/kernel/vdso/vdso.lds
+arch/*/kernel/vdso/vdso.so
+arch/*/kernel/vdso/vdso.so.dbg
+arch/*/kernel/vmlinux.lds
+*.dtb
+*.dtb.S
+
+# cscope / ctags / misc
+*.lex.c
+*.tab.c
+*.tab.h
+cscope.*
+tags
+TAGS
