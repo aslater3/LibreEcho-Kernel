@@ -523,24 +523,44 @@ static int __init atf_log_init(void)
 {
 	/* register module driver */
 	int err;
+	int irq_ret;
+
+	pr_notice("[ATFDBG] enter atf_log_init\n");
 
 	err = misc_register(&atf_log_dev);
 	if (unlikely(err)) {
-		pr_err("atf_log: failed to register device");
+		pr_err("[ATFDBG] misc_register failed: %d\n", err);
 		return -1;
 	}
-	pr_notice("atf_log: inited");
+	pr_notice("[ATFDBG] misc device registered\n");
 	/* get atf reserved memory(atf_buf_phy_ctl) from device */
 	atf_get_from_dt(&atf_buf_phy_ctl, &atf_buf_len);    /* TODO */
+	pr_notice("[ATFDBG] DT buffer phy=0x%lx len=%u\n",
+		  atf_buf_phy_ctl, atf_buf_len);
 	if (atf_buf_len == 0) {
-		pr_err("No atf_log_buffer!\n");
+		pr_err("[ATFDBG] no atf_log_buffer\n");
 		return -1;
 	}
 	/* map control header */
 	atf_buf_vir_ctl = ioremap_wc(atf_buf_phy_ctl, ATF_LOG_CTRL_BUF_SIZE);
+	if (!atf_buf_vir_ctl) {
+		pr_err("[ATFDBG] control-header ioremap failed\n");
+		return -ENOMEM;
+	}
 	atf_log_len = atf_buf_vir_ctl->info.atf_buf_size;
+	pr_notice("[ATFDBG] control mapped=%p log_len=%u\n",
+		  atf_buf_vir_ctl, atf_log_len);
+	if (!atf_log_len || atf_log_len > atf_buf_len - ATF_LOG_CTRL_BUF_SIZE) {
+		pr_err("[ATFDBG] invalid log length %u for buffer %u\n",
+		       atf_log_len, atf_buf_len);
+		return -EINVAL;
+	}
 	/* map log buffer */
 	atf_log_vir_addr = ioremap_wc(atf_buf_phy_ctl + ATF_LOG_CTRL_BUF_SIZE, atf_log_len);
+	if (!atf_log_vir_addr) {
+		pr_err("[ATFDBG] log-buffer ioremap failed\n");
+		return -ENOMEM;
+	}
 	pr_notice("atf_buf_phy_ctl: 0x%lu\n", atf_buf_phy_ctl);
 	pr_notice("atf_buf_len: %u\n", atf_buf_len);
 	pr_notice("atf_buf_vir_ctl: %p\n", atf_buf_vir_ctl);
@@ -552,10 +572,11 @@ static int __init atf_log_init(void)
 	atf_buf_vir_ctl->info.atf_read_seq = 0;
 	/* initial wait queue */
 	init_waitqueue_head(&atf_log_wq);
-	if (request_irq(281, (irq_handler_t)ATF_log_irq_handler, IRQF_TRIGGER_NONE, "ATF_irq", NULL) != 0) {
-		pr_crit("Fail to request ATF_log_irq interrupt!\n");
-		return -1;
-	}
+	irq_ret = request_irq(281, (irq_handler_t)ATF_log_irq_handler,
+			      IRQF_TRIGGER_NONE, "ATF_irq", NULL);
+	pr_notice("[ATFDBG] request_irq(281) returned %d\n", irq_ret);
+	if (irq_ret != 0)
+		pr_warn("[ATFDBG] ATF IRQ unavailable; continuing without IRQ wakeups\n");
 	/* create /proc/atf_log */
 	atf_log_proc_dir = proc_mkdir("atf_log", NULL);
 	if (atf_log_proc_dir == NULL) {
@@ -580,6 +601,7 @@ static int __init atf_log_init(void)
 				atf_buf_vir_ctl->info.atf_crash_log_size);
 	}
 
+	pr_notice("[ATFDBG] atf_log_init complete\n");
 	return 0;
 }
 

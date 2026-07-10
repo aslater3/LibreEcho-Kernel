@@ -689,6 +689,9 @@ static int __init mtk_wdt_get_base_addr(void)
 {
 	struct device_node *np_rgu = NULL;
 	int i;
+	u32 mode_before;
+	u32 status_before;
+	u32 length_before;
 
 	for (i = 0; rgu_of_match[i].compatible; i++) {
 		np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[i].compatible);
@@ -701,8 +704,30 @@ static int __init mtk_wdt_get_base_addr(void)
 		if (!toprgu_base)
 			pr_err("RGU iomap failed\n");
 
-		pr_debug("RGU base: 0x%p\n", toprgu_base);
+		pr_notice("[WDTDBG] early RGU base: 0x%p irq=%d\n",
+			  toprgu_base, wdt_irq_id);
 	}
+
+	if (!toprgu_base)
+		return 0;
+
+	/*
+	 * The bootloader can leave the RGU watchdog armed with a short timeout.
+	 * The normal platform probe is a later initcall than ATF logging, so take
+	 * a snapshot and put the timer into a known disabled state before any
+	 * potentially slow late-init driver runs.  The platform probe applies
+	 * the normal watchdog policy later.
+	 */
+	mode_before = __raw_readl(MTK_WDT_MODE);
+	status_before = __raw_readl(MTK_WDT_STATUS);
+	length_before = __raw_readl(MTK_WDT_LENGTH);
+	pr_notice("[WDTDBG] early regs mode=0x%x status=0x%x length=0x%x\n",
+		  mode_before, status_before, length_before);
+	mtk_wdt_set_time_out_value(120);
+	mtk_wdt_restart(WD_TYPE_NORMAL);
+	mtk_wdt_mode_config(FALSE, FALSE, TRUE, FALSE, FALSE);
+	pr_notice("[WDTDBG] early watchdog disabled mode=0x%x status=0x%x\n",
+		  __raw_readl(MTK_WDT_MODE), __raw_readl(MTK_WDT_STATUS));
 
 	return 0;
 }
