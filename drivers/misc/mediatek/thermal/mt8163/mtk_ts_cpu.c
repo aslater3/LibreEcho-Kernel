@@ -597,6 +597,10 @@ int tscpu_thermal_clock_off(void)
 void tscpu_thermal_clock_on(void)
 {
 	pr_debug("tscpu_thermal_clock_on\n");
+	if (IS_ERR_OR_NULL(clk_auxadc) || IS_ERR_OR_NULL(clk_peri_therm)) {
+		pr_warn("tscpu_thermal_clock_on: clocks unavailable, skip\n");
+		return;
+	}
 	clk_prepare(clk_auxadc);
 	clk_enable(clk_auxadc);
 	clk_prepare(clk_peri_therm);
@@ -606,6 +610,8 @@ void tscpu_thermal_clock_on(void)
 void tscpu_thermal_clock_off(void)
 {
 	pr_debug("tscpu_thermal_clock_off\n");
+	if (IS_ERR_OR_NULL(clk_auxadc) || IS_ERR_OR_NULL(clk_peri_therm))
+		return;
 	clk_disable(clk_peri_therm);
 	clk_unprepare(clk_peri_therm);
 	clk_disable(clk_auxadc);
@@ -4957,10 +4963,18 @@ static int tscpu_thermal_probe(struct platform_device *pdev)
 	pr_debug("tscpu_thermal_probe\n");
 
 	clk_peri_therm = devm_clk_get(&pdev->dev, "therm");
-	if (IS_ERR(clk_peri_therm)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (IS_ERR(clk_peri_therm)) {
+		pr_warn("tscpu: clock 'therm' not available (err=%ld), thermal disabled\n",
+			PTR_ERR(clk_peri_therm));
+		return PTR_ERR(clk_peri_therm);
+	}
 
 	clk_auxadc = devm_clk_get(&pdev->dev, "auxadc");
-	if (IS_ERR(clk_auxadc)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (IS_ERR(clk_auxadc)) {
+		pr_warn("tscpu: clock 'auxadc' not available (err=%ld), thermal disabled\n",
+			PTR_ERR(clk_auxadc));
+		return PTR_ERR(clk_auxadc);
+	}
 
 
 #ifdef CONFIG_OF
