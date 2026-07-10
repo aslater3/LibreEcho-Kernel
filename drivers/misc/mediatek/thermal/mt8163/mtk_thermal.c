@@ -355,7 +355,11 @@ void tscpu_thermal_clock_on(void)
 {
 	pr_debug("tscpu_thermal_clock_on\n");
 	if (IS_ERR_OR_NULL(clk_auxadc) || IS_ERR_OR_NULL(clk_peri_therm)) {
-		pr_warn("tscpu_thermal_clock_on: clocks not ready, skip\n");
+		pr_warn("tscpu_thermal_clock_on: clocks not ready: auxadc=%p err=%ld therm=%p err=%ld, skip\n",
+			clk_auxadc,
+			IS_ERR(clk_auxadc) ? PTR_ERR(clk_auxadc) : 0L,
+			clk_peri_therm,
+			IS_ERR(clk_peri_therm) ? PTR_ERR(clk_peri_therm) : 0L);
 		return;
 	}
 	clk_prepare(clk_auxadc);
