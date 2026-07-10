@@ -628,6 +628,15 @@ int smi_common_init(void)
 {
 	int i;
 
+	/* Deferred SMI/LARB probes may leave the platform data incomplete. */
+	if (!smi_data || !smi_data->smi_priv || !smi_data->smi_priv->init_setting ||
+	    !smi_data->larb_nr) {
+		SMIERR("smi_common_init: SMI not ready (data=%p priv=%p larb_nr=%d), skip\n",
+			smi_data, smi_data ? smi_data->smi_priv : NULL,
+			smi_data ? smi_data->larb_nr : -1);
+		return -ENODEV;
+	}
+
 	for (i = 0; i <= smi_data->larb_nr; i++) {
 		pLarbRegBackUp[i] = kmalloc(LARB_BACKUP_REG_SIZE, GFP_KERNEL | __GFP_ZERO);
 		if (pLarbRegBackUp[i] == NULL)
