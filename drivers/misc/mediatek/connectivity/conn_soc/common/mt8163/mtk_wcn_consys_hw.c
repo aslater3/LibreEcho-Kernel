@@ -1260,6 +1260,15 @@ INT32 mtk_wcn_consys_hw_init(void)
 		conn_reg.spm_base = (SIZE_T) of_iomap(node, 3);
 		WMT_PLAT_DBG_FUNC("Get spm register base(0x%zx)\n", conn_reg.spm_base);
 #endif
+		/* Defensive: never raw-deref an unchecked of_iomap result */
+		if (!conn_reg.mcu_base || !conn_reg.ap_rgu_base ||
+		    !conn_reg.topckgen_base || !conn_reg.spm_base) {
+			WMT_PLAT_ERR_FUNC(
+				"CONSYS: MMIO map failed: mcu=0x%lx rgu=0x%lx topck=0x%lx spm=0x%lx\n",
+				(unsigned long)conn_reg.mcu_base, (unsigned long)conn_reg.ap_rgu_base,
+				(unsigned long)conn_reg.topckgen_base, (unsigned long)conn_reg.spm_base);
+			return -ENODEV;
+		}
 	} else {
 		WMT_PLAT_ERR_FUNC("[%s] can't find CONSYS compatible node\n", __func__);
 		return iRet;
