@@ -2704,10 +2704,18 @@ static int tscpu_init(struct platform_device *pdev)
 	pr_debug("tscpu_thermal_probe\n");
 
 	clk_peri_therm = devm_clk_get(&pdev->dev, "therm");
-	if (IS_ERR(clk_peri_therm)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (IS_ERR(clk_peri_therm)) {
+		pr_warn("tscpu: clock 'therm' not available (err=%ld), thermal disabled\n",
+			PTR_ERR(clk_peri_therm));
+		return PTR_ERR(clk_peri_therm);
+	}
 
 	clk_auxadc = devm_clk_get(&pdev->dev, "auxadc");
-	if (IS_ERR(clk_auxadc)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
+	if (IS_ERR(clk_auxadc)) {
+		pr_warn("tscpu: clock 'auxadc' not available (err=%ld), thermal disabled\n",
+			PTR_ERR(clk_auxadc));
+		return PTR_ERR(clk_auxadc);
+	}
 
 #ifdef CONFIG_OF
 	if (get_io_reg_base(pdev) == 0)
