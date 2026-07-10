@@ -63,10 +63,12 @@ int bitdebug_enabled;
 unsigned bitdebug_writeCnt;
 unsigned bitdebug_readCnt;
 
-/* AUXADC IMM stubs - missing from non-Android build */
+/* AUXADC IMM stubs - keep only when the AUXADC driver is not built. */
+#if !defined(CONFIG_MTK_AUXADC)
 int IMM_IsAdcInitReady(void) { return 0; }
 int IMM_GetOneChannelValue(int dwChannel, int data[4], int *rawdata) { return 0; }
 int IMM_GetOneChannelValue_Cali(int Channel, int *voltage) { *voltage = 0; return 0; }
+#endif
 
 /*Don't enable gadget CMDQ for MP branch*/
 #undef CONFIG_MTK_MUSB_QMU_SUPPORT

@@ -15,8 +15,9 @@ obj-$(CONFIG_MTK_FB) += mtkfb_console.o        \
 						mtk_ovl.o              \
 						fbconfig_kdebug_platform.o
 
-#debug
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/include/     \
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys/   \
+             -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/    \
+             -I$(srctree)/drivers/misc/mediatek/video/include/     \
              -I$(srctree)/drivers/misc/mediatek/video/common/
 
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys/   \
