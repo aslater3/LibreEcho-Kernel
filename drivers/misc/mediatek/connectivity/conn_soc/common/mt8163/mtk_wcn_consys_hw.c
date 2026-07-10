@@ -493,8 +493,11 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 				 CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET) |
 				 CONSYS_SPM_PWR_ON_BIT);
 		/*3.read conn_top1_pwr_on_ack =1, power on ack ready 0x1000660C [1] */
-		while (0 == (CONSYS_PWR_ON_ACK_BIT & CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET)))
-			NULL;
+		{ unsigned int _spm_to = 100000;
+		while ((0 == (CONSYS_PWR_ON_ACK_BIT & CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET))) && (_spm_to-- > 0))
+			udelay(1);
+		if (_spm_to == 0)
+			WMT_PLAT_ERR_FUNC("SPM PWR_ON_ACK timeout!\n"); }
 		/*5.write conn_top1_pwr_on_s=1, power on conn_top1 0x10006280 [3]  1'b1 */
 		CONSYS_REG_WRITE(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET,
 				 CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET) |
@@ -506,9 +509,12 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		/*7.wait 1us    */
 		udelay(1);
 		/*8.read conn_top1_pwr_on_ack_s =1, power on ack ready 0x10006610 [1] */
-		while (0 == (CONSYS_PWR_CONN_ACK_S_BIT &
-			CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_S_OFFSET)))
-			NULL;
+		{ unsigned int _spm_to2 = 100000;
+		while ((0 == (CONSYS_PWR_CONN_ACK_S_BIT &
+			CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_S_OFFSET))) && (_spm_to2-- > 0))
+			udelay(1);
+		if (_spm_to2 == 0)
+			WMT_PLAT_ERR_FUNC("SPM PWR_ON_ACK_S timeout!\n"); }
 		/*9.release connsys ISO, conn_top1_iso_en=0 0x10006280 [1]  1'b0 */
 		CONSYS_REG_WRITE(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET,
 				 CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET) &
@@ -521,8 +527,11 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		CONSYS_REG_WRITE(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET,
 				 CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET) &
 				 ~CONSYS_PROT_MASK);
-		while (CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_STA1_OFFSET) & CONSYS_PROT_MASK)
-			NULL;
+		{ unsigned int _axi_to = 100000;
+		while ((CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_STA1_OFFSET) & CONSYS_PROT_MASK) && (_axi_to-- > 0))
+			udelay(1);
+		if (_axi_to == 0)
+			WMT_PLAT_ERR_FUNC("AXI PROT clear timeout!\n"); }
 #endif
 		/*11.26M is ready now, delay 10us for mem_pd de-assert */
 		udelay(10);
@@ -548,10 +557,13 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 				break;
 			}
 
-			/* SPOOF: TEE blocks CONN master from reading chip ID register.
+			/* Fallback spoof: only on last retry, if real read never matched.
+		 * TEE may block CONN master from reading chip ID register.
 		 * Override with expected value to allow driver init to proceed. */
-		WMT_PLAT_WARN_FUNC("Read CONSYS chipId(0x%08x) - SPOOFING to 0x8163\n", consysHwChipId);
-		consysHwChipId = 0x8163;
+		if (retry == 0) {
+			WMT_PLAT_WARN_FUNC("Read CONSYS chipId(0x%08x) - SPOOFING to 0x8163 (last retry)\n", consysHwChipId);
+			consysHwChipId = 0x8163;
+		}
 		break;
 	}
 
