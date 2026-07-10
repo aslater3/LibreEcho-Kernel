@@ -3905,7 +3905,11 @@ static int __init stk3x1x_init(void)
 {
        const char *name = "mediatek,stk3x1x";
 	hw = get_alsps_dts_func(name, hw);
-	APS_LOG("%s: i2c_number=%d\n", __func__,hw->i2c_num);
+	if (!hw) {
+		APS_ERR("%s: no matching ALSPS DT node; driver disabled\n", __func__);
+		return -ENODEV;
+	}
+	APS_LOG("%s: i2c_number=%d\n", __func__, hw->i2c_num);
 	alsps_driver_add(&stk3x1x_init_info);
 	return 0;
 }
