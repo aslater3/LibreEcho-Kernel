@@ -1477,11 +1477,12 @@ struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx)
 	if (!tty->port)
 		tty->port = driver->ports[idx];
 
-	WARN_RATELIMIT(!tty->port,
-			"%s: %s driver does not set tty->port. This will crash the kernel later. Fix the driver!\n",
-			__func__, tty->driver->name);
-
-	tty->port->itty = tty;
+	if (!tty->port) {
+		pr_warn("tty_init_dev: %s has no port for index %d, refusing open\n",
+			tty->driver->name, idx);
+		retval = -ENODEV;
+		goto err_deinit_tty;
+	}
 
 	/*
 	 * Structures all installed ... call the ldisc open routines.
