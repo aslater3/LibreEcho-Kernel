@@ -477,6 +477,7 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 /*step2.MTCMOS ctrl*/
 
 #ifdef CONFIG_OF		/*use DT */
+		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: begin inline power-on\n");
 		/*3.assert CONNSYS CPU SW reset  0x10007018 "[12]=1'b1  [31:24]=8'h88 (key)" */
 		CONSYS_REG_WRITE((conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET),
 				 CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET) |
@@ -508,6 +509,7 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 				 ~CONSYS_CLK_CTRL_BIT);
 		/*7.wait 1us    */
 		udelay(1);
+		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: SPM ack received, releasing ISO + AXI protect\n");
 		/*8.read conn_top1_pwr_on_ack_s =1, power on ack ready 0x10006610 [1] */
 		{ unsigned int _spm_to2 = 100000;
 		while ((0 == (CONSYS_PWR_CONN_ACK_S_BIT &
@@ -532,6 +534,7 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 			udelay(1);
 		if (_axi_to == 0)
 			WMT_PLAT_ERR_FUNC("AXI PROT clear timeout!\n"); }
+		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: deasserting CPU SW reset, polling CHIP_ID...\n");
 #endif
 		/*11.26M is ready now, delay 10us for mem_pd de-assert */
 		udelay(10);
@@ -548,6 +551,7 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		/*12.poll CONNSYS CHIP ID until chipid is returned  0x18070008 */
 		while (retry-- > 0) {
 			consysHwChipId = CONSYS_REG_READ(conn_reg.mcu_base + CONSYS_CHIP_ID_OFFSET);
+			WMT_PLAT_INFO_FUNC("ECHO_CONSYS: CHIP_ID raw=0x%08x attempt=%u\n", consysHwChipId, 10 - retry);
 			if ((consysHwChipId == 0x0321) || (consysHwChipId == 0x0335) || (consysHwChipId == 0x0337)) {
 				WMT_PLAT_INFO_FUNC("retry(%d)consys chipId(0x%08x)\n", retry, consysHwChipId);
 				break;
