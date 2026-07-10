@@ -354,6 +354,10 @@ void set_taklking_flag(bool flag)
 void tscpu_thermal_clock_on(void)
 {
 	pr_debug("tscpu_thermal_clock_on\n");
+	if (IS_ERR_OR_NULL(clk_auxadc) || IS_ERR_OR_NULL(clk_peri_therm)) {
+		pr_warn("tscpu_thermal_clock_on: clocks not ready, skip\n");
+		return;
+	}
 	clk_prepare(clk_auxadc);
 	clk_enable(clk_auxadc);
 	clk_prepare(clk_peri_therm);
@@ -363,6 +367,8 @@ void tscpu_thermal_clock_on(void)
 void tscpu_thermal_clock_off(void)
 {
 	pr_debug("tscpu_thermal_clock_off\n");
+	if (IS_ERR_OR_NULL(clk_auxadc) || IS_ERR_OR_NULL(clk_peri_therm))
+		return;
 	clk_disable(clk_peri_therm);
 	clk_unprepare(clk_peri_therm);
 	clk_disable(clk_auxadc);
