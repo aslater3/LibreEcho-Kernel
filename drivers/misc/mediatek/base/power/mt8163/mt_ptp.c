@@ -2353,8 +2353,19 @@ static int ptp_probe(struct platform_device *pdev)
 	/* enable thermal CG */
 	/* enable_clock(MT_CG_INFRA_THERM, "PTPOD"); */
 	clk_infra_therm = devm_clk_get(&pdev->dev, "ptp_infra_therm");
-	if (IS_ERR(clk_infra_therm)) { pr_warn("stub: BUG_ON avoided in %s\n", __func__); }
-	clk_prepare_enable(clk_infra_therm);
+	if (IS_ERR(clk_infra_therm)) {
+		ret = PTR_ERR(clk_infra_therm);
+		pr_warn("ptp: clock 'ptp_infra_therm' unavailable (err=%d), PTP disabled\n",
+			ret);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(clk_infra_therm);
+	if (ret) {
+		pr_warn("ptp: failed to enable 'ptp_infra_therm' (err=%d), PTP disabled\n",
+			ret);
+		return ret;
+	}
 
 	/* set PTP IRQ */
 	ret = request_irq(ptpod_irq_number, ptp_isr, IRQF_TRIGGER_LOW, "ptp", NULL);
