@@ -1265,8 +1265,12 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			u4Status = WLAN_STATUS_FAILURE;
 			break;
 		}
+		pr_err("ECHO_WLAN_HIF: driver-own acknowledged, before nicInitializeAdapter cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		/* 4 <1> Initialize the Adapter */
 		u4Status = nicInitializeAdapter(prAdapter);
+		pr_err("ECHO_WLAN_HIF: after nicInitializeAdapter status=%u cpu=%u jiffies=%lu\n",
+		       u4Status, raw_smp_processor_id(), jiffies);
 		if (u4Status != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, ERROR, "nicInitializeAdapter failed!\n");
 			u4Status = WLAN_STATUS_FAILURE;
