@@ -63,11 +63,11 @@ struct adb_dev {
 };
 
 /* __ADB_DEBUG__ start */
-struct usb_ep *ep_in = NULL;
-struct usb_ep *ep_out = NULL;
-int bitdebug_enabled;
-unsigned bitdebug_writeCnt = 1;
-unsigned bitdebug_readCnt = 0;
+static struct usb_ep *ep_in = NULL;
+static struct usb_ep *ep_out = NULL;
+static int bitdebug_enabled;
+static unsigned bitdebug_writeCnt = 1;
+static unsigned bitdebug_readCnt = 0;
 
 struct amessage {
 	unsigned command;	/* command identifier constant      */
