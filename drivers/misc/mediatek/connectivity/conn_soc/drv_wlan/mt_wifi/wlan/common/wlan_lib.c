@@ -967,6 +967,26 @@
 #include "precomp.h"
 #include "mgmt/ais_fsm.h"
 
+#if CFG_ENABLE_FW_DOWNLOAD
+static VOID echoWlanHifSnapshot(IN P_ADAPTER_T prAdapter, IN const char *pszStage)
+{
+	UINT_32 wc, lp, whisr, whier, wasr, h2d, d2h0, d2h1;
+
+	HAL_MCR_RD(prAdapter, MCR_WCIR, &wc);
+	HAL_MCR_RD(prAdapter, MCR_WHLPCR, &lp);
+	HAL_MCR_RD(prAdapter, MCR_WHISR, &whisr);
+	HAL_MCR_RD(prAdapter, MCR_WHIER, &whier);
+	HAL_MCR_RD(prAdapter, MCR_WASR, &wasr);
+	HAL_MCR_RD(prAdapter, MCR_H2DSM0R, &h2d);
+	HAL_MCR_RD(prAdapter, MCR_D2HRM0R, &d2h0);
+	HAL_MCR_RD(prAdapter, MCR_D2HRM1R, &d2h1);
+	pr_err("ECHO_FW_STATE: %s WCIR=0x%08x WHLPCR=0x%08x WHISR=0x%08x "
+	       "WHIER=0x%08x WASR=0x%08x H2DSM0=0x%08x D2HRM0=0x%08x D2HRM1=0x%08x cpu=%u jiffies=%lu\n",
+	       pszStage, wc, lp, whisr, whier, wasr, h2d, d2h0, d2h1,
+	       raw_smp_processor_id(), jiffies);
+}
+#endif
+
 /*******************************************************************************
 *                              C O N S T A N T S
 ********************************************************************************
@@ -1328,6 +1348,9 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 #if CFG_ENABLE_FW_DIVIDED_DOWNLOAD
 		/* 3a. parse file header for decision of divided firmware download or not */
 		prFwHead = (P_FIRMWARE_DIVIDED_DOWNLOAD_T) pvFwImageMapFile;
+		pr_err("ECHO_FW_IMAGE: magic=0x%08x crc=0x%08x entries=%u load=0x%08x size=%u cpu=%u jiffies=%lu\n",
+		       prFwHead->u4Signature, prFwHead->u4CRC, prFwHead->u4NumOfEntries,
+		       u4FwLoadAddr, u4FwImageFileLength, raw_smp_processor_id(), jiffies);
 
 		if (prFwHead->u4Signature == MTK_WIFI_SIGNATURE &&
 		    prFwHead->u4CRC == wlanCRC32((PUINT_8) pvFwImageMapFile + u4CRCOffset,
@@ -1342,10 +1365,16 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			DBGLOG(INIT, TRACE, "wlanAdapterStart(): fgValidHead == TRUE\n");
 
 			for (i = 0; i < prFwHead->u4NumOfEntries; i++) {
+				pr_err("ECHO_FW_SECTION: index=%u offset=0x%08x target=0x%08x length=%u\n",
+				       i, prFwHead->arSection[i].u4Offset,
+				       prFwHead->arSection[i].u4DestAddr,
+				       prFwHead->arSection[i].u4Length);
 
 #if CFG_START_ADDRESS_IS_1ST_SECTION_ADDR
 				if (i == 0) {
 					prRegInfo->u4StartAddress = prFwHead->arSection[i].u4DestAddr;
+					pr_err("ECHO_FW_START_ADDR: first_section=0x%08x\n",
+					       prRegInfo->u4StartAddress);
 					DBGLOG(INIT, TRACE,
 					       "wlanAdapterStart(): FW start address 0x%08x\n",
 						prRegInfo->u4StartAddress);
@@ -1421,6 +1450,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			break;
 		pr_err("ECHO_WLAN_STAGE: 112 firmware download complete status=%u cpu=%u jiffies=%lu\n",
 		       u4Status, raw_smp_processor_id(), jiffies);
+		echoWlanHifSnapshot(prAdapter, "after-download");
 #if !CFG_ENABLE_FW_DOWNLOAD_ACK
 		/* Send INIT_CMD_ID_QUERY_PENDING_ERROR command and wait for response */
 		pr_err("ECHO_WLAN_STAGE: 113 before firmware query-status cpu=%u jiffies=%lu\n",
@@ -1435,8 +1465,10 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		/* 4. send Wi-Fi Start command */
 		pr_err("ECHO_WLAN_STAGE: 114 firmware query-status complete cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
+		echoWlanHifSnapshot(prAdapter, "before-start");
 		DBGLOG(INIT, INFO, "<wifi> send Wi-Fi Start command\n");
-		pr_err("ECHO_WLAN_STAGE: 115 before Wi-Fi start command cpu=%u jiffies=%lu\n",
+		pr_err("ECHO_WLAN_STAGE: 115 before Wi-Fi start command addr=0x%08x enable=%u cpu=%u jiffies=%lu\n",
+		       prRegInfo->u4StartAddress, CFG_OVERRIDE_FW_START_ADDRESS,
 		       raw_smp_processor_id(), jiffies);
 #if CFG_OVERRIDE_FW_START_ADDRESS
 		wlanConfigWifiFunc(prAdapter, TRUE, prRegInfo->u4StartAddress);
@@ -1445,6 +1477,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 #endif
 		pr_err("ECHO_WLAN_STAGE: 116 after Wi-Fi start command cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
+		echoWlanHifSnapshot(prAdapter, "after-start");
 #endif
 
 		pr_err("ECHO_WLAN_STAGE: 120 enter firmware-ready wait cpu=%u jiffies=%lu\n",
@@ -3154,6 +3187,11 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 	prInitCmdWifiStart = (P_INIT_CMD_WIFI_START) (prInitHifTxHeader->rInitWifiCmd.aucBuffer);
 	prInitCmdWifiStart->u4Override = (fgEnable == TRUE ? 1 : 0);
 	prInitCmdWifiStart->u4Address = u4StartAddress;
+	pr_err("ECHO_FW_START: cid=0x%02x seq=%u override=%u address=0x%08x info_len=%u cpu=%u jiffies=%lu\n",
+	       prInitHifTxHeader->rInitWifiCmd.ucCID,
+	       prInitHifTxHeader->rInitWifiCmd.ucSeqNum,
+	       prInitCmdWifiStart->u4Override, prInitCmdWifiStart->u4Address,
+	       prCmdInfo->u2InfoBufLen, raw_smp_processor_id(), jiffies);
 
 	/* 5. Seend WIFI start command */
 	while (1) {
@@ -3174,6 +3212,8 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 			u4Status = WLAN_STATUS_FAILURE;
 			DBGLOG(INIT, ERROR, "Fail to transmit WIFI start command\n");
 		}
+		pr_err("ECHO_FW_START: tx_submit_status=%u cpu=%u jiffies=%lu\n",
+		       u4Status, raw_smp_processor_id(), jiffies);
 
 		break;
 	};
