@@ -525,6 +525,12 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		CONSYS_REG_WRITE(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET,
 				 CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET) |
 				 CONSYS_SPM_PWR_RST_BIT);
+		/*11.release CONSYS SRAM power-down, conn_top1_sram_pd[8]=0 */
+		CONSYS_REG_WRITE(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET,
+				 CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET) &
+				 ~CONSYS_SRAM_CONN_PD_BIT);
+		/* The standalone sequence needs a settling interval before MCU reads. */
+		msleep(10);
 		/*disable AXI BUS protect */
 		CONSYS_REG_WRITE(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET,
 				 CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET) &
