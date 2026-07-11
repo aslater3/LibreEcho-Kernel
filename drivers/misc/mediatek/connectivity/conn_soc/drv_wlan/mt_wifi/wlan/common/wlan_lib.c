@@ -986,6 +986,89 @@ static VOID echoWlanExecutionSnapshot(IN P_ADAPTER_T prAdapter, IN const char *p
 	       raw_smp_processor_id(), jiffies);
 }
 
+static struct {
+	UINT_32 u4Address;
+	UINT_32 u4Count;
+	unsigned long ulFirstJiffies;
+	unsigned long ulLastJiffies;
+} arEchoFwCpuHist[64];
+static UINT_32 u4EchoFwCpuHistEntries;
+
+static VOID echoWlanCpuHistReset(VOID)
+{
+	u4EchoFwCpuHistEntries = 0;
+}
+
+static VOID echoWlanCpuHistRecord(IN UINT_32 u4Address)
+{
+	UINT_32 i;
+
+	for (i = 0; i < u4EchoFwCpuHistEntries; i++) {
+		if (arEchoFwCpuHist[i].u4Address == u4Address) {
+			arEchoFwCpuHist[i].u4Count++;
+			arEchoFwCpuHist[i].ulLastJiffies = jiffies;
+			return;
+		}
+	}
+	if (u4EchoFwCpuHistEntries < ARRAY_SIZE(arEchoFwCpuHist)) {
+		arEchoFwCpuHist[i].u4Address = u4Address;
+		arEchoFwCpuHist[i].u4Count = 1;
+		arEchoFwCpuHist[i].ulFirstJiffies = jiffies;
+		arEchoFwCpuHist[i].ulLastJiffies = jiffies;
+		u4EchoFwCpuHistEntries++;
+	}
+}
+
+static VOID echoWlanCpuHistDump(VOID)
+{
+	UINT_32 i, j, u4Best;
+
+	pr_err("ECHO_FW_HIST: entries=%u\n", u4EchoFwCpuHistEntries);
+	for (i = 0; i < u4EchoFwCpuHistEntries && i < 16; i++) {
+		u4Best = i;
+		for (j = i + 1; j < u4EchoFwCpuHistEntries; j++) {
+			if (arEchoFwCpuHist[j].u4Count > arEchoFwCpuHist[u4Best].u4Count)
+				u4Best = j;
+		}
+		if (u4Best != i) {
+			typedef typeof(arEchoFwCpuHist[0]) ECHO_FW_HIST_T;
+			ECHO_FW_HIST_T rTmp = arEchoFwCpuHist[i];
+			arEchoFwCpuHist[i] = arEchoFwCpuHist[u4Best];
+			arEchoFwCpuHist[u4Best] = rTmp;
+		}
+		pr_err("ECHO_FW_HIST: rank=%u addr=0x%08x count=%u first=%lu last=%lu\n",
+		       i, arEchoFwCpuHist[i].u4Address, arEchoFwCpuHist[i].u4Count,
+		       arEchoFwCpuHist[i].ulFirstJiffies, arEchoFwCpuHist[i].ulLastJiffies);
+	}
+}
+
+static BOOLEAN echoWlanCpuHistSample(IN P_ADAPTER_T prAdapter)
+{
+	UINT_32 u4Wcir, u4Cpupcr;
+
+	HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Wcir);
+	u4Cpupcr = wmt_plat_read_cpupcr();
+	echoWlanCpuHistRecord(u4Cpupcr);
+	return (u4Wcir & WCIR_WLAN_READY) ? TRUE : FALSE;
+}
+
+static BOOLEAN echoWlanCpuHistWarmup(IN P_ADAPTER_T prAdapter)
+{
+	UINT_32 i;
+
+	for (i = 0; i < 200; i++) {
+		if (echoWlanCpuHistSample(prAdapter) == TRUE)
+			return TRUE;
+		udelay(10);
+	}
+	for (i = 0; i < 180; i++) {
+		if (echoWlanCpuHistSample(prAdapter) == TRUE)
+			return TRUE;
+		udelay(100);
+	}
+	return FALSE;
+}
+
 static VOID echoWlanHifSnapshot(IN P_ADAPTER_T prAdapter, IN const char *pszStage)
 {
 	UINT_32 wc, lp, whisr, whier, wasr, h2d, d2h0, d2h1;
@@ -1482,6 +1565,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 #endif
 
 		/* 4. send Wi-Fi Start command */
+		echoWlanCpuHistReset();
 		pr_err("ECHO_WLAN_STAGE: 114 firmware download/ACK path complete cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
 		echoWlanHifSnapshot(prAdapter, "before-start");
@@ -1502,6 +1586,9 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 
 		pr_err("ECHO_WLAN_STAGE: 120 enter firmware-ready wait cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
+		echoWlanCpuHistWarmup(prAdapter);
+		pr_err("ECHO_WLAN_STAGE: 120 histogram warmup complete entries=%u cpu=%u jiffies=%lu\n",
+		       u4EchoFwCpuHistEntries, raw_smp_processor_id(), jiffies);
 		DBGLOG(INIT, TRACE, "wlanAdapterStart(): Waiting for Ready bit..\n");
 		/* 4 <5> check Wi-Fi FW asserts ready bit */
 		i = 0;
@@ -1510,6 +1597,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 				pr_err("ECHO_WLAN_STAGE: 121 ready poll before read iter=%u mask=0x%08x cpu=%u jiffies=%lu\n",
 				       i, (UINT_32) WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
+			echoWlanCpuHistRecord(wmt_plat_read_cpupcr());
 			if (i < 5 || (i % 100) == 0) {
 				u4PollCpupcr = wmt_plat_read_cpupcr();
 				HAL_MCR_RD(prAdapter, MCR_D2HRM0R, &u4PollD2h0);
@@ -1558,6 +1646,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			}
 		}
 
+		echoWlanCpuHistDump();
 		pr_err("ECHO_WLAN_STAGE: 122 firmware-ready wait exit status=%u WCIR=0x%08x iter=%u cpu=%u jiffies=%lu\n",
 		       u4Status, u4Value, i, raw_smp_processor_id(), jiffies);
 		if (u4Status == WLAN_STATUS_SUCCESS) {
