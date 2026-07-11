@@ -117,6 +117,12 @@ struct regulator *reg_VCN18;
 struct regulator *reg_VCN28;
 struct regulator *reg_VCN33_BT;
 struct regulator *reg_VCN33_WIFI;
+/*
+ * MT8163 radar_puffin needs VCN33_BT for the CONSYS register bank itself.
+ * Keep one reference for the whole CONSYS power lifetime; BT/Wi-Fi PALDO
+ * users take their own references later.
+ */
+static bool reg_vcn33_consys_enabled;
 #endif
 #endif
 
@@ -472,6 +478,27 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 			}
 #endif
 		}
+
+		/*
+		 * A bounded rail-isolation probe on radar_puffin established:
+		 *   VCN18 + VCN28           -> CHIP_ID 0x00000000
+		 *   VCN18 + VCN28 + VCN33_BT -> CHIP_ID 0x00008163
+		 * VCN33_WIFI did not change the result.  Therefore VCN33_BT is a
+		 * prerequisite for accessing CONSYS, not merely a later BT PALDO.
+		 */
+#if defined(CONFIG_MTK_PMIC_LEGACY)
+		hwPowerOn(MT6323_POWER_LDO_VCN33_BT, VOL_3300, "wcn_drv");
+#else
+		if (!IS_ERR_OR_NULL(reg_VCN33_BT)) {
+			regulator_set_voltage(reg_VCN33_BT, 3300000, 3300000);
+			if (regulator_enable(reg_VCN33_BT)) {
+				WMT_PLAT_ERR_FUNC("enable CONSYS VCN33_BT fail!\n");
+			} else {
+				reg_vcn33_consys_enabled = true;
+				WMT_PLAT_INFO_FUNC("enable CONSYS VCN33_BT ok\n");
+			}
+		}
+#endif
 #endif
 
 /*step2.MTCMOS ctrl*/
@@ -685,13 +712,10 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 			msleep(20);
 		}
 
-		/* SPOOF: TEE blocks chip ID read */
-		if (consysHwChipId == 0) {
-			WMT_PLAT_WARN_FUNC("SPOOFING chipId to 0x8163\n");
-			consysHwChipId = 0x8163;
-		}
-
-		if ((0 == retry) || (0 == consysHwChipId)) {
+		if ((consysHwChipId != 0x0321) &&
+		    (consysHwChipId != 0x0335) &&
+		    (consysHwChipId != 0x0337) &&
+		    (consysHwChipId != 0x8163)) {
 			WMT_PLAT_ERR_FUNC("Maybe has a consys power on issue,(0x%08x)\n", consysHwChipId);
 			WMT_PLAT_INFO_FUNC("reg dump:CONSYS_CPU_SW_RST_REG(0x%x)\n",
 					   CONSYS_REG_READ(CONSYS_CPU_SW_RST_REG));
@@ -701,6 +725,9 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 					   CONSYS_REG_READ(CONSYS_PWR_CONN_ACK_S_REG));
 			WMT_PLAT_INFO_FUNC("reg dump:CONSYS_TOP1_PWR_CTRL_REG(0x%x)\n",
 					   CONSYS_REG_READ(CONSYS_TOP1_PWR_CTRL_REG));
+			/* Do not continue into HIF/STP with an inaccessible MCU. */
+			mtk_wcn_consys_hw_reg_ctrl(0, co_clock_type);
+			return -EIO;
 		}
 
 		/*13.{default no need}update ROMDEL/PATCH RAM DELSEL if needed 0x18070114  */
@@ -826,6 +853,18 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 #endif
 
 #if CONSYS_PMIC_CTRL_ENABLE
+		/* Drop the CONSYS-lifetime VCN33_BT reference after MTCMOS. */
+#if defined(CONFIG_MTK_PMIC_LEGACY)
+		hwPowerDown(MT6323_POWER_LDO_VCN33_BT, "wcn_drv");
+#else
+		if (reg_vcn33_consys_enabled && !IS_ERR_OR_NULL(reg_VCN33_BT)) {
+			if (regulator_disable(reg_VCN33_BT))
+				WMT_PLAT_ERR_FUNC("disable CONSYS VCN33_BT fail!\n");
+			else
+				reg_vcn33_consys_enabled = false;
+		}
+#endif
+
 		if (co_clock_type) {
 			/*VCN28 has been turned off by GPS OR FM */
 #if CONSYS_CLOCK_BUF_CTRL
@@ -920,8 +959,9 @@ INT32 mtk_wcn_consys_hw_pwr_on(UINT32 co_clock_type)
 
 	WMT_PLAT_INFO_FUNC("CONSYS-HW-PWR-ON, start\n");
 
-	iRet += mtk_wcn_consys_hw_reg_ctrl(1, co_clock_type);
-	iRet += mtk_wcn_consys_hw_gpio_ctrl(1);
+	iRet = mtk_wcn_consys_hw_reg_ctrl(1, co_clock_type);
+	if (!iRet)
+		iRet = mtk_wcn_consys_hw_gpio_ctrl(1);
 #if CONSYS_ENALBE_SET_JTAG
 	if (gJtagCtrl)
 		mtk_wcn_consys_jtag_set_for_mcu();
