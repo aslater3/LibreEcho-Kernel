@@ -579,9 +579,12 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 #endif
 		WMT_PLAT_ERR_FUNC(
 			"ECHO_CONSYS: post-power TOP1=0x%08x ACK=0x%08x ACK_S=0x%08x AXI_EN=0x%08x AXI_STA=0x%08x INFRA0_CG_STA=0x%08x RGU=0x%08x\n",
-			CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET),
-			CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET),
-			CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_S_OFFSET),
+			conn_reg.spm_base ?
+				CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET) : 0xffffffff,
+			conn_reg.spm_base ?
+				CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET) : 0xffffffff,
+			conn_reg.spm_base ?
+				CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_S_OFFSET) : 0xffffffff,
 			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET),
 			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_STA1_OFFSET),
 			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_INFRA0_CG_STA_OFFSET),
