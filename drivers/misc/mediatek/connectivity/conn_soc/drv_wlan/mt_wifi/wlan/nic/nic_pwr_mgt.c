@@ -344,22 +344,16 @@ BOOLEAN nicpmSetDriverOwn(IN P_ADAPTER_T prAdapter)
 		} else if (kalIsCardRemoved(prAdapter->prGlueInfo) == TRUE
 			   || fgIsBusAccessFailed == TRUE
 			   || (kalGetTimeTick() - u4CurrTick) > LP_OWN_BACK_TOTAL_DELAY_MS || fgIsResetting == TRUE) {
-			/* ERRORLOG(("LP cannot be own back (for %ld ms)", kalGetTimeTick() - u4CurrTick)); */
+			/*
+			 * Do not touch D2HRM2R/CPUPCR after ownership timeout on
+			 * radar_puffin. Those post-failure MMIO reads can wedge the AP
+			 * interconnect and prevent the hardware watchdog from being kicked.
+			 */
 			fgStatus = FALSE;
-			if (fgIsResetting != TRUE) {
-				UINT_32 u4FwCnt;
-				static unsigned int u4OwnCnt;
-
-				HAL_MCR_RD(prAdapter, MCR_D2HRM2R, &u4RegValue);
-				DBGLOG(NIC, WARN, "<WiFi> MCR_D2HRM2R = 0x%x\n", u4RegValue);
-				DBGLOG(NIC, WARN,
-					"<WiFi> Fatal error! Driver own fail!!!!!!!!!!!! %d\n", u4OwnCnt++);
-
-				DBGLOG(NIC, WARN, "CONNSYS FW CPUINFO:\n");
-				for (u4FwCnt = 0; u4FwCnt < 16; u4FwCnt++)
-					DBGLOG(NIC, WARN, "0x%08x ", MCU_REG_READL(HifInfo, CONN_MCU_CPUPCR));
-				/* CONSYS_REG_READ(CONSYS_CPUPCR_REG) */
-			}
+			pr_err("ECHO_WLAN_HIF: driver-own timeout elapsed=%u loops=%u WHLPCR=0x%08x removed=%u busfail=%u resetting=%u\n",
+			       kalGetTimeTick() - u4CurrTick, i, u4RegValue,
+			       kalIsCardRemoved(prAdapter->prGlueInfo), fgIsBusAccessFailed,
+			       fgIsResetting);
 			break;
 		}
 		if ((i & (LP_OWN_BACK_CLR_OWN_ITERATION - 1)) == 0) {
