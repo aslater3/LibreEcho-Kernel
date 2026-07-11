@@ -1625,6 +1625,9 @@ static irqreturn_t HifAhbISR(IN int Irq, IN void *Arg)
 
 	/* Init */
 	IsrCnt++;
+	if (IsrCnt <= 5 || (IsrCnt % 1000) == 0)
+		pr_err("ECHO_WLAN_IRQ: enter count=%u irq=%d cpu=%u jiffies=%lu\n",
+		       IsrCnt, Irq, raw_smp_processor_id(), jiffies);
 	ASSERT(prNetDevice);
 	GlueInfo = *((P_GLUE_INFO_T *) netdev_priv(prNetDevice));
 	ASSERT(GlueInfo);
@@ -1642,6 +1645,9 @@ static irqreturn_t HifAhbISR(IN int Irq, IN void *Arg)
 	}
 
 	HIF_REG_WRITEL(HifInfo, MCR_WHLPCR, WHLPCR_INT_EN_CLR);
+	if (IsrCnt <= 5 || (IsrCnt % 1000) == 0)
+		pr_err("ECHO_WLAN_IRQ: after INT_EN_CLR count=%u cpu=%u jiffies=%lu\n",
+		       IsrCnt, raw_smp_processor_id(), jiffies);
 
 #if 0
 	wlanISR(GlueInfo->prAdapter, TRUE);
