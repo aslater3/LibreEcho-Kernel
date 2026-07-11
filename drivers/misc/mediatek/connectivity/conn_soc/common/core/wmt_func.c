@@ -647,6 +647,9 @@ INT32 wmt_func_wifi_on(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf)
 	if (NULL != mtk_wcn_wlan_probe) {
 
 		WMT_INFO_FUNC("WMT-FUNC: wmt wlan func on before wlan probe\n");
+		pr_err("ECHO_WMT_STATE: wifi_func_on ready=%d coredump=%d cb=%p\n",
+		       mtk_wcn_stp_is_ready(), mtk_wcn_stp_coredump_start_get(),
+		       mtk_wcn_wlan_probe);
 		WMT_INFO_FUNC("ECHO_WMT_STATE: site=wifi_before_probe ready=%d coredump=%d\n",
 			      mtk_wcn_stp_is_ready(), mtk_wcn_stp_coredump_start_get());
 		if (!mtk_wcn_stp_is_ready()) {
@@ -654,6 +657,8 @@ INT32 wmt_func_wifi_on(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf)
 			return -1;
 		}
 		iRet = (*mtk_wcn_wlan_probe) ();
+		pr_err("ECHO_WMT_STATE: wifi_func_on probe_ret=%d ready_after=%d coredump_after=%d\n",
+		       iRet, mtk_wcn_stp_is_ready(), mtk_wcn_stp_coredump_start_get());
 		if (iRet) {
 			WMT_ERR_FUNC("WMT-FUNC: wmt call wlan probe fail(%d)\n", iRet);
 			iRet = -1;
