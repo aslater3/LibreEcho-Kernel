@@ -3157,6 +3157,9 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 	P_INIT_CMD_WIFI_START prInitCmdWifiStart;
 	UINT_8 ucTC, ucCmdSeqNum;
 	WLAN_STATUS u4Status = WLAN_STATUS_SUCCESS;
+	UINT_32 u4ProbeIter, u4ProbeWcir, u4ProbeWhisr;
+	UINT_32 u4ProbeWtsr0, u4ProbeWtsr1, u4ProbeWasr, u4ProbeHstcr;
+	UINT_32 u4PrevWcir = 0xffffffff, u4PrevWhisr = 0xffffffff;
 
 	ASSERT(prAdapter);
 
@@ -3211,6 +3214,41 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 		if (nicTxInitCmd(prAdapter, prCmdInfo, ucTC) != WLAN_STATUS_SUCCESS) {
 			u4Status = WLAN_STATUS_FAILURE;
 			DBGLOG(INIT, ERROR, "Fail to transmit WIFI start command\n");
+		}
+
+		/*
+		 * Download/start uses polling mode with HIF interrupts disabled. Sample
+		 * the host-visible completion counters for 20 ms so TX-port submission
+		 * can be distinguished from device consumption and POR transition.
+		 * WTSR reads return released-buffer counts and may clear those counts;
+		 * this is diagnostic-only and occurs before normal TX resource reset.
+		 */
+		for (u4ProbeIter = 0; u4ProbeIter < 200; u4ProbeIter++) {
+			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4ProbeWcir);
+			HAL_MCR_RD(prAdapter, MCR_WHISR, &u4ProbeWhisr);
+			HAL_MCR_RD(prAdapter, MCR_WTSR0, &u4ProbeWtsr0);
+			HAL_MCR_RD(prAdapter, MCR_WTSR1, &u4ProbeWtsr1);
+			HAL_MCR_RD(prAdapter, MCR_WASR, &u4ProbeWasr);
+			HAL_MCR_RD(prAdapter, MCR_HSTCR, &u4ProbeHstcr);
+
+			if (u4ProbeIter == 0 || u4ProbeIter == 1 ||
+			    u4ProbeIter == 10 || u4ProbeIter == 100 ||
+			    u4ProbeIter == 199 || u4ProbeWcir != u4PrevWcir ||
+			    u4ProbeWhisr != u4PrevWhisr || u4ProbeWtsr0 ||
+			    u4ProbeWtsr1 || u4ProbeWasr) {
+				pr_err("ECHO_FW_CONSUME: iter=%u WCIR=0x%08x POR=%u READY=%u "
+				       "WHISR=0x%08x TXDONE=%u WTSR0=0x%08x WTSR1=0x%08x "
+				       "WASR=0x%08x HSTCR=0x%08x cpu=%u jiffies=%lu\n",
+				       u4ProbeIter, u4ProbeWcir,
+				       !!(u4ProbeWcir & WCIR_POR_INDICATOR),
+				       !!(u4ProbeWcir & WCIR_WLAN_READY),
+				       u4ProbeWhisr, !!(u4ProbeWhisr & WHISR_TX_DONE_INT),
+				       u4ProbeWtsr0, u4ProbeWtsr1, u4ProbeWasr,
+				       u4ProbeHstcr, raw_smp_processor_id(), jiffies);
+			}
+			u4PrevWcir = u4ProbeWcir;
+			u4PrevWhisr = u4ProbeWhisr;
+			udelay(100);
 		}
 		pr_err("ECHO_FW_START_SUBMIT: tx_port_return status=%u; no start-command ACK is waited by this path cpu=%u jiffies=%lu\n",
 		       u4Status, raw_smp_processor_id(), jiffies);
