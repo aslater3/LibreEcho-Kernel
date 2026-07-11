@@ -1255,6 +1255,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 	WLAN_STATUS u4Status = WLAN_STATUS_SUCCESS;
 	UINT_32 i, u4Value = 0;
 	UINT_32 u4WHISR = 0;
+	UINT_32 u4PollCpupcr, u4PollD2h0, u4PollD2h1;
 	UINT_8 aucTxCount[8];
 #if CFG_ENABLE_FW_DOWNLOAD
 	UINT_32 u4FwLoadAddr, u4ImgSecSize;
@@ -1509,6 +1510,15 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 				pr_err("ECHO_WLAN_STAGE: 121 ready poll before read iter=%u mask=0x%08x cpu=%u jiffies=%lu\n",
 				       i, (UINT_32) WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
+			if (i < 5 || (i % 100) == 0) {
+				u4PollCpupcr = wmt_plat_read_cpupcr();
+				HAL_MCR_RD(prAdapter, MCR_D2HRM0R, &u4PollD2h0);
+				HAL_MCR_RD(prAdapter, MCR_D2HRM1R, &u4PollD2h1);
+				pr_err("ECHO_FW_POLL: iter=%u CPUPCR=0x%08x WCIR=0x%08x "
+				       "D2HRM0=0x%08x D2HRM1=0x%08x cpu=%u jiffies=%lu\n",
+				       i, u4PollCpupcr, u4Value, u4PollD2h0, u4PollD2h1,
+				       raw_smp_processor_id(), jiffies);
+			}
 			if (i < 5 || (i % 100) == 0)
 				pr_err("ECHO_WLAN_STAGE: 121 ready poll after read iter=%u WCIR=0x%08x mask=0x%08x cpu=%u jiffies=%lu\n",
 				       i, u4Value, (UINT_32) WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
