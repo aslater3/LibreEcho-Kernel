@@ -398,7 +398,10 @@ VOID mtk_wcn_consys_power_off(VOID)
 
 INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 {
+#ifndef CONFIG_OF
 	UINT32 retry = 10;
+#endif
+	UINT32 attempt;
 	UINT32 consysHwChipId = 0;
 
 	WMT_PLAT_DBG_FUNC("CONSYS-HW-REG-CTRL(0x%08x),start\n", on);
@@ -499,6 +502,11 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 			}
 		}
 #endif
+		WMT_PLAT_ERR_FUNC(
+			"ECHO_CONSYS: rails VCN18=%d VCN28=%d VCN33_BT=%d\n",
+			IS_ERR_OR_NULL(reg_VCN18) ? -1 : regulator_is_enabled(reg_VCN18),
+			IS_ERR_OR_NULL(reg_VCN28) ? -1 : regulator_is_enabled(reg_VCN28),
+			IS_ERR_OR_NULL(reg_VCN33_BT) ? -1 : regulator_is_enabled(reg_VCN33_BT));
 #endif
 
 /*step2.MTCMOS ctrl*/
@@ -569,6 +577,15 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		if (_axi_to == 0)
 			WMT_PLAT_ERR_FUNC("AXI PROT clear timeout!\n"); }
 #endif
+		WMT_PLAT_ERR_FUNC(
+			"ECHO_CONSYS: post-power TOP1=0x%08x ACK=0x%08x ACK_S=0x%08x AXI_EN=0x%08x AXI_STA=0x%08x INFRA0_CG_STA=0x%08x RGU=0x%08x\n",
+			CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET),
+			CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET),
+			CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_S_OFFSET),
+			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET),
+			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_STA1_OFFSET),
+			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_INFRA0_CG_STA_OFFSET),
+			CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET));
 		/* The AP-RGU CPU reset is separate from the SPM domain reset.
 		 * Deassert it after either raw SPM sequencing or the genpd/scpsys
 		 * power-on has completed, and before the first CONSYS MCU read. */
@@ -589,29 +606,22 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 #endif /* defined(CONFIG_MTK_CLKMGR) */
 #endif
 		/*12.poll CONNSYS CHIP ID until chipid is returned  0x18070008 */
-		while (retry-- > 0) {
+		for (attempt = 1; attempt <= 10; attempt++) {
 			consysHwChipId = CONSYS_REG_READ(conn_reg.mcu_base + CONSYS_CHIP_ID_OFFSET);
-			WMT_PLAT_INFO_FUNC("ECHO_CONSYS: CHIP_ID raw=0x%08x attempt=%u\n", consysHwChipId, 10 - retry);
-			if ((consysHwChipId == 0x0321) || (consysHwChipId == 0x0335) || (consysHwChipId == 0x0337)) {
-				WMT_PLAT_INFO_FUNC("retry(%d)consys chipId(0x%08x)\n", retry, consysHwChipId);
+			WMT_PLAT_ERR_FUNC("ECHO_CONSYS: CHIP_ID raw=0x%08x attempt=%u\n",
+					   consysHwChipId, attempt);
+			if ((consysHwChipId == 0x0321) ||
+			    (consysHwChipId == 0x0335) ||
+			    (consysHwChipId == 0x0337) ||
+			    (consysHwChipId == 0x8163))
 				break;
-			}
-			if ((consysHwChipId == 0x8163)) {
-				WMT_PLAT_INFO_FUNC("retry(%d)consys chipId(0x%08x)\n", retry, consysHwChipId);
-				break;
-			}
-
-			/* Fallback spoof: only on last retry, if real read never matched.
-		 * TEE may block CONN master from reading chip ID register.
-		 * Override with expected value to allow driver init to proceed. */
-		if (retry == 0) {
-			WMT_PLAT_WARN_FUNC("Read CONSYS chipId(0x%08x) - SPOOFING to 0x8163 (last retry)\n", consysHwChipId);
-			consysHwChipId = 0x8163;
+			msleep(20);
 		}
-		break;
-	}
 
-	if ((0 == retry) || (0 == consysHwChipId)) {
+		if ((consysHwChipId != 0x0321) &&
+		    (consysHwChipId != 0x0335) &&
+		    (consysHwChipId != 0x0337) &&
+		    (consysHwChipId != 0x8163)) {
 			WMT_PLAT_ERR_FUNC("Maybe has a consys power on issue,(0x%08x)\n", consysHwChipId);
 			WMT_PLAT_ERR_FUNC("reg dump:CONSYS_CPU_SW_RST_REG(0x%x)\n",
 				  CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET));
@@ -624,6 +634,9 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 			WMT_PLAT_ERR_FUNC("reg dump:CONSYS_TOP1_PWR_CTRL_REG(0x%x)\n",
 				   CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET));
 #endif
+			WMT_PLAT_ERR_FUNC("ECHO_CONSYS: refusing HIF/STP with invalid physical CHIP_ID\n");
+			mtk_wcn_consys_hw_reg_ctrl(0, co_clock_type);
+			return -EIO;
 		}
 
 		/*13.{default no need}update ROMDEL/PATCH RAM DELSEL if needed 0x18070114 */
