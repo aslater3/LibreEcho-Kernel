@@ -298,7 +298,7 @@ static INT32 mtk_wmt_probe(struct platform_device *pdev)
 		WMT_PLAT_ERR_FUNC("[CCF]cannot get clk_infra_conn_main clock.\n");
 		return PTR_ERR(clk_infra_conn_main);
 	}
-	WMT_PLAT_DBG_FUNC("[CCF]clk_infra_conn_main=%p\n", clk_infra_conn_main);
+	WMT_PLAT_ERR_FUNC("ECHO_CONSYS: acquired CCF bus clock %p\n", clk_infra_conn_main);
 #endif
 #endif /* !defined(CONFIG_MTK_CLKMGR) */
 
@@ -600,7 +600,8 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		WMT_PLAT_DBG_FUNC("enable MT_CG_INFRA_CONNMCU_BUS CLK\n");
 #else
 		clk_prepare_enable(clk_infra_conn_main);
-		WMT_PLAT_DBG_FUNC("[CCF]enable clk_infra_conn_main\n");
+		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: enabled CCF bus clock rate=%lu\n",
+				  clk_get_rate(clk_infra_conn_main));
 #endif /* defined(CONFIG_MTK_CLKMGR) */
 #endif
 		/*12.poll CONNSYS CHIP ID until chipid is returned  0x18070008 */
@@ -705,7 +706,8 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		WMT_PLAT_DBG_FUNC("enable MT_CG_INFRA_CONNMCU_BUS CLK\n");
 #else
 		clk_prepare_enable(clk_infra_conn_main);
-		WMT_PLAT_DBG_FUNC("[CCF]enable clk_infra_conn_main\n");
+		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: enabled CCF bus clock rate=%lu\n",
+				  clk_get_rate(clk_infra_conn_main));
 #endif /* defined(CONFIG_MTK_CLKMGR) */
 #endif
 		/*12.poll CONNSYS CHIP ID until 6752 is returned 0x18070008 32'h6752 */

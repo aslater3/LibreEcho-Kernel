@@ -1436,6 +1436,8 @@
 			      <0 0x10000000 0 0x2000>,  /*TOPCKGEN + INFRA AXI      */
 			      <0 0x10006000 0 0x1000>;  /*SPM_BASE                  */
 			power-domains = <&scpsys MT8163_POWER_DOMAIN_CONN>;
+			clocks = <&infracfg CLK_INFRA_PMIC_CONN>;
+			clock-names = "bus";
 			interrupts = <GIC_SPI 237 IRQ_TYPE_LEVEL_LOW>,  /* BGF_EINT */
 				     <GIC_SPI 236 IRQ_TYPE_LEVEL_LOW>;  /* WDT_EINT */
 		};
