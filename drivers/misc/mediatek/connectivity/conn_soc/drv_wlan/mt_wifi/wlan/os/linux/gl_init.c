@@ -3831,7 +3831,11 @@ static INT_32 wlanProbe(PVOID pvData)
 		/* 4 <4> Setup IRQ */
 		prWlandevInfo = &arWlanDevInfo[i4DevIdx];
 
+		pr_err("ECHO_WLAN_STAGE: 090 before IRQ registration cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		i4Status = glBusSetIrq(prWdev->netdev, NULL, *((P_GLUE_INFO_T *) netdev_priv(prWdev->netdev)));
+		pr_err("ECHO_WLAN_STAGE: 091 after IRQ registration status=%d cpu=%u jiffies=%lu\n",
+		       i4Status, raw_smp_processor_id(), jiffies);
 
 		if (i4Status != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, ERROR, "wlanProbe: Set IRQ error\n");
@@ -3930,18 +3934,31 @@ static INT_32 wlanProbe(PVOID pvData)
 			}
 
 			if (kalFirmwareImageMapping(prGlueInfo, &prFwBuffer, &u4FwSize) == NULL) {
+				pr_err("ECHO_WLAN_STAGE: 109 firmware mapping failed cpu=%u jiffies=%lu\n",
+				       raw_smp_processor_id(), jiffies);
 				i4Status = -EIO;
 				DBGLOG(INIT, ERROR, "kalFirmwareImageMapping fail!\n");
 				goto bailout;
 			} else {
+				pr_err("ECHO_WLAN_STAGE: 110 firmware mapped size=%u buf=%p first=%02x%02x%02x%02x cpu=%u jiffies=%lu\n",
+				       u4FwSize, prFwBuffer,
+				       ((PUINT_8) prFwBuffer)[0], ((PUINT_8) prFwBuffer)[1],
+				       ((PUINT_8) prFwBuffer)[2], ((PUINT_8) prFwBuffer)[3],
+				       raw_smp_processor_id(), jiffies);
+				pr_err("ECHO_WLAN_STAGE: 111 enter wlanAdapterStart cpu=%u jiffies=%lu\n",
+				       raw_smp_processor_id(), jiffies);
 
 				if (wlanAdapterStart(prAdapter, prRegInfo, prFwBuffer,
 					u4FwSize) != WLAN_STATUS_SUCCESS) {
 					i4Status = -EIO;
 				}
+				pr_err("ECHO_WLAN_STAGE: 141 exit wlanAdapterStart status=%d cpu=%u jiffies=%lu\n",
+				       i4Status, raw_smp_processor_id(), jiffies);
 			}
 
 			kalFirmwareImageUnmapping(prGlueInfo, NULL, prFwBuffer);
+			pr_err("ECHO_WLAN_STAGE: 142 firmware unmapped status=%d cpu=%u jiffies=%lu\n",
+			       i4Status, raw_smp_processor_id(), jiffies);
 
 bailout:
 			/* kfree(prRegInfo); */
@@ -4060,8 +4077,12 @@ bailout:
 #endif
 
 		/* 4 <3> Register the card */
+		pr_err("ECHO_WLAN_STAGE: 150 enter wlanNetRegister cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		DBGLOG(INIT, TRACE, "wlanNetRegister...\n");
 		i4DevIdx = wlanNetRegister(prWdev);
+		pr_err("ECHO_WLAN_STAGE: 151 exit wlanNetRegister status=%d cpu=%u jiffies=%lu\n",
+		       i4DevIdx, raw_smp_processor_id(), jiffies);
 		if (i4DevIdx < 0) {
 			i4Status = -ENXIO;
 			DBGLOG(INIT, ERROR, "wlanProbe: Cannot register the net_device context to the kernel\n");

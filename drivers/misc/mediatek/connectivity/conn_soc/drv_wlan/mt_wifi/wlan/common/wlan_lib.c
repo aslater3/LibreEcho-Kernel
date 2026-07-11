@@ -1292,7 +1292,11 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		wlanDefTxPowerCfg(prAdapter);
 
 		/* 4 <4> Initialize Rx */
+		pr_err("ECHO_WLAN_STAGE: 100 enter RX init cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		nicRxInitialize(prAdapter);
+		pr_err("ECHO_WLAN_STAGE: 101 exit RX init cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 
 #if CFG_ENABLE_FW_DOWNLOAD
 		if (pvFwImageMapFile == NULL) {
@@ -1302,12 +1306,23 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		}
 
 		/* 1. disable interrupt, download is done by polling mode only */
+		pr_err("ECHO_WLAN_STAGE: 102 before disable IRQ cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		nicDisableInterrupt(prAdapter);
+		pr_err("ECHO_WLAN_STAGE: 103 after disable IRQ cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 
 		/* 2. Initialize Tx Resource to fw download state */
+		pr_err("ECHO_WLAN_STAGE: 104 before reset download TX resource cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		nicTxInitResetResource(prAdapter);
+		pr_err("ECHO_WLAN_STAGE: 105 after reset download TX resource cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 
 		/* 3. FW download here */
+		pr_err("ECHO_WLAN_STAGE: 110 enter firmware download size=%u load=0x%08x buf=%p cpu=%u jiffies=%lu\n",
+		       u4FwImageFileLength, prRegInfo->u4LoadAddress, pvFwImageMapFile,
+		       raw_smp_processor_id(), jiffies);
 		u4FwLoadAddr = prRegInfo->u4LoadAddress;
 
 #if CFG_ENABLE_FW_DIVIDED_DOWNLOAD
@@ -1404,8 +1419,12 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 
 		if (u4Status != WLAN_STATUS_SUCCESS)
 			break;
+		pr_err("ECHO_WLAN_STAGE: 112 firmware download complete status=%u cpu=%u jiffies=%lu\n",
+		       u4Status, raw_smp_processor_id(), jiffies);
 #if !CFG_ENABLE_FW_DOWNLOAD_ACK
 		/* Send INIT_CMD_ID_QUERY_PENDING_ERROR command and wait for response */
+		pr_err("ECHO_WLAN_STAGE: 113 before firmware query-status cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		if (wlanImageQueryStatus(prAdapter) != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, ERROR, "Firmware download failed!\n");
 			u4Status = WLAN_STATUS_FAILURE;
@@ -1414,22 +1433,37 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 #endif
 
 		/* 4. send Wi-Fi Start command */
+		pr_err("ECHO_WLAN_STAGE: 114 firmware query-status complete cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		DBGLOG(INIT, INFO, "<wifi> send Wi-Fi Start command\n");
+		pr_err("ECHO_WLAN_STAGE: 115 before Wi-Fi start command cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 #if CFG_OVERRIDE_FW_START_ADDRESS
 		wlanConfigWifiFunc(prAdapter, TRUE, prRegInfo->u4StartAddress);
 #else
 		wlanConfigWifiFunc(prAdapter, FALSE, 0);
 #endif
+		pr_err("ECHO_WLAN_STAGE: 116 after Wi-Fi start command cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 #endif
 
+		pr_err("ECHO_WLAN_STAGE: 120 enter firmware-ready wait cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		DBGLOG(INIT, TRACE, "wlanAdapterStart(): Waiting for Ready bit..\n");
 		/* 4 <5> check Wi-Fi FW asserts ready bit */
 		i = 0;
 		while (1) {
+			if (i == 0 || (i % 100) == 0)
+				pr_err("ECHO_WLAN_STAGE: 121 ready poll before read iter=%u cpu=%u jiffies=%lu\n",
+				       i, raw_smp_processor_id(), jiffies);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
+			if (i == 0 || (i % 100) == 0)
+				pr_err("ECHO_WLAN_STAGE: 121 ready poll after read iter=%u WCIR=0x%08x cpu=%u jiffies=%lu\n",
+				       i, u4Value, raw_smp_processor_id(), jiffies);
 
 			if (u4Value & WCIR_WLAN_READY) {
-				DBGLOG(INIT, TRACE, "Ready bit asserted\n");
+				pr_err("ECHO_WLAN_STAGE: 121 ready asserted iter=%u WCIR=0x%08x cpu=%u jiffies=%lu\n",
+				       i, u4Value, raw_smp_processor_id(), jiffies);
 				break;
 			} else if (kalIsCardRemoved(prAdapter->prGlueInfo) == TRUE || fgIsBusAccessFailed == TRUE) {
 				u4Status = WLAN_STATUS_FAILURE;
@@ -1447,6 +1481,8 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			kalMsleep(10);
 		}
 
+		pr_err("ECHO_WLAN_STAGE: 122 firmware-ready wait exit status=%u WCIR=0x%08x iter=%u cpu=%u jiffies=%lu\n",
+		       u4Status, u4Value, i, raw_smp_processor_id(), jiffies);
 		if (u4Status == WLAN_STATUS_SUCCESS) {
 			/* 1. reset interrupt status */
 			HAL_READ_INTR_STATUS(prAdapter, 4, (PUINT_8)&u4WHISR);
@@ -1457,14 +1493,26 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			nicTxResetResource(prAdapter);
 
 			/* 3. query for permanent address by polling */
+			pr_err("ECHO_WLAN_STAGE: 130 before permanent-address command cpu=%u jiffies=%lu\n",
+			       raw_smp_processor_id(), jiffies);
 			wlanQueryPermanentAddress(prAdapter);
+			pr_err("ECHO_WLAN_STAGE: 131 after permanent-address command cpu=%u jiffies=%lu\n",
+			       raw_smp_processor_id(), jiffies);
 
 #if (CFG_SUPPORT_NIC_CAPABILITY == 1)
 			/* 4. query for NIC capability */
+			pr_err("ECHO_WLAN_STAGE: 132 before NIC capability command cpu=%u jiffies=%lu\n",
+			       raw_smp_processor_id(), jiffies);
 			wlanQueryNicCapability(prAdapter);
+			pr_err("ECHO_WLAN_STAGE: 133 after NIC capability command cpu=%u jiffies=%lu\n",
+			       raw_smp_processor_id(), jiffies);
 #endif
 			/* 4.1 query for compiler flags */
+			pr_err("ECHO_WLAN_STAGE: 134 before compiler-flags command cpu=%u jiffies=%lu\n",
+			       raw_smp_processor_id(), jiffies);
 			wlanQueryCompileFlags(prAdapter);
+			pr_err("ECHO_WLAN_STAGE: 135 after compiler-flags command cpu=%u jiffies=%lu\n",
+			       raw_smp_processor_id(), jiffies);
 
 			/* 5. Override network address */
 			wlanUpdateNetworkAddress(prAdapter);
