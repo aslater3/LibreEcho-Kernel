@@ -578,16 +578,11 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 			WMT_PLAT_ERR_FUNC("AXI PROT clear timeout!\n"); }
 #endif
 		WMT_PLAT_ERR_FUNC(
-			"ECHO_CONSYS: post-power TOP1=0x%08x ACK=0x%08x ACK_S=0x%08x AXI_EN=0x%08x AXI_STA=0x%08x INFRA0_CG_STA=0x%08x RGU=0x%08x\n",
-			conn_reg.spm_base ?
-				CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET) : 0xffffffff,
-			conn_reg.spm_base ?
-				CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET) : 0xffffffff,
-			conn_reg.spm_base ?
-				CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_S_OFFSET) : 0xffffffff,
-			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET),
-			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_STA1_OFFSET),
-			CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_INFRA0_CG_STA_OFFSET),
+			"ECHO_CONSYS: post-power maps MCU=0x%lx AP_RGU=0x%lx TOP=0x%lx SPM=0x%lx RGU=0x%08x\n",
+			(unsigned long)conn_reg.mcu_base,
+			(unsigned long)conn_reg.ap_rgu_base,
+			(unsigned long)conn_reg.topckgen_base,
+			(unsigned long)conn_reg.spm_base,
 			CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET));
 		/* The AP-RGU CPU reset is separate from the SPM domain reset.
 		 * Deassert it after either raw SPM sequencing or the genpd/scpsys
