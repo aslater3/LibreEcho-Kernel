@@ -1455,11 +1455,11 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		while (1) {
 			if (i < 5 || (i % 100) == 0)
 				pr_err("ECHO_WLAN_STAGE: 121 ready poll before read iter=%u mask=0x%08x cpu=%u jiffies=%lu\n",
-				       i, WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
+				       i, (UINT_32) WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
 			if (i < 5 || (i % 100) == 0)
 				pr_err("ECHO_WLAN_STAGE: 121 ready poll after read iter=%u WCIR=0x%08x mask=0x%08x cpu=%u jiffies=%lu\n",
-				       i, u4Value, WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
+				       i, u4Value, (UINT_32) WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
 
 			if (u4Value & WCIR_WLAN_READY) {
 				pr_err("ECHO_WLAN_STAGE: 121 ready asserted iter=%u WCIR=0x%08x cpu=%u jiffies=%lu\n",
@@ -1494,6 +1494,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 					pr_err("ECHO_WLAN_STAGE: 121 after ready sleep iter=%u cpu=%u jiffies=%lu\n",
 					       i, raw_smp_processor_id(), jiffies);
 			}
+		}
 
 		pr_err("ECHO_WLAN_STAGE: 122 firmware-ready wait exit status=%u WCIR=0x%08x iter=%u cpu=%u jiffies=%lu\n",
 		       u4Status, u4Value, i, raw_smp_processor_id(), jiffies);
