@@ -513,7 +513,8 @@ WLAN_STATUS glRegisterBus(probe_card pfProbe, remove_card pfRemove)
 		return Ret;
 	}
 
-	HifAhbProbe();
+	Ret = HifAhbProbe();
+	pr_err("ECHO_RET: HifAhbProbe=%d\n", Ret);
 #else
 
 	Ret = platform_driver_register(&MtkPltmAhbDriver);

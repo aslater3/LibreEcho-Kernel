@@ -4147,7 +4147,8 @@ bailout:
 	if (i4Status < 0)
 		DBGLOG(INIT, ERROR, "wlanProbe: init MET procfs failed\n");
 #endif
-	DBGLOG(INIT, TRACE, "wlanProbe ok\n");
+	DBGLOG(INIT, TRACE, "wlanProbe final i4Status=%d\n", i4Status);
+	pr_err("ECHO_RET: wlanProbe final i4Status=%d\n", i4Status);
 	return i4Status;
 }				/* end of wlanProbe() */
 
