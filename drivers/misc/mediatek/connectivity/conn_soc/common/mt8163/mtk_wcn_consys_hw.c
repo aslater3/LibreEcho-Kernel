@@ -535,6 +535,11 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		if (_axi_to == 0)
 			WMT_PLAT_ERR_FUNC("AXI PROT clear timeout!\n"); }
 		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: deasserting CPU SW reset, polling CHIP_ID...\n");
+		/* Deassert reset before touching CONSYS MCU registers.  Polling
+		 * CHIP_ID while bit 12 is still asserted always returns zero. */
+		CONSYS_REG_WRITE(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET,
+				 (CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET) &
+				 ~CONSYS_CPU_SW_RST_BIT) | CONSYS_CPU_SW_RST_CTRL_KEY);
 #endif
 		/*11.26M is ready now, delay 10us for mem_pd de-assert */
 		udelay(10);
@@ -605,11 +610,6 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 		CONSYS_REG_WRITE(CONSYS_AFE_REG_WBG_PLL_02, CONSYS_AFE_REG_WBG_PLL_02_VALUE);
 		CONSYS_REG_WRITE(CONSYS_AFE_REG_WBG_WB_TX_01, CONSYS_AFE_REG_WBG_WB_TX_01_VALUE);
 #endif
-		/*16.deassert CONNSYS CPU SW reset 0x10007018 "[12]=1'b0 [31:24] =8'h88 (key)" */
-		CONSYS_REG_WRITE(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET,
-				 (CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET) &
-				 ~CONSYS_CPU_SW_RST_BIT) | CONSYS_CPU_SW_RST_CTRL_KEY);
-
 		msleep(20);
 #else /*use HADRCODE, maybe no use.. */
 		/*3.assert CONNSYS CPU SW reset  0x10007018  "[12]=1'b1  [31:24]=8'h88 (key)" */
