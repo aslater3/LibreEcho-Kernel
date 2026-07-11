@@ -42,6 +42,7 @@
 #include "wmt_lib.h"
 #include "wmt_core.h"
 #include "wmt_exp.h"
+#include "stp_core.h"
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -646,6 +647,12 @@ INT32 wmt_func_wifi_on(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf)
 	if (NULL != mtk_wcn_wlan_probe) {
 
 		WMT_INFO_FUNC("WMT-FUNC: wmt wlan func on before wlan probe\n");
+		WMT_INFO_FUNC("ECHO_WMT_STATE: site=wifi_before_probe ready=%d coredump=%d\n",
+			      mtk_wcn_stp_is_ready(), mtk_wcn_stp_coredump_start_get());
+		if (!mtk_wcn_stp_is_ready()) {
+			WMT_ERR_FUNC("ECHO_WMT_STATE: refusing WLAN probe: STP not ready\n");
+			return -1;
+		}
 		iRet = (*mtk_wcn_wlan_probe) ();
 		if (iRet) {
 			WMT_ERR_FUNC("WMT-FUNC: wmt call wlan probe fail(%d)\n", iRet);

@@ -1280,11 +1280,15 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		/* init wake lock before interrupt enable and tx thread */
 		KAL_WAKE_LOCK_INIT(prAdapter, &prAdapter->rTxThreadWakeLock, "WLAN TX THREAD");
 
+		pr_err("ECHO_WLAN_HIF: before nicInitSystemService cpu=%u jiffies=%lu\n", raw_smp_processor_id(), jiffies);
 		/* 4 <2> Initialize System Service (MGMT Memory pool and STA_REC) */
 		nicInitSystemService(prAdapter);
+		pr_err("ECHO_WLAN_HIF: after nicInitSystemService cpu=%u jiffies=%lu\n", raw_smp_processor_id(), jiffies);
 
+		pr_err("ECHO_WLAN_HIF: before nicTxInitialize cpu=%u jiffies=%lu\n", raw_smp_processor_id(), jiffies);
 		/* 4 <3> Initialize Tx */
 		nicTxInitialize(prAdapter);
+		pr_err("ECHO_WLAN_HIF: after nicTxInitialize cpu=%u jiffies=%lu\n", raw_smp_processor_id(), jiffies);
 		wlanDefTxPowerCfg(prAdapter);
 
 		/* 4 <4> Initialize Rx */

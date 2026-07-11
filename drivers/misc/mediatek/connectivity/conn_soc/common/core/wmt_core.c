@@ -743,6 +743,19 @@ static VOID wmt_core_dump_func_state(PINT8 pSource)
 
 }
 
+static VOID wmt_core_diag_state(PINT8 pSite, INT32 iInitRet)
+{
+	WMT_INFO_FUNC("ECHO_WMT_STATE: site=%s wifi=%d wmt=%d stp=%d ready=%d "
+		      "hif=%d coredump=%d init_ret=%d\n",
+		      (pSite == NULL ? (PINT8) "?" : pSite),
+		      gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_WIFI],
+		      gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_WMT],
+		      gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_STP],
+		      mtk_wcn_stp_is_ready(),
+		      !!(gMtkWmtCtx.wmtInfoBit & WMT_OP_HIF_BIT),
+		      mtk_wcn_stp_coredump_start_get(), iInitRet);
+}
+
 MTK_WCN_BOOL wmt_core_patch_check(UINT32 u4PatchVer, UINT32 u4HwVer)
 {
 	if (MAJORNUM(u4HwVer) != MAJORNUM(u4PatchVer)) {
@@ -882,6 +895,7 @@ pwr_on_rty:
 
 	/* init stp */
 	iRet = wmt_core_stp_init();
+	wmt_core_diag_state((PINT8) "after_stp_init", iRet);
 	if (iRet) {
 		WMT_ERR_FUNC("WMT-CORE: wmt_core_stp_init fail (%d)\n", iRet);
 		osal_assert(0);
@@ -981,6 +995,7 @@ static INT32 opfunc_func_on(P_WMT_OP pWmtOp)
 
 	/* check if chip power on is needed */
 	if (DRV_STS_FUNC_ON != gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_WMT]) {
+		wmt_core_diag_state((PINT8) "before_pwr_on", -1);
 		iRet = opfunc_pwr_on(pWmtOp);
 
 		if (iRet) {
@@ -993,6 +1008,7 @@ static INT32 opfunc_func_on(P_WMT_OP pWmtOp)
 	}
 
 	if (WMTDRV_TYPE_WMT > drvType) {
+		wmt_core_diag_state((PINT8) "before_func_cb", iRet);
 		if (NULL != gpWmtFuncOps[drvType] && NULL != gpWmtFuncOps[drvType]->func_on) {
 			iRet = (*(gpWmtFuncOps[drvType]->func_on)) (gMtkWmtCtx.p_ic_ops, wmt_conf_get_cfg());
 			if (0 != iRet)
