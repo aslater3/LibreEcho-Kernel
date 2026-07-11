@@ -621,9 +621,19 @@ VOID glSetHifInfo(GLUE_INFO_T *GlueInfo, ULONG ulCookie)
 #ifdef CONFIG_OF
 #if !defined(CONFIG_MTK_CLKMGR)
 	HifInfo->clk_wifi_dma = devm_clk_get(&HifAhbPDev->dev, "wifi-dma");
+	HifInfo->fgWifiDmaClkHeld = FALSE;
 	if (IS_ERR(HifInfo->clk_wifi_dma)) {
 		DBGLOG(INIT, ERROR, "[WiFi/HIF][CCF]cannot get HIF clk_wifi_dma clock.\n");
 		/* return PTR_ERR(HifInfo->clk_wifi_dma); */
+	} else {
+		int clk_ret = clk_prepare_enable(HifInfo->clk_wifi_dma);
+		if (clk_ret) {
+			DBGLOG(INIT, ERROR, "[WiFi/HIF][CCF]hold HIF clk_wifi_dma failed: %d\n", clk_ret);
+		} else {
+			HifInfo->fgWifiDmaClkHeld = TRUE;
+			pr_err("ECHO_WLAN_HIF: held wifi-dma clock rate=%lu\n",
+			       clk_get_rate(HifInfo->clk_wifi_dma));
+		}
 	}
 	DBGLOG(INIT, TRACE, "[WiFi/HIF][CCF]HIF clk_wifi_dma=0x%p\n", HifInfo->clk_wifi_dma);
 #endif
@@ -680,6 +690,13 @@ VOID glSetHifInfo(GLUE_INFO_T *GlueInfo, ULONG ulCookie)
 /*----------------------------------------------------------------------------*/
 VOID glClearHifInfo(GLUE_INFO_T *GlueInfo)
 {
+#if !defined(CONFIG_MTK_CLKMGR)
+	if (GlueInfo->rHifInfo.fgWifiDmaClkHeld == TRUE) {
+		clk_disable_unprepare(GlueInfo->rHifInfo.clk_wifi_dma);
+		GlueInfo->rHifInfo.fgWifiDmaClkHeld = FALSE;
+		pr_err("ECHO_WLAN_HIF: released wifi-dma clock\n");
+	}
+#endif
 	iounmap(GlueInfo->rHifInfo.HifRegBaseAddr);
 	iounmap(GlueInfo->rHifInfo.DmaRegBaseAddr);
 	iounmap(GlueInfo->rHifInfo.McuRegBaseAddr);

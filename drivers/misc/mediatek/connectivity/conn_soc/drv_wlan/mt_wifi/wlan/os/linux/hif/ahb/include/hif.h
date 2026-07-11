@@ -198,6 +198,7 @@ typedef struct _GL_HIF_INFO_T {
 
 #if !defined(CONFIG_MTK_CLKMGR)
 	struct clk *clk_wifi_dma;
+	BOOLEAN fgWifiDmaClkHeld;
 #endif
 } GL_HIF_INFO_T, *P_GL_HIF_INFO_T;
 
