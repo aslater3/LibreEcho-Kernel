@@ -40,6 +40,7 @@
 
 #include <wmt_exp.h>
 #include <wmt_lib.h>
+#include "stp_core.h"
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -454,7 +455,14 @@ INT32 mtk_wcn_wmt_wlan_reg(P_MTK_WCN_WMT_WLAN_CB_INFO pWmtWlanCbInfo)
 	mtk_wcn_wlan_bus_tx_cnt_clr = pWmtWlanCbInfo->wlan_bus_cnt_clr_cb;
 
 	if (gWifiProbed) {
-		WMT_INFO_FUNC("wlan has been done power on,call probe directly\n");
+		pr_err("ECHO_WMT_STATE: direct_wlan_reg probed=%u ready=%d coredump=%d cb=%p\n",
+		       gWifiProbed, mtk_wcn_stp_is_ready(),
+		       mtk_wcn_stp_coredump_start_get(), mtk_wcn_wlan_probe);
+		if (!mtk_wcn_stp_is_ready()) {
+			pr_err("ECHO_WMT_STATE: refusing direct WLAN probe: STP not ready\n");
+			return -3;
+		}
+		pr_err("ECHO_WMT_STATE: invoking direct WLAN probe\n");
 		iRet = (*mtk_wcn_wlan_probe) ();
 		if (!iRet) {
 			WMT_INFO_FUNC("call wlan probe OK when do wlan register to wmt\n");
