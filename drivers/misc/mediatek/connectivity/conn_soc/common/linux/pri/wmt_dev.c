@@ -1846,11 +1846,11 @@ ssize_t WMT_write(struct file *filp, const char __user *buf, size_t count, loff_
 		wrBuf[NAME_MAX] = '\0';
 
 		if (!strncasecmp(wrBuf, "ok", NAME_MAX)) {
-			WMT_DBG_FUNC("resp str ok\n");
+			WMT_INFO_FUNC("cmd write response ok, state=0x%lx\n", gDevWmt.state);
 			/* pWmtDevCtx->cmd_result = 0; */
 			wmt_lib_trigger_cmd_signal(0);
 		} else {
-			WMT_WARN_FUNC("warning resp str (%s)\n", wrBuf);
+			WMT_WARN_FUNC("cmd write response fail (%s), state=0x%lx\n", wrBuf, gDevWmt.state);
 			/* pWmtDevCtx->cmd_result = -1; */
 			wmt_lib_trigger_cmd_signal(-1);
 		}

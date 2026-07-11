@@ -382,9 +382,10 @@ INT32 wmt_ctrl_ul_cmd(P_DEV_WMT pWmtDev, const UINT8 *pCmdStr)
 	P_OSAL_EVENT pCmdReq;
 
 	if (osal_test_and_set_bit(WMT_STAT_CMD, &pWmtDev->state)) {
-		WMT_WARN_FUNC("cmd buf is occupied by (%s)\n", pWmtDev->cCmd);
+		WMT_WARN_FUNC("cmd buf is occupied by (%s), state=0x%lx\n", pWmtDev->cCmd, pWmtDev->state);
 		return -1;
 	}
+	WMT_INFO_FUNC("cmd claim str(%s), state=0x%lx\n", pCmdStr, pWmtDev->state);
 
 	/* indicate baud rate change to user space app */
 #if 0
@@ -404,17 +405,17 @@ INT32 wmt_ctrl_ul_cmd(P_DEV_WMT pWmtDev, const UINT8 *pCmdStr)
 	pCmdReq = &pWmtDev->cmdReq;
 
 	osal_trigger_event(&pWmtDev->cmdReq);
-	WMT_DBG_FUNC("str(%s) request ok\n", pCmdStr);
+	WMT_INFO_FUNC("cmd queued str(%s), state=0x%lx\n", pCmdStr, pWmtDev->state);
 
 /* waitRet = wait_for_completion_interruptible_timeout(&pWmtDev->cmd_comp, msecs_to_jiffies(2000)); */
 	waitRet = osal_wait_for_signal_timeout(pCmdSignal);
-	WMT_LOUD_FUNC("wait signal iRet:%d\n", waitRet);
+	WMT_INFO_FUNC("cmd wait str(%s), waitRet=%d, state=0x%lx, result=%d\n", pCmdStr, waitRet, pWmtDev->state, pWmtDev->cmdResult);
 	if (0 == waitRet) {
-		WMT_ERR_FUNC("wait signal timeout\n");
+		WMT_ERR_FUNC("cmd timeout str(%s), state=0x%lx, result=%d; ownership retained\n", pCmdStr, pWmtDev->state, pWmtDev->cmdResult);
 		return -2;
 	}
 
-	WMT_INFO_FUNC("str(%s) result(%d)\n", pCmdStr, pWmtDev->cmdResult);
+	WMT_INFO_FUNC("cmd response str(%s), waitRet=%d, state=0x%lx, result=%d\n", pCmdStr, waitRet, pWmtDev->state, pWmtDev->cmdResult);
 
 	return pWmtDev->cmdResult;
 }

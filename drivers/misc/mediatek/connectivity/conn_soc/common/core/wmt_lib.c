@@ -438,8 +438,10 @@ P_WMT_HIF_CONF wmt_lib_get_hif(VOID)
 
 PUINT8 wmt_lib_get_cmd(VOID)
 {
-	if (osal_test_and_clear_bit(WMT_STAT_CMD, &gDevWmt.state))
+	if (osal_test_and_clear_bit(WMT_STAT_CMD, &gDevWmt.state)) {
+		WMT_INFO_FUNC("cmd read str(%s), state=0x%lx\n", gDevWmt.cCmd, gDevWmt.state);
 		return gDevWmt.cCmd;
+	}
 
 	return NULL;
 }
