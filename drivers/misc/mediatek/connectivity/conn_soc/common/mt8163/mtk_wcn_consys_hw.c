@@ -1086,8 +1086,50 @@ INT32 mtk_wcn_consys_hw_bt_paldo_ctrl(UINT32 enable)
 
 INT32 mtk_wcn_consys_hw_wifi_paldo_ctrl(UINT32 enable)
 {
-	mtk_wcn_consys_hw_bt_paldo_ctrl(enable);
-	return 0;
+	int ret = 0;
+
+	/*
+	 * radar_puffin exposes VCN33_BT and VCN33_WIFI as distinct PMIC rails.
+	 * The generic MT8163 shared-V33 path aliases Wi-Fi to the BT regulator,
+	 * which leaves the DT-provided Wi-Fi rail off before WLAN HIF access.
+	 */
+	if (enable) {
+#if CONSYS_PMIC_CTRL_ENABLE
+#if CONSYS_PMIC_CTRL_UPMU
+		upmu_set_vcn33_on_ctrl_wifi(1);
+#else
+		pmic_set_register_value(PMIC_RG_VCN33_ON_CTRL_WIFI, 1);
+#endif
+#if defined(CONFIG_MTK_PMIC_LEGACY)
+		ret = hwPowerOn(MT6323_POWER_LDO_VCN33_WIFI, VOL_3300, "wcn_drv") ? 0 : -EIO;
+#else
+		if (!IS_ERR_OR_NULL(reg_VCN33_WIFI)) {
+			regulator_set_voltage(reg_VCN33_WIFI, 3300000, 3300000);
+			ret = regulator_enable(reg_VCN33_WIFI);
+		}
+#endif
+#endif
+		udelay(200);
+	} else {
+#if CONSYS_PMIC_CTRL_ENABLE
+#if CONSYS_PMIC_CTRL_UPMU
+		upmu_set_vcn33_on_ctrl_wifi(0);
+#else
+		pmic_set_register_value(PMIC_RG_VCN33_ON_CTRL_WIFI, 0);
+#endif
+#if defined(CONFIG_MTK_PMIC_LEGACY)
+		hwPowerDown(MT6323_POWER_LDO_VCN33_WIFI, "wcn_drv");
+#else
+		if (!IS_ERR_OR_NULL(reg_VCN33_WIFI))
+			ret = regulator_disable(reg_VCN33_WIFI);
+#endif
+#endif
+	}
+	WMT_PLAT_ERR_FUNC("ECHO_WIFI_RAIL: enable=%u ret=%d bt=%d wifi=%d\n",
+			enable, ret,
+			IS_ERR_OR_NULL(reg_VCN33_BT) ? -1 : regulator_is_enabled(reg_VCN33_BT),
+			IS_ERR_OR_NULL(reg_VCN33_WIFI) ? -1 : regulator_is_enabled(reg_VCN33_WIFI));
+	return ret;
 }
 
 #else

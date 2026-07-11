@@ -607,7 +607,11 @@ VOID glSetHifInfo(GLUE_INFO_T *GlueInfo, ULONG ulCookie)
 	HifInfo->DmaOps = NULL;
 
 	/* read chip ID */
+	pr_err("ECHO_WLAN_HIF: before WCIR read base=%p cpu=%u jiffies=%lu\n",
+	       HifInfo->HifRegBaseAddr, raw_smp_processor_id(), jiffies);
 	HifInfo->ChipID = HIF_REG_READL(HifInfo, MCR_WCIR) & 0xFFFF;
+	pr_err("ECHO_WLAN_HIF: after WCIR read value=0x%04x cpu=%u jiffies=%lu\n",
+	       HifInfo->ChipID, raw_smp_processor_id(), jiffies);
 	if (HifInfo->ChipID == 0x0321 || HifInfo->ChipID == 0x0335 || HifInfo->ChipID == 0x0337)
 		HifInfo->ChipID = 0x6735;	/* Denali ChipID transition */
 	if (HifInfo->ChipID == 0x0326)
