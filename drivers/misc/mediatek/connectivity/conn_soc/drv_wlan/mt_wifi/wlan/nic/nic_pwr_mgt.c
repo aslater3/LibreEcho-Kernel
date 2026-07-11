@@ -329,14 +329,14 @@ BOOLEAN nicpmSetDriverOwn(IN P_ADAPTER_T prAdapter)
 	i = 0;
 
 	while (1) {
-		if (i == 0)
-			pr_err("ECHO_WLAN_HIF: before WHLPCR read base=%p cpu=%u jiffies=%lu irq=%u preempt=%x\n",
-			       HifInfo->HifRegBaseAddr, raw_smp_processor_id(), jiffies,
+		if (i == 0 || i == 1)
+			pr_err("ECHO_WLAN_HIF: before WHLPCR read iter=%u base=%p cpu=%u jiffies=%lu irq=%u preempt=%x\n",
+			       i, HifInfo->HifRegBaseAddr, raw_smp_processor_id(), jiffies,
 			       irqs_disabled(), preempt_count());
 		HAL_MCR_RD(prAdapter, MCR_WHLPCR, &u4RegValue);
-		if (i == 0)
-			pr_err("ECHO_WLAN_HIF: after WHLPCR read value=0x%08x cpu=%u jiffies=%lu\n",
-			       u4RegValue, raw_smp_processor_id(), jiffies);
+		if (i == 0 || i == 1)
+			pr_err("ECHO_WLAN_HIF: after WHLPCR read iter=%u value=0x%08x cpu=%u jiffies=%lu\n",
+			       i, u4RegValue, raw_smp_processor_id(), jiffies);
 
 		if (u4RegValue & WHLPCR_FW_OWN_REQ_SET) {
 			prAdapter->fgIsFwOwn = FALSE;
