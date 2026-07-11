@@ -3187,7 +3187,7 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 	prInitCmdWifiStart = (P_INIT_CMD_WIFI_START) (prInitHifTxHeader->rInitWifiCmd.aucBuffer);
 	prInitCmdWifiStart->u4Override = (fgEnable == TRUE ? 1 : 0);
 	prInitCmdWifiStart->u4Address = u4StartAddress;
-	pr_err("ECHO_FW_START: cid=0x%02x seq=%u override=%u address=0x%08x info_len=%u cpu=%u jiffies=%lu\n",
+	pr_err("ECHO_FW_START_SUBMIT: cid=0x%02x seq=%u override=%u address=0x%08x info_len=%u cpu=%u jiffies=%lu\n",
 	       prInitHifTxHeader->rInitWifiCmd.ucCID,
 	       prInitHifTxHeader->rInitWifiCmd.ucSeqNum,
 	       prInitCmdWifiStart->u4Override, prInitCmdWifiStart->u4Address,
@@ -3212,7 +3212,7 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 			u4Status = WLAN_STATUS_FAILURE;
 			DBGLOG(INIT, ERROR, "Fail to transmit WIFI start command\n");
 		}
-		pr_err("ECHO_FW_START: tx_submit_status=%u cpu=%u jiffies=%lu\n",
+		pr_err("ECHO_FW_START_SUBMIT: tx_port_return status=%u; no start-command ACK is waited by this path cpu=%u jiffies=%lu\n",
 		       u4Status, raw_smp_processor_id(), jiffies);
 
 		break;
