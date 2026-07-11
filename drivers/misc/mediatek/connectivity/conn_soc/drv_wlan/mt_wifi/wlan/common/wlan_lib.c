@@ -1453,33 +1453,47 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		/* 4 <5> check Wi-Fi FW asserts ready bit */
 		i = 0;
 		while (1) {
-			if (i == 0 || (i % 100) == 0)
-				pr_err("ECHO_WLAN_STAGE: 121 ready poll before read iter=%u cpu=%u jiffies=%lu\n",
-				       i, raw_smp_processor_id(), jiffies);
+			if (i < 5 || (i % 100) == 0)
+				pr_err("ECHO_WLAN_STAGE: 121 ready poll before read iter=%u mask=0x%08x cpu=%u jiffies=%lu\n",
+				       i, WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
-			if (i == 0 || (i % 100) == 0)
-				pr_err("ECHO_WLAN_STAGE: 121 ready poll after read iter=%u WCIR=0x%08x cpu=%u jiffies=%lu\n",
-				       i, u4Value, raw_smp_processor_id(), jiffies);
+			if (i < 5 || (i % 100) == 0)
+				pr_err("ECHO_WLAN_STAGE: 121 ready poll after read iter=%u WCIR=0x%08x mask=0x%08x cpu=%u jiffies=%lu\n",
+				       i, u4Value, WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
 
 			if (u4Value & WCIR_WLAN_READY) {
 				pr_err("ECHO_WLAN_STAGE: 121 ready asserted iter=%u WCIR=0x%08x cpu=%u jiffies=%lu\n",
 				       i, u4Value, raw_smp_processor_id(), jiffies);
 				break;
-			} else if (kalIsCardRemoved(prAdapter->prGlueInfo) == TRUE || fgIsBusAccessFailed == TRUE) {
-				u4Status = WLAN_STATUS_FAILURE;
-				break;
-			} else if (i >= CFG_RESPONSE_POLLING_TIMEOUT) {
-				UINT_32 u4MailBox0;
+			} else {
+				if (i < 5)
+					pr_err("ECHO_WLAN_STAGE: 121 before card/bus check iter=%u cpu=%u jiffies=%lu\n",
+					       i, raw_smp_processor_id(), jiffies);
+				if (kalIsCardRemoved(prAdapter->prGlueInfo) == TRUE || fgIsBusAccessFailed == TRUE) {
+					u4Status = WLAN_STATUS_FAILURE;
+					break;
+				}
+				if (i < 5)
+					pr_err("ECHO_WLAN_STAGE: 121 card/bus check passed iter=%u cpu=%u jiffies=%lu\n",
+					       i, raw_smp_processor_id(), jiffies);
+				if (i >= CFG_RESPONSE_POLLING_TIMEOUT) {
+					UINT_32 u4MailBox0;
 
-				nicGetMailbox(prAdapter, 0, &u4MailBox0);
-				DBGLOG(INIT, ERROR, "Waiting for Ready bit: Timeout, ID=%u\n",
-						     (u4MailBox0 & 0x0000FFFF));
-				u4Status = WLAN_STATUS_FAILURE;
-				break;
+					nicGetMailbox(prAdapter, 0, &u4MailBox0);
+					DBGLOG(INIT, ERROR, "Waiting for Ready bit: Timeout, ID=%u\n",
+							     (u4MailBox0 & 0x0000FFFF));
+					u4Status = WLAN_STATUS_FAILURE;
+					break;
+				}
+				i++;
+				if (i <= 5)
+					pr_err("ECHO_WLAN_STAGE: 121 before ready sleep iter=%u cpu=%u jiffies=%lu\n",
+					       i, raw_smp_processor_id(), jiffies);
+				kalMsleep(10);
+				if (i <= 5)
+					pr_err("ECHO_WLAN_STAGE: 121 after ready sleep iter=%u cpu=%u jiffies=%lu\n",
+					       i, raw_smp_processor_id(), jiffies);
 			}
-			i++;
-			kalMsleep(10);
-		}
 
 		pr_err("ECHO_WLAN_STAGE: 122 firmware-ready wait exit status=%u WCIR=0x%08x iter=%u cpu=%u jiffies=%lu\n",
 		       u4Status, u4Value, i, raw_smp_processor_id(), jiffies);
