@@ -477,7 +477,8 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 /*step2.MTCMOS ctrl*/
 
 #ifdef CONFIG_OF		/*use DT */
-		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: begin inline power-on\n");
+		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: begin power-on (genpd=%d)\n",
+			CONSYS_PWR_ON_OFF_API_AVAILABLE);
 		/*3.assert CONNSYS CPU SW reset  0x10007018 "[12]=1'b1  [31:24]=8'h88 (key)" */
 		CONSYS_REG_WRITE((conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET),
 				 CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET) |
@@ -540,13 +541,14 @@ INT32 mtk_wcn_consys_hw_reg_ctrl(UINT32 on, UINT32 co_clock_type)
 			udelay(1);
 		if (_axi_to == 0)
 			WMT_PLAT_ERR_FUNC("AXI PROT clear timeout!\n"); }
+#endif
+		/* The AP-RGU CPU reset is separate from the SPM domain reset.
+		 * Deassert it after either raw SPM sequencing or the genpd/scpsys
+		 * power-on has completed, and before the first CONSYS MCU read. */
 		WMT_PLAT_ERR_FUNC("ECHO_CONSYS: deasserting CPU SW reset, polling CHIP_ID...\n");
-		/* Deassert reset before touching CONSYS MCU registers.  Polling
-		 * CHIP_ID while bit 12 is still asserted always returns zero. */
 		CONSYS_REG_WRITE(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET,
 				 (CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET) &
 				 ~CONSYS_CPU_SW_RST_BIT) | CONSYS_CPU_SW_RST_CTRL_KEY);
-#endif
 		/*11.26M is ready now, delay 10us for mem_pd de-assert */
 		udelay(10);
 		/*enable AP bus clock : connmcu_bus_pd  API: enable_clock() ++?? */
@@ -1268,7 +1270,11 @@ INT32 mtk_wcn_consys_hw_init(void)
 #endif
 		/* Defensive: never raw-deref an unchecked of_iomap result */
 		if (!conn_reg.mcu_base || !conn_reg.ap_rgu_base ||
-		    !conn_reg.topckgen_base || !conn_reg.spm_base) {
+		    !conn_reg.topckgen_base
+#if !CONSYS_PWR_ON_OFF_API_AVAILABLE
+		    || !conn_reg.spm_base
+#endif
+		    ) {
 			WMT_PLAT_ERR_FUNC(
 				"CONSYS: MMIO map failed: mcu=0x%lx rgu=0x%lx topck=0x%lx spm=0x%lx\n",
 				(unsigned long)conn_reg.mcu_base, (unsigned long)conn_reg.ap_rgu_base,
