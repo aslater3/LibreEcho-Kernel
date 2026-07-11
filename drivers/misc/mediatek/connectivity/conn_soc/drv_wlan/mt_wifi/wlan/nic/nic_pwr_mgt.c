@@ -357,14 +357,15 @@ BOOLEAN nicpmSetDriverOwn(IN P_ADAPTER_T prAdapter)
 			break;
 		}
 		if ((i & (LP_OWN_BACK_CLR_OWN_ITERATION - 1)) == 0) {
-			/*
-			 * Diagnostic safe mode: the MT8163 WLAN HIF read path is live,
-			 * but the ownership-request write never returns on radar_puffin.
-			 * Keep this loop read-only so its software timeout can execute.
-			 */
+			/* Software get LP ownership - per 256 iterations. */
 			if (i == 0)
-				pr_err("ECHO_WLAN_HIF: skipping unsafe WHLPCR own-clear write value=0x%08lx\n",
-				       (unsigned long)WHLPCR_FW_OWN_REQ_CLR);
+				pr_err("ECHO_WLAN_HIF: before WHLPCR own-clear write value=0x%08lx base=%p cpu=%u jiffies=%lu\n",
+				       (unsigned long)WHLPCR_FW_OWN_REQ_CLR,
+				       HifInfo->HifRegBaseAddr, raw_smp_processor_id(), jiffies);
+			HAL_MCR_WR(prAdapter, MCR_WHLPCR, WHLPCR_FW_OWN_REQ_CLR);
+			if (i == 0)
+				pr_err("ECHO_WLAN_HIF: after WHLPCR own-clear write cpu=%u jiffies=%lu\n",
+				       raw_smp_processor_id(), jiffies);
 		}
 
 		/* Delay for LP engine to complete its operation. */
