@@ -2012,12 +2012,14 @@ static int HifAhbPltmProbe(IN struct platform_device *PDev)
 	DBGLOG(INIT, INFO, "mtk_wcn_wmt_wlan_reg\n");
 	{
 		MTK_WCN_WMT_WLAN_CB_INFO WmtCb;
+		INT32 i4WmtRet;
 
 		WmtCb.wlan_probe_cb = HifAhbProbe;
 		WmtCb.wlan_remove_cb = HifAhbRemove;
 		WmtCb.wlan_bus_cnt_get_cb = HifAhbBusCntGet;
 		WmtCb.wlan_bus_cnt_clr_cb = HifAhbBusCntClr;
-		mtk_wcn_wmt_wlan_reg(&WmtCb);
+		i4WmtRet = mtk_wcn_wmt_wlan_reg(&WmtCb);
+		pr_err("ECHO_RET: mtk_wcn_wmt_wlan_reg=%d\n", i4WmtRet);
 	}
 #endif /* MTK_WCN_SINGLE_MODULE */
 	return 0;
