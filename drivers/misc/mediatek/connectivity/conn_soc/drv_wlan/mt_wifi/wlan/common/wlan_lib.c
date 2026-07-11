@@ -1463,7 +1463,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 #endif
 
 		/* 4. send Wi-Fi Start command */
-		pr_err("ECHO_WLAN_STAGE: 114 firmware query-status complete cpu=%u jiffies=%lu\n",
+		pr_err("ECHO_WLAN_STAGE: 114 firmware download/ACK path complete cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
 		echoWlanHifSnapshot(prAdapter, "before-start");
 		DBGLOG(INIT, INFO, "<wifi> send Wi-Fi Start command\n");
