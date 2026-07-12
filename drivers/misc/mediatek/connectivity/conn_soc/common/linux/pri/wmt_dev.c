@@ -73,6 +73,33 @@ P_OSAL_EVENT gpRxEvent = NULL;
 
 UINT32 u4RxFlag = 0x0;
 static atomic_t gRxCount = ATOMIC_INIT(0);
+static atomic_t stp_error_generation = ATOMIC_INIT(0);
+static atomic_t stp_error_snapshot = ATOMIC_INIT(0);
+
+VOID wmt_dev_stp_error_arm(VOID)
+{
+	atomic_set(&stp_error_snapshot, atomic_read(&stp_error_generation));
+}
+
+UINT32 wmt_dev_stp_error_generation(VOID)
+{
+	return (UINT32) atomic_read(&stp_error_generation);
+}
+
+UINT32 wmt_dev_stp_error_snapshot(VOID)
+{
+	return (UINT32) atomic_read(&stp_error_snapshot);
+}
+
+VOID wmt_dev_stp_error_notify(VOID)
+{
+	P_OSAL_EVENT pEvent;
+
+	atomic_inc(&stp_error_generation);
+	pEvent = gpRxEvent;
+	if (pEvent)
+		wake_up_interruptible(&pEvent->waitQueue);
+}
 
 /* Linux UINT8 device */
 static int gWmtMajor = WMT_DEV_MAJOR;
@@ -1456,21 +1483,28 @@ VOID wmt_dev_rx_event_cb(VOID)
 	}
 }
 
-INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent)
+INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent, UINT32 error_generation)
 {
 
 	UINT32 ms = pEvent->timeoutValue;
 	long lRet = 0;
+	MTK_WCN_BOOL protocol_error;
 
 	gpRxEvent = pEvent;
 	if (0 != ms)
-		lRet = wait_event_interruptible_timeout(gpRxEvent->waitQueue, 0 != u4RxFlag, msecs_to_jiffies(ms));
+		lRet = wait_event_interruptible_timeout(gpRxEvent->waitQueue,
+				0 != u4RxFlag || error_generation != wmt_dev_stp_error_generation(),
+				msecs_to_jiffies(ms));
 	else
-		lRet = wait_event_interruptible(gpRxEvent->waitQueue, u4RxFlag != 0);
+		lRet = wait_event_interruptible(gpRxEvent->waitQueue,
+				u4RxFlag != 0 || error_generation != wmt_dev_stp_error_generation());
+
+	protocol_error = error_generation != wmt_dev_stp_error_generation();
+	if (protocol_error)
+		return -EBADMSG;
 
 	u4RxFlag = 0;
-/* gpRxEvent = NULL; */
-	if (atomic_dec_return(&gRxCount)) {
+	if (atomic_read(&gRxCount) > 0 && atomic_dec_return(&gRxCount)) {
 		WMT_ERR_FUNC("gRxCount != 0 (%d), reset it!\n", atomic_read(&gRxCount));
 		atomic_set(&gRxCount, 0);
 	}

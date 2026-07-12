@@ -153,6 +153,7 @@ typedef INT32(*IF_TX) (const PUINT8 data, const UINT32 size, PUINT32 written_siz
 typedef INT32(*EVENT_SET) (UINT8 function_type);
 typedef INT32(*EVENT_TX_RESUME) (UINT8 winspace);
 typedef INT32(*FUNCTION_STATUS) (UINT8 type, UINT8 op);
+typedef VOID(*PROTOCOL_ERROR) (VOID);
 typedef INT32(*WMT_NOTIFY_FUNC_T) (UINT32 action);
 typedef INT32(*BTM_NOTIFY_WMT_FUNC_T) (INT32);
 
@@ -169,6 +170,7 @@ typedef struct {
 	EVENT_SET cb_event_set;
 	EVENT_TX_RESUME cb_event_tx_resume;
 	FUNCTION_STATUS cb_check_funciton_status;
+	PROTOCOL_ERROR cb_protocol_error;
 } mtkstp_callback;
 
 typedef enum {
@@ -227,6 +229,8 @@ typedef struct {
 	UINT32 tx_read;		/* read ptr of tx_buf[] */
 	UINT32 tx_write;	/* write ptr of tx_buf[] */
 	UINT8 tx_buf[MTKSTP_BUFFER_SIZE];	/* output buffer of STP */
+	UINT8 *tx_linear_buf;	/* contiguous copy of a wrapped TX frame */
+	UINT32 tx_linear_buf_size;
 	UINT32 tx_start_addr[MTKSTP_SEQ_SIZE];	/* ptr of each pkt in tx_buf[] */
 	UINT32 tx_length[MTKSTP_SEQ_SIZE];	/* length of each pkt in tx_buf[] */
 	mtkstp_ring_buffer_struct ring[MTKSTP_MAX_TASK_NUM];	/* ring buffers for each function driver */

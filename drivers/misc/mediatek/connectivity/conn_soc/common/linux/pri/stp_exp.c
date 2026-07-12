@@ -45,6 +45,7 @@
 #include "osal_typedef.h"
 #include "stp_core.h"
 #include "stp_exp.h"
+#include "wmt_dev.h"
 
 /*******************************************************************************
 *                          C O N S T A N T S
@@ -241,7 +242,8 @@ INT32 stp_drv_init(VOID)
 		.cb_if_tx = mtk_wcn_sys_if_tx,
 		.cb_event_set = mtk_wcn_sys_event_set,
 		.cb_event_tx_resume = mtk_wcn_sys_event_tx_resume,
-		.cb_check_funciton_status = mtk_wcn_sys_check_function_status
+		.cb_check_funciton_status = mtk_wcn_sys_check_function_status,
+		.cb_protocol_error = wmt_dev_stp_error_notify
 	};
 
 #ifdef MTK_WCN_WMT_STP_EXP_SYMBOL_ABSTRACT

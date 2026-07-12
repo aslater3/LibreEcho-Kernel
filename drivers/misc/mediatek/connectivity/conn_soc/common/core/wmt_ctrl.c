@@ -212,6 +212,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 	P_DEV_WMT pDev = &gDevWmt;	/* single instance */
 	INT32 readLen;
 	long waitRet = -1;
+	UINT32 errorGeneration;
 	PUINT8 pBuff = (PUINT8) pWmtCtrlData->au4CtrlData[0];
 	UINT32 buffLen = pWmtCtrlData->au4CtrlData[1];
 	PUINT32 readSize = (PUINT32) pWmtCtrlData->au4CtrlData[2];
@@ -239,6 +240,8 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		return -2;
 	}
 
+	/* Use the generation armed before TX so an early response error is not missed. */
+	errorGeneration = wmt_dev_stp_error_snapshot();
 	/* sanity ok, proceeding rx operation */
 	/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
 	readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
@@ -253,11 +256,14 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		*/
 		pDev->rWmtRxWq.timeoutValue = WMT_LIB_RX_TIMEOUT;
 		/* waitRet = osal_wait_for_event_bit_timeout(&pDev->rWmtRxWq, &pDev->state, WMT_STAT_RX); */
-		waitRet = wmt_dev_rx_timeout(&pDev->rWmtRxWq);
+		waitRet = wmt_dev_rx_timeout(&pDev->rWmtRxWq, errorGeneration);
 
 		WMT_LOUD_FUNC("wmt_dev_rx_timeout returned\n");
 
-		if (0 == waitRet) {
+		if (waitRet == -EBADMSG) {
+			WMT_ERR_FUNC("STP protocol error while waiting for WMT response\n");
+			return waitRet;
+		} else if (0 == waitRet) {
 			WMT_ERR_FUNC("wmt_dev_rx_timeout: timeout,jiffies(%lu),timeoutvalue(%d)\n",
 				     jiffies, pDev->rWmtRxWq.timeoutValue);
 			return -1;
@@ -312,18 +318,27 @@ INT32 wmt_ctrl_tx_ex(const PUINT8 pData, const UINT32 size, PUINT32 writtenSize,
 	/* sanity ok, proceeding tx operation */
 	/*retval = mtk_wcn_stp_send_data(data, size, WMTDRV_TYPE_WMT); */
 	mtk_wcn_stp_flush_rx_queue(WMT_TASK_INDX);
+	wmt_dev_stp_error_arm();
 	if (bRawFlag)
 		iRet = mtk_wcn_stp_send_data_raw(pData, size, WMT_TASK_INDX);
 	else
 		iRet = mtk_wcn_stp_send_data(pData, size, WMT_TASK_INDX);
 
-	if (iRet != size) {
-		WMT_WARN_FUNC("write(%d) written(%d)\n", size, iRet);
-		osal_assert(iRet == size);
+	if (iRet < 0) {
+		WMT_ERR_FUNC("write(%d) failed(%d)\n", size, iRet);
+		wmt_dev_stp_error_notify();
+		return iRet;
 	}
+	if (iRet == 0)
+		return -EAGAIN;
 
 	if (writtenSize)
 		*writtenSize = iRet;
+	if (iRet != size) {
+		WMT_ERR_FUNC("write(%d) incomplete(%d)\n", size, iRet);
+		wmt_dev_stp_error_notify();
+		return -EIO;
+	}
 
 	return 0;
 

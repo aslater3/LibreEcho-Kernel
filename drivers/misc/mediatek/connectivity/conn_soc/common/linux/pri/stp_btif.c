@@ -59,6 +59,12 @@
 */
 unsigned long stpBtifId = 0;
 unsigned long *pBtifRef = &stpBtifId;
+static UINT32 stp_btif_tx_failure_count;
+
+static MTK_WCN_BOOL stp_btif_diag_should_log(UINT32 count)
+{
+	return count <= 4 || !(count & (count - 1));
+}
 /*******************************************************************************
 *                           P R I V A T E   D A T A
 ********************************************************************************
@@ -131,64 +137,48 @@ INT32 mtk_wcn_consys_stp_btif_rx_cb_register(MTK_WCN_BTIF_RX_CB rx_cb)
 
 INT32 mtk_wcn_consys_stp_btif_tx(const UINT8 *pBuf, const UINT32 len, UINT32 *written_len)
 {
-	INT32 retry_left = STP_BTIF_TX_RTY_LMT;
-	INT32 wr_count = 0;
-	INT32 written = 0;
+	INT32 wr_count;
 
 	osal_ftrace_print("%s|S\n", __func__);
+	if (!written_len)
+		return -EINVAL;
+
+	*written_len = 0;
+	if (!pBuf || !len)
+		return -EINVAL;
+
 	if (!stpBtifId) {
 		WMT_WARN_FUNC("NULL BTIF ID reference!\n");
-		return -1;
+		return -ENODEV;
 	}
 
-	if (len == 0) {
-		*written_len = 0;
-		WMT_INFO_FUNC("special case for STP-CORE,pbuf(%p)\n", pBuf);
-		return 0;
-	}
-
-	*written_len = 0;
-
-	if (len < 0 || len > STP_MAX_PACKAGE_ALLOWED) {
+	if (len > STP_MAX_PACKAGE_ALLOWED) {
 		WMT_WARN_FUNC("abnormal pacage length,len(%d),pid[%d/%s]\n", len, current->pid, current->comm);
-		return -2;
+		return -EINVAL;
 	}
+
 	wr_count = mtk_wcn_btif_write(stpBtifId, pBuf, len);
-
 	if (wr_count < 0) {
-		WMT_ERR_FUNC("mtk_wcn_btif_write err(%d)\n", wr_count);
-		*written_len = 0;
-		return -3;
-	}
-	if (wr_count == len) {
-		/*perfect case */
-		*written_len = wr_count;
-		osal_ftrace_print("%s|E11111\n", __func__);
+		stp_btif_tx_failure_count++;
+		if (stp_btif_diag_should_log(stp_btif_tx_failure_count))
+			WMT_ERR_FUNC("BTIF TX failure #%u,len(%u),written(%d),pid[%d/%s]\n",
+				     stp_btif_tx_failure_count, len, wr_count,
+				     current->pid, current->comm);
 		return wr_count;
 	}
 
-	while ((retry_left--) && (wr_count < len)) {
-		osal_sleep_ms(STP_BTIF_TX_RTY_DLY);
-		written = mtk_wcn_btif_write(stpBtifId, pBuf + wr_count, len - wr_count);
-		if (written < 0) {
-			WMT_ERR_FUNC("mtk_wcn_btif_write err(%d)when do recovered\n", written);
-			break;
-		}
-		wr_count += written;
+	*written_len = wr_count;
+	if (wr_count != len) {
+		stp_btif_tx_failure_count++;
+		if (stp_btif_diag_should_log(stp_btif_tx_failure_count))
+			WMT_ERR_FUNC("BTIF TX failure #%u,len(%u),written(%d),pid[%d/%s]\n",
+				     stp_btif_tx_failure_count, len, wr_count,
+				     current->pid, current->comm);
+		return -EIO;
 	}
 
-	if (wr_count == len) {
-		WMT_INFO_FUNC("recovered,len(%d),retry_left(%d)\n", len, retry_left);
-		/*recovered case */
-		*written_len = wr_count;
-		osal_ftrace_print("%s|E22222\n", __func__);
-		return wr_count;
-	}
-
-	WMT_ERR_FUNC("stp btif write fail,len(%d),written(%d),retry_left(%d),pid[%d/%s]\n",
-		     len, wr_count, retry_left, current->pid, current->comm);
-	*written_len = 0;
-	return -wr_count;
+	osal_ftrace_print("%s|E\n", __func__);
+	return wr_count;
 }
 
 INT32 mtk_wcn_consys_stp_btif_rx(UINT8 *pBuf, UINT32 len)

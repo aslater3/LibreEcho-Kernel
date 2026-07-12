@@ -41,6 +41,7 @@
 #include "wmt_lib.h"
 #include "wmt_core.h"
 #include "wmt_ctrl.h"
+#include "wmt_dev.h"
 #include "wmt_ic.h"
 #include "wmt_conf.h"
 
@@ -267,6 +268,9 @@ INT32 wmt_core_deinit(VOID)
 INT32 wmt_core_tx(const PUINT8 pData, const UINT32 size, PUINT32 writtenSize, const MTK_WCN_BOOL bRawFlag)
 {
 	INT32 iRet;
+	INT32 retry_times = 0;
+	const INT32 max_retry_times = 3;
+	const INT32 retry_delay_ms = 360;
 #if 0				/* Test using direct function call instead of wmt_ctrl() interface */
 	WMT_CTRL_DATA ctrlData;
 
@@ -284,21 +288,15 @@ INT32 wmt_core_tx(const PUINT8 pData, const UINT32 size, PUINT32 writtenSize, co
 		osal_assert(0);
 	}
 #endif
+	if (!writtenSize)
+		return -EINVAL;
+
 	iRet = wmt_ctrl_tx_ex(pData, size, writtenSize, bRawFlag);
-	if (0 == *writtenSize) {
-		INT32 retry_times = 0;
-		INT32 max_retry_times = 3;
-		INT32 retry_delay_ms = 360;
-
-		WMT_WARN_FUNC("WMT-CORE: wmt_ctrl_tx_ex failed and written ret:%d, maybe no winspace in STP layer\n",
-			      *writtenSize);
-		while ((0 == *writtenSize) && (retry_times < max_retry_times)) {
-			WMT_ERR_FUNC("WMT-CORE: retrying, wait for %d ms\n", retry_delay_ms);
-			osal_sleep_ms(retry_delay_ms);
-
-			iRet = wmt_ctrl_tx_ex(pData, size, writtenSize, bRawFlag);
-			retry_times++;
-		}
+	while (iRet == -EAGAIN && retry_times < max_retry_times) {
+		WMT_WARN_FUNC("WMT-CORE: no STP window, retrying after %d ms\n", retry_delay_ms);
+		osal_sleep_ms(retry_delay_ms);
+		iRet = wmt_ctrl_tx_ex(pData, size, writtenSize, bRawFlag);
+		retry_times++;
 	}
 	return iRet;
 }
@@ -854,6 +852,9 @@ static INT32 opfunc_pwr_on(P_WMT_OP pWmtOp)
 	unsigned long ctrlPa1;
 	unsigned long ctrlPa2;
 	INT32 retry = WMT_PWRON_RTY_DFT;
+	UINT32 errorGeneration;
+	MTK_WCN_BOOL stream_error;
+	MTK_WCN_BOOL stream_recovery_active = MTK_WCN_BOOL_FALSE;
 
 	if (DRV_STS_POWER_OFF != gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_WMT]) {
 		WMT_ERR_FUNC("WMT-CORE: already powered on, WMT DRV_STS_[0x%x]\n",
@@ -881,8 +882,10 @@ pwr_on_rty:
 	gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_WMT] = DRV_STS_POWER_ON;
 
 	/* init stp */
+	errorGeneration = wmt_dev_stp_error_generation();
 	iRet = wmt_core_stp_init();
 	if (iRet) {
+		stream_error = errorGeneration != wmt_dev_stp_error_generation();
 		WMT_ERR_FUNC("WMT-CORE: wmt_core_stp_init fail (%d)\n", iRet);
 		osal_assert(0);
 
@@ -892,6 +895,15 @@ pwr_on_rty:
 		if (iRet)
 			WMT_ERR_FUNC("WMT-CORE: opfunc_pwr_off fail during pwr_on retry\n");
 
+		if (stream_recovery_active) {
+			WMT_ERR_FUNC("WMT-CORE: stream recovery retry failed\n");
+			return -2;
+		}
+		if (stream_error) {
+			stream_recovery_active = MTK_WCN_BOOL_TRUE;
+			WMT_WARN_FUNC("WMT-CORE: stream error, restart full initialization once\n");
+			goto pwr_on_rty;
+		}
 		if (0 < retry--) {
 			WMT_INFO_FUNC("WMT-CORE: retry (%d)\n", retry);
 			goto pwr_on_rty;

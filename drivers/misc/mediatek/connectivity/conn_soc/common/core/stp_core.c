@@ -54,6 +54,15 @@ static IF_TX sys_if_tx;
 static EVENT_SET sys_event_set;
 static EVENT_TX_RESUME sys_event_tx_resume;
 static FUNCTION_STATUS sys_check_function_status;
+static PROTOCOL_ERROR sys_protocol_error;
+static UINT32 stp_tx_wrap_count;
+static UINT32 stp_tx_failure_count;
+static UINT32 stp_crc_failure_count;
+
+static MTK_WCN_BOOL stp_diag_should_log(UINT32 count)
+{
+	return count <= 4 || !(count & (count - 1));
+}
 /* kernel lib */
 /* int                g_block_tx = 0; */
 static mtkstp_context_struct stp_core_ctx = { 0 };
@@ -124,7 +133,7 @@ static INT32 stp_is_apply_powersaving(VOID);
 static MTK_WCN_BOOL stp_is_tx_res_available(UINT32 length);
 static VOID stp_add_to_tx_queue(const UINT8 *buffer, UINT32 length);
 static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type);
-static VOID stp_send_tx_queue(UINT32 txseq);
+static INT32 stp_send_tx_queue(UINT32 txseq);
 static VOID stp_send_ack(UINT8 txAck, UINT8 nak);
 static INT32 stp_process_rxack(VOID);
 static VOID stp_process_packet(VOID);
@@ -276,7 +285,10 @@ static MTK_WCN_BOOL stp_check_crc(UINT8 *buffer, UINT32 length, UINT16 crc)
 	if (checksum == crc)
 		return MTK_WCN_BOOL_TRUE;
 
-	STP_ERR_FUNC("CRC fail, length = %d, rx = %x, calc = %x \r\n", length, crc, checksum);
+	stp_crc_failure_count++;
+	if (stp_diag_should_log(stp_crc_failure_count))
+		STP_ERR_FUNC("CRC fail #%u, length=%u rx=%x calc=%x\n",
+			     stp_crc_failure_count, length, crc, checksum);
 	return MTK_WCN_BOOL_FALSE;
 
 }
@@ -721,41 +733,71 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 * RETURNS
 *  void
 *****************************************************************************/
-static VOID stp_send_tx_queue(UINT32 txseq)
+static INT32 stp_if_tx_exact(UINT8 *buffer, UINT32 length)
 {
-	UINT32 ret;
-	INT32 tx_read, tx_length, last_len;
+	UINT32 written = 0;
+	INT32 ret;
+
+	if (!buffer || !length)
+		return -EINVAL;
+	if (!sys_if_tx)
+		return -ENODEV;
+
+	ret = (*sys_if_tx)(buffer, length, &written);
+	if (ret < 0) {
+		stp_tx_failure_count++;
+		if (stp_diag_should_log(stp_tx_failure_count))
+			STP_ERR_FUNC("interface TX failure #%u: expected=%u written=%u status=%d\n",
+				     stp_tx_failure_count, length, written, ret);
+		return ret;
+	}
+	if (written != length) {
+		stp_tx_failure_count++;
+		if (stp_diag_should_log(stp_tx_failure_count))
+			STP_ERR_FUNC("interface TX failure #%u: expected=%u written=%u status=%d\n",
+				     stp_tx_failure_count, length, written, ret);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static INT32 stp_send_tx_queue(UINT32 txseq)
+{
+	UINT32 tx_read;
+	UINT32 tx_length;
+	UINT32 first_length;
+	UINT8 *tx_buffer;
+
+	if (txseq >= MTKSTP_SEQ_SIZE)
+		return -EINVAL;
 
 	tx_read = stp_core_ctx.tx_start_addr[txseq];
 	tx_length = stp_core_ctx.tx_length[txseq];
+	if (tx_read >= MTKSTP_BUFFER_SIZE || !tx_length ||
+	    tx_length > MTKSTP_BUFFER_SIZE)
+		return -EINVAL;
 
 	stp_update_tx_queue(txseq);
-
-	if (tx_read + tx_length < MTKSTP_BUFFER_SIZE) {
-
-		(*sys_if_tx) (&stp_core_ctx.tx_buf[tx_read], tx_length, &ret);
-
-		if (ret != tx_length) {
-			STP_ERR_FUNC("stp_send_tx_queue, %d/%d\n", tx_length, ret);
-			osal_assert(0);
-		}
+	first_length = MTKSTP_BUFFER_SIZE - tx_read;
+	if (tx_length <= first_length) {
+		tx_buffer = &stp_core_ctx.tx_buf[tx_read];
 	} else {
-		last_len = MTKSTP_BUFFER_SIZE - tx_read;
-		(*sys_if_tx) (&stp_core_ctx.tx_buf[tx_read], last_len, &ret);
-
-		if (ret != last_len) {
-			STP_ERR_FUNC("stp_send_tx_queue, %d/%d\n", last_len, ret);
-			osal_assert(0);
-		}
-
-		(*sys_if_tx) (&stp_core_ctx.tx_buf[0], tx_length - last_len, &ret);
-
-		if (ret != tx_length - last_len) {
-			STP_ERR_FUNC("stp_send_tx_queue, %d/%d\n", tx_length - last_len, ret);
-			osal_assert(0);
-		}
+		stp_tx_wrap_count++;
+		if (stp_diag_should_log(stp_tx_wrap_count))
+			STP_INFO_FUNC("linearized wrapped TX frame #%u: start=%u length=%u\n",
+				      stp_tx_wrap_count, tx_read, tx_length);
+		if (!stp_core_ctx.tx_linear_buf ||
+		    tx_length > stp_core_ctx.tx_linear_buf_size)
+			return -ENOMEM;
+		osal_memcpy(stp_core_ctx.tx_linear_buf,
+			    &stp_core_ctx.tx_buf[tx_read], first_length);
+		osal_memcpy(stp_core_ctx.tx_linear_buf + first_length,
+			    &stp_core_ctx.tx_buf[0], tx_length - first_length);
+		tx_buffer = stp_core_ctx.tx_linear_buf;
 	}
 
+	return stp_if_tx_exact(tx_buffer, tx_length);
 }
 
 /*****************************************************************************
@@ -811,6 +853,7 @@ INT32 stp_send_data_no_ps(UINT8 *buffer, UINT32 length, UINT8 type)
 	UINT8 *p_tx_buf = NULL;
 	UINT16 crc;
 	INT32 ret = 0;
+	INT32 tx_ret;
 
 	/* osal_lock_unsleepable_lock(&stp_core_ctx.stp_mutex); */
 	stp_ctx_lock(&stp_core_ctx);
@@ -889,19 +932,26 @@ INT32 stp_send_data_no_ps(UINT8 *buffer, UINT32 length, UINT8 type)
 					stp_core_ctx.sequence.txack,
 					stp_core_ctx.sequence.txseq, crc, PKT_DIR_TX, buffer, length);
 
-			/*Kick to UART */
-			stp_send_tx_queue(stp_core_ctx.sequence.txseq);
-			INDEX_INC(stp_core_ctx.sequence.txseq);
-			stp_core_ctx.sequence.winspace--;
+			/* Commit sequence/window state only after the complete frame is accepted. */
+			tx_ret = stp_send_tx_queue(stp_core_ctx.sequence.txseq);
+			if (tx_ret) {
+				stp_core_ctx.tx_write =
+					stp_core_ctx.tx_start_addr[stp_core_ctx.sequence.txseq];
+				stp_core_ctx.tx_length[stp_core_ctx.sequence.txseq] = 0;
+				ret = tx_ret;
+			} else {
+				INDEX_INC(stp_core_ctx.sequence.txseq);
+				stp_core_ctx.sequence.winspace--;
 
-			/*Setup the Retry Timer */
-			osal_timer_stop(&stp_core_ctx.tx_timer);
-			if (stp_core_ctx.sequence.winspace != MTKSTP_WINSIZE)
-				osal_timer_start(&stp_core_ctx.tx_timer, mtkstp_tx_timeout);
-			else
-				STP_ERR_FUNC("mtk_wcn_stp_send_data: wmt_stop_timer\n");
+				/*Setup the Retry Timer */
+				osal_timer_stop(&stp_core_ctx.tx_timer);
+				if (stp_core_ctx.sequence.winspace != MTKSTP_WINSIZE)
+					osal_timer_start(&stp_core_ctx.tx_timer, mtkstp_tx_timeout);
+				else
+					STP_ERR_FUNC("mtk_wcn_stp_send_data: wmt_stop_timer\n");
 
-			ret = (INT32) length;
+				ret = (INT32) length;
+			}
 		} else {
 			/* No winspace to send. Let caller retry */
 			STP_ERR_FUNC("%s: There is no winspace/txqueue to send !!!\n", __func__);
@@ -1212,6 +1262,7 @@ INT32 mtk_wcn_stp_init(const mtkstp_callback * const cb_func)
 	   STP has received the kind of information, and STP have the right to put it away.
 	 */
 	sys_check_function_status = cb_func->cb_check_funciton_status;
+	sys_protocol_error = cb_func->cb_protocol_error;
 
 	/* osal_unsleepable_lock_init(&stp_core_ctx.stp_mutex); */
 	stp_ctx_lock_init(&stp_core_ctx);
@@ -1224,6 +1275,12 @@ INT32 mtk_wcn_stp_init(const mtkstp_callback * const cb_func)
 	stp_core_ctx.tx_timer.timeoutHandler = stp_tx_timeout_handler;
 	stp_core_ctx.tx_timer.timeroutHandlerData = 0;
 	osal_timer_create(&stp_core_ctx.tx_timer);
+	stp_core_ctx.tx_linear_buf_size = MTKSTP_BUFFER_SIZE;
+	stp_core_ctx.tx_linear_buf = osal_malloc(stp_core_ctx.tx_linear_buf_size);
+	if (!stp_core_ctx.tx_linear_buf) {
+		ret = -ENOMEM;
+		goto ERROR;
+	}
 
 	STP_SET_BT_STK(stp_core_ctx, 0);
 	STP_SET_ENABLE(stp_core_ctx, 0);
@@ -1270,6 +1327,11 @@ INT32 mtk_wcn_stp_init(const mtkstp_callback * const cb_func)
 
 ERROR:
 	stp_psm_deinit(STP_PSM_CORE(stp_core_ctx));
+	if (stp_core_ctx.tx_linear_buf) {
+		osal_free(stp_core_ctx.tx_linear_buf);
+		stp_core_ctx.tx_linear_buf = NULL;
+		stp_core_ctx.tx_linear_buf_size = 0;
+	}
 
 RETURN:
 	return ret;
@@ -1294,10 +1356,16 @@ INT32 mtk_wcn_stp_deinit(void)
 	sys_event_set = NULL;
 	sys_event_tx_resume = NULL;
 	sys_check_function_status = NULL;
+	sys_protocol_error = NULL;
 
 	stp_dbg_deinit(g_mtkstp_dbg);
 	stp_btm_deinit(STP_BTM_CORE(stp_core_ctx));
 	stp_psm_deinit(STP_PSM_CORE(stp_core_ctx));
+	if (stp_core_ctx.tx_linear_buf) {
+		osal_free(stp_core_ctx.tx_linear_buf);
+		stp_core_ctx.tx_linear_buf = NULL;
+		stp_core_ctx.tx_linear_buf_size = 0;
+	}
 
 	for (i = 0; i < MTKSTP_MAX_TASK_NUM; i++)
 		osal_unsleepable_lock_deinit(&stp_core_ctx.ring[i].mtx);
@@ -2041,7 +2109,8 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				else
 					STP_WARN_FUNC("Now it's inband reset process and drop packet.\n");
 			} else {
-				STP_ERR_FUNC("The CRC of packet is error !!!\n");
+				if (sys_protocol_error)
+					(*sys_protocol_error)();
 				/* George FIXME: error handling mechanism shall be refined */
 				stp_change_rx_state(MTKSTP_RESYNC1);
 				stp_core_ctx.rx_counter = 0;
@@ -2416,6 +2485,7 @@ INT32 mtk_wcn_stp_send_data(const PUINT8 buffer, const UINT32 length, const UINT
 	UINT8 *p_tx_buf = NULL;
 	UINT16 crc;
 	INT32 ret = 0;
+	INT32 tx_ret;
 	MTK_WCN_BOOL is_quick_enable = MTK_WCN_BOOL_TRUE;
 
 	/* osal_buffer_dump(buffer,"tx", length, 32); */
@@ -2597,20 +2667,26 @@ DONT_MONITOR:
 					stp_core_ctx.sequence.txack,
 					stp_core_ctx.sequence.txseq, crc, PKT_DIR_TX, buffer, length);
 
-			/*Kick to UART */
-			stp_send_tx_queue(stp_core_ctx.sequence.txseq);
+			/* Commit sequence/window state only after the complete frame is accepted. */
+			tx_ret = stp_send_tx_queue(stp_core_ctx.sequence.txseq);
+			if (tx_ret) {
+				stp_core_ctx.tx_write =
+					stp_core_ctx.tx_start_addr[stp_core_ctx.sequence.txseq];
+				stp_core_ctx.tx_length[stp_core_ctx.sequence.txseq] = 0;
+				ret = tx_ret;
+			} else {
+				INDEX_INC(stp_core_ctx.sequence.txseq);
+				stp_core_ctx.sequence.winspace--;
 
-			INDEX_INC(stp_core_ctx.sequence.txseq);
-			stp_core_ctx.sequence.winspace--;
+				/*Setup the Retry Timer */
+				osal_timer_stop(&stp_core_ctx.tx_timer);
+				if (stp_core_ctx.sequence.winspace != MTKSTP_WINSIZE)
+					osal_timer_start(&stp_core_ctx.tx_timer, mtkstp_tx_timeout);
+				else
+					STP_ERR_FUNC("mtk_wcn_stp_send_data: wmt_stop_timer\n");
 
-			/*Setup the Retry Timer */
-			osal_timer_stop(&stp_core_ctx.tx_timer);
-			if (stp_core_ctx.sequence.winspace != MTKSTP_WINSIZE)
-				osal_timer_start(&stp_core_ctx.tx_timer, mtkstp_tx_timeout);
-			else
-				STP_ERR_FUNC("mtk_wcn_stp_send_data: wmt_stop_timer\n");
-
-			ret = (INT32) length;
+				ret = (INT32) length;
+			}
 		} else {
 			/*
 			   No winspace to send. Let caller retry
