@@ -105,6 +105,7 @@ struct echo_wmt_progress {
 	UINT8 reserved[3];
 	UINT32 wait_result;
 	UINT32 queue_read_result;
+	UINT8 tail_pad[4];
 };
 
 static struct echo_wmt_progress g_echo_wmt_progress;
