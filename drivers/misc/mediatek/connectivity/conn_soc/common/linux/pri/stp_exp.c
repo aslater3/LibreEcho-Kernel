@@ -170,6 +170,7 @@ VOID mtk_wcn_stp_set_if_tx_type(ENUM_STP_TX_IF_TYPE stp_if_type)
 		"UNKNOWN"
 	};
 	g_stp_if_type = stp_if_type;
+	pr_err("ECHO_STP_IF_TX: selected=%d\n", stp_if_type);
 	pr_debug("[%s] set STP_IF_TX to %s.\n", __func__, ifType[stp_if_type]);
 }
 

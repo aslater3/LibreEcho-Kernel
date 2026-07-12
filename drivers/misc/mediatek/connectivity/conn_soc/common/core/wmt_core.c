@@ -624,10 +624,14 @@ static INT32 wmt_core_stp_init(VOID)
 		osal_assert(0);
 		return -1;
 	}
+	pr_err("ECHO_STP_INIT: hifType=%u using_btif=%d\n",
+	       pctx->wmtHifConf.hifType,
+	       pctx->wmtHifConf.hifType == WMT_HIF_BTIF);
 	/* 4 <1> open stp */
 	ctrlPa1 = 0;
 	ctrlPa2 = 0;
 	iRet = wmt_core_ctrl(WMT_CTRL_STP_OPEN, &ctrlPa1, &ctrlPa2);
+	pr_err("ECHO_STP_OPEN: ret=%d hifType=%u\n", iRet, pctx->wmtHifConf.hifType);
 	if (iRet) {
 		WMT_ERR_FUNC("WMT-CORE: wmt open stp\n");
 		return -2;
@@ -842,6 +846,10 @@ static INT32 wmt_core_hw_check(VOID)
 
 static INT32 opfunc_hif_conf(P_WMT_OP pWmtOp)
 {
+	pr_err("ECHO_HIFCONF: raw type=%lu data1=%lu data2=%lu data3=%lu\n",
+	       pWmtOp->au4OpData[0], pWmtOp->au4OpData[1],
+	       pWmtOp->au4OpData[2], pWmtOp->au4OpData[3]);
+
 	if (!(pWmtOp->u4InfoBit & WMT_OP_HIF_BIT)) {
 		WMT_ERR_FUNC("WMT-CORE: no HIF_BIT in WMT_OP!\n");
 		return -1;
@@ -856,6 +864,8 @@ static INT32 opfunc_hif_conf(P_WMT_OP pWmtOp)
 	}
 
 	osal_memcpy(&gMtkWmtCtx.wmtHifConf, &pWmtOp->au4OpData[0], osal_sizeof(gMtkWmtCtx.wmtHifConf));
+	pr_err("ECHO_HIFCONF: installed type=%u BTIF=%u\n",
+	       gMtkWmtCtx.wmtHifConf.hifType, WMT_HIF_BTIF);
 	return 0;
 
 }
