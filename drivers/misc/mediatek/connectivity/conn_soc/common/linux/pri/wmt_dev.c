@@ -73,6 +73,7 @@ P_OSAL_EVENT gpRxEvent = NULL;
 
 UINT32 u4RxFlag = 0x0;
 static atomic_t gRxCount = ATOMIC_INIT(0);
+static unsigned int g_echo_wmt_rx_diag_count;
 
 /* Linux UINT8 device */
 static int gWmtMajor = WMT_DEV_MAJOR;
@@ -1444,8 +1445,14 @@ INT32 wmt_dev_proc_for_aee_remove(VOID)
 
 VOID wmt_dev_rx_event_cb(VOID)
 {
+	INT32 before = atomic_read(&gRxCount);
+	INT32 after = atomic_inc_return(&gRxCount);
+
 	u4RxFlag = 1;
-	atomic_inc(&gRxCount);
+	if (g_echo_wmt_rx_diag_count < 32 || after <= 0)
+		pr_err("ECHO_WMT_EVENT: before=%d after=%d flag=%u event=%p\n",
+		       before, after, u4RxFlag, gpRxEvent);
+	g_echo_wmt_rx_diag_count++;
 	if (NULL != gpRxEvent) {
 		/* u4RxFlag = 1; */
 		/* atomic_inc(&gRxCount); */
@@ -1458,11 +1465,18 @@ VOID wmt_dev_rx_event_cb(VOID)
 
 INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent)
 {
-
 	UINT32 ms = pEvent->timeoutValue;
 	long lRet = 0;
+	INT32 before_count;
+	INT32 after_count;
+	UINT32 before_flag;
 
 	gpRxEvent = pEvent;
+	before_count = atomic_read(&gRxCount);
+	before_flag = u4RxFlag;
+	if (g_echo_wmt_rx_diag_count < 32)
+		pr_err("ECHO_WMT_WAIT: before_count=%d flag=%u timeout=%u event=%p\n",
+		       before_count, before_flag, ms, pEvent);
 	if (0 != ms)
 		lRet = wait_event_interruptible_timeout(gpRxEvent->waitQueue, 0 != u4RxFlag, msecs_to_jiffies(ms));
 	else
@@ -1470,7 +1484,11 @@ INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent)
 
 	u4RxFlag = 0;
 /* gpRxEvent = NULL; */
-	if (atomic_dec_return(&gRxCount)) {
+	after_count = atomic_dec_return(&gRxCount);
+	if (g_echo_wmt_rx_diag_count < 32 || after_count != 0 || lRet <= 0)
+		pr_err("ECHO_WMT_WAIT: ret=%ld after_count=%d flag=%u\n",
+		       lRet, after_count, u4RxFlag);
+	if (after_count) {
 		WMT_ERR_FUNC("gRxCount != 0 (%d), reset it!\n", atomic_read(&gRxCount));
 		atomic_set(&gRxCount, 0);
 	}

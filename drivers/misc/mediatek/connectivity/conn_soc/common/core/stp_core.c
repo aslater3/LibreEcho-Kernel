@@ -106,6 +106,7 @@ static mtkstp_context_struct stp_core_ctx = { 0 };
 /*[PatchNeed]Need to calculate the timeout value*/
 static UINT32 mtkstp_tx_timeout = MTKSTP_TX_TIMEOUT;
 static mtkstp_parser_state prev_state = -1;
+static unsigned int g_echo_stp_rx_diag_count;
 
 #define CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
 #ifdef CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
@@ -681,8 +682,11 @@ static VOID stp_add_to_tx_queue(const UINT8 *buffer, UINT32 length)
 static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 {
 	UINT32 roomLeft, last_len;
+	UINT32 read_p, write_p;
 
 	osal_lock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
+	read_p = stp_core_ctx.ring[type].read_p;
+	write_p = stp_core_ctx.ring[type].write_p;
 
 	if (stp_core_ctx.ring[type].read_p <= stp_core_ctx.ring[type].write_p)
 		roomLeft = MTKSTP_BUFFER_SIZE - stp_core_ctx.ring[type].write_p + stp_core_ctx.ring[type].read_p - 1;
@@ -691,6 +695,8 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 
 	if (roomLeft < length) {
 		osal_unlock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
+		pr_err("ECHO_STP_QUEUE: DROP type=%u len=%u read=%u write=%u room=%u\n",
+		       type, length, read_p, write_p, roomLeft);
 		STP_ERR_FUNC("Queue is full !!!, type = %d\n", type);
 		osal_assert(0);
 		return -1;
@@ -707,6 +713,11 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 	}
 
 	osal_unlock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
+	if (g_echo_stp_rx_diag_count < 32)
+		pr_err("ECHO_STP_QUEUE: ACCEPT type=%u len=%u read=%u->%u write=%u->%u room=%u\n",
+		       type, length, read_p, stp_core_ctx.ring[type].read_p,
+		       write_p, stp_core_ctx.ring[type].write_p, roomLeft);
+	g_echo_stp_rx_diag_count++;
 
 	return 0;
 }

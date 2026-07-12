@@ -127,6 +127,7 @@ static INT32 wmt_ctrl_get_patch_name(P_WMT_CTRL_DATA pWmtCtrlData);
 /* GeorgeKuo: Use designated initializers described in
  * http://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Designated-Inits.html
  */
+static unsigned int g_echo_wmt_ctrl_diag_count;
 static const WMT_CTRL_FUNC wmt_ctrl_func[] = {
 	[WMT_CTRL_HW_PWR_OFF] = wmt_ctrl_hw_pwr_off,
 	[WMT_CTRL_HW_PWR_ON] = wmt_ctrl_hw_pwr_on,
@@ -239,9 +240,14 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		return -2;
 	}
 
+	if (g_echo_wmt_ctrl_diag_count < 32)
+		pr_err("ECHO_WMT_RX: enter buff=%u state=0x%lx\n", buffLen,
+		       pDev->state.data);
 	/* sanity ok, proceeding rx operation */
 	/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
 	readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
+	if (g_echo_wmt_ctrl_diag_count < 32)
+		pr_err("ECHO_WMT_RX: initial_read=%d\n", readLen);
 
 	while (readLen == 0) {	/* got nothing, wait for STP's signal */
 		WMT_LOUD_FUNC("before wmt_dev_rx_timeout\n");
@@ -256,6 +262,8 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		waitRet = wmt_dev_rx_timeout(&pDev->rWmtRxWq);
 
 		WMT_LOUD_FUNC("wmt_dev_rx_timeout returned\n");
+		if (g_echo_wmt_ctrl_diag_count < 32)
+			pr_err("ECHO_WMT_RX: wait_ret=%ld\n", waitRet);
 
 		if (0 == waitRet) {
 			WMT_ERR_FUNC("wmt_dev_rx_timeout: timeout,jiffies(%lu),timeoutvalue(%d)\n",
@@ -275,6 +283,10 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 #else
 			WMT_WARN_FUNC("wmt_ctrl_rx be signaled, but no rx data(%ld)\n", waitRet);
 #endif
+
+		if (g_echo_wmt_ctrl_diag_count < 32 || readLen == 0)
+			pr_err("ECHO_WMT_RX: post_wait_read=%d\n", readLen);
+		g_echo_wmt_ctrl_diag_count++;
 
 		WMT_DBG_FUNC("readLen(%d)\n", readLen);
 	}
