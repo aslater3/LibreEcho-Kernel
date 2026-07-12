@@ -1736,8 +1736,10 @@ static irqreturn_t HifDmaISR(IN int Irq, IN void *Arg)
 static int HifAhbProbe(VOID)
 {
 	int Ret = 0;
+	int i4ProbeRet;
 
-	DBGLOG(INIT, INFO, "HifAhbProbe()\n");
+	pr_err("ECHO_RET: HifAhbProbe enter cpu=%u jiffies=%lu\n",
+	       raw_smp_processor_id(), jiffies);
 
 	/* ASSERT(dev); */
 
@@ -1777,18 +1779,22 @@ static int HifAhbProbe(VOID)
 	}
 
 #if (CONF_HIF_DEV_MISC == 1)
-	if (pfWlanProbe((PVOID) &MtkAhbDriver.this_device) != WLAN_STATUS_SUCCESS) {
+	i4ProbeRet = pfWlanProbe((PVOID) &MtkAhbDriver.this_device);
 #else
-	if (pfWlanProbe((PVOID) &HifAhbPDev->dev) != WLAN_STATUS_SUCCESS) {
+	i4ProbeRet = pfWlanProbe((PVOID) &HifAhbPDev->dev);
 #endif /* CONF_HIF_DEV_MISC */
-		/* DBGLOG(INIT, INFO, ("pfWlanProbe fail!call pfWlanRemove()\n")); */
-
+	pr_err("ECHO_RET: pfWlanProbe=%d cpu=%u jiffies=%lu\n",
+	       i4ProbeRet, raw_smp_processor_id(), jiffies);
+	if (i4ProbeRet != WLAN_STATUS_SUCCESS) {
+		pr_err("ECHO_RET: pfWlanProbe failure, invoking remove cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		pfWlanRemove();
 		Ret = -1;
 	}
 
+	pr_err("ECHO_RET: HifAhbProbe return=%d cpu=%u jiffies=%lu\n",
+	       Ret, raw_smp_processor_id(), jiffies);
 	return Ret;
-
 }
 
 /*----------------------------------------------------------------------------*/
