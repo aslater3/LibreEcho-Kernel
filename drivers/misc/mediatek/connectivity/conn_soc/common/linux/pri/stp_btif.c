@@ -157,14 +157,14 @@ INT32 mtk_wcn_consys_stp_btif_tx(const UINT8 *pBuf, const UINT32 len, UINT32 *wr
 
 	*written_len = 0;
 
-	pr_err("ECHO_BTIF_TX: enter id=%lx len=%u\n", stpBtifId, len);
-
 	if (len < 0 || len > STP_MAX_PACKAGE_ALLOWED) {
 		WMT_WARN_FUNC("abnormal pacage length,len(%d),pid[%d/%s]\n", len, current->pid, current->comm);
 		return -2;
 	}
 	wr_count = mtk_wcn_btif_write(stpBtifId, pBuf, len);
-	pr_err("ECHO_BTIF_TX: first write=%d\n", wr_count);
+
+	if (wr_count < 0 || wr_count == 0)
+		pr_err("ECHO_BTIF_TX: write=%d len=%u\n", wr_count, len);
 
 	if (wr_count < 0) {
 		WMT_ERR_FUNC("mtk_wcn_btif_write err(%d)\n", wr_count);
@@ -181,8 +181,9 @@ INT32 mtk_wcn_consys_stp_btif_tx(const UINT8 *pBuf, const UINT32 len, UINT32 *wr
 	while ((retry_left--) && (wr_count < len)) {
 		osal_sleep_ms(STP_BTIF_TX_RTY_DLY);
 		written = mtk_wcn_btif_write(stpBtifId, pBuf + wr_count, len - wr_count);
-		pr_err("ECHO_BTIF_TX: retry=%d offset=%d requested=%u ret=%d\n",
-		       retry_left, wr_count, len - wr_count, written);
+		if (written <= 0)
+			pr_err("ECHO_BTIF_TX: retry offset=%d requested=%u ret=%d\n",
+			       wr_count, len - wr_count, written);
 		if (written < 0) {
 			WMT_ERR_FUNC("mtk_wcn_btif_write err(%d)when do recovered\n", written);
 			break;
