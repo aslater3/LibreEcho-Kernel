@@ -38,6 +38,8 @@
 #include "osal_typedef.h"
 #include "mtk_wcn_consys_hw.h"
 #include "stp_dbg.h"
+#include "wmt_plat.h"
+#include <mt-plat/mtk_ram_console.h>
 
 #define CFG_WMT_WAKELOCK_SUPPORT 1
 
@@ -929,32 +931,48 @@ EXPORT_SYMBOL(wmt_plat_read_cpupcr);
 
 VOID wmt_plat_dump_ap_state(const char *pszStage)
 {
-	UINT32 pwr, ack, ack_s, rst, axi_en, axi_sta;
-	UINT32 infra0_sta, infra1_sta, osc;
+	UINT32 pwr, ack, rst, axi_en, axi_sta;
 
 	if (!conn_reg.spm_base || !conn_reg.ap_rgu_base || !conn_reg.topckgen_base) {
-		WMT_PLAT_ERR_FUNC("ECHO_AP_STATE: %s bases unavailable\n", pszStage);
+		pr_err("ECHO_AP: %s bases unavailable\n", pszStage);
+		aee_rr_rec_fiq_step(0xF0);
 		return;
 	}
 
+	pr_err("ECHO_AP: %s begin\n", pszStage);
+	aee_rr_rec_fiq_step(0xF1);
+	pr_err("ECHO_AP: before power status\n");
 	pwr = CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET);
-	ack = CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET);
-	ack_s = CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_S_OFFSET);
-	rst = CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET);
-	axi_en = CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET);
-	axi_sta = CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_STA1_OFFSET);
-	/* infracfg is the second 0x1000 window in the DT-mapped 0x2000 region. */
-	infra0_sta = CONSYS_REG_READ(conn_reg.topckgen_base + 0x1090);
-	infra1_sta = CONSYS_REG_READ(conn_reg.topckgen_base + 0x1094);
-	osc = CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_AP2CONN_OSC_EN_OFFSET);
+	aee_rr_rec_fiq_step(0xF2);
+	pr_err("ECHO_AP: power status=0x%08x\n", pwr);
 
-	WMT_PLAT_ERR_FUNC("ECHO_AP_STATE: %s pwr=0x%08x ack=0x%08x ack_s=0x%08x "
-			  "rst=0x%08x axi_en=0x%08x axi_sta=0x%08x "
-			  "infra0_sta=0x%08x infra1_sta=0x%08x osc=0x%08x "
-			  "pmic_conn=%u wifi_dma=%u\n",
-			  pszStage, pwr, ack, ack_s, rst, axi_en, axi_sta,
-			  infra0_sta, infra1_sta, osc,
-			  !!(infra0_sta & BIT(3)), !!(infra1_sta & BIT(18)));
+	aee_rr_rec_fiq_step(0xF3);
+	pr_err("ECHO_AP: before power ack\n");
+	ack = CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET);
+	aee_rr_rec_fiq_step(0xF4);
+	pr_err("ECHO_AP: power ack=0x%08x\n", ack);
+
+	aee_rr_rec_fiq_step(0xF5);
+	pr_err("ECHO_AP: before AP reset status\n");
+	rst = CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET);
+	aee_rr_rec_fiq_step(0xF6);
+	pr_err("ECHO_AP: AP reset status=0x%08x\n", rst);
+
+	aee_rr_rec_fiq_step(0xF7);
+	pr_err("ECHO_AP: before AXI protection enable\n");
+	axi_en = CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET);
+	aee_rr_rec_fiq_step(0xF8);
+	pr_err("ECHO_AP: AXI protection enable=0x%08x\n", axi_en);
+
+	aee_rr_rec_fiq_step(0xF9);
+	pr_err("ECHO_AP: before AXI protection status\n");
+	axi_sta = CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_STA1_OFFSET);
+	aee_rr_rec_fiq_step(0xFA);
+	pr_err("ECHO_AP: AXI protection status=0x%08x\n", axi_sta);
+
+	aee_rr_rec_fiq_step(0xFB);
+	pr_err("ECHO_AP: %s complete pwr=0x%08x ack=0x%08x rst=0x%08x axi_en=0x%08x axi_sta=0x%08x\n",
+	       pszStage, pwr, ack, rst, axi_en, axi_sta);
 }
 EXPORT_SYMBOL(wmt_plat_dump_ap_state);
 
