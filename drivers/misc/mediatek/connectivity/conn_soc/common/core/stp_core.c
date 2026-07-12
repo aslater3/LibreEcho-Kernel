@@ -107,6 +107,7 @@ static mtkstp_context_struct stp_core_ctx = { 0 };
 static UINT32 mtkstp_tx_timeout = MTKSTP_TX_TIMEOUT;
 static mtkstp_parser_state prev_state = -1;
 static unsigned int g_echo_stp_rx_diag_count;
+static unsigned int g_echo_stp_crc_diag_count;
 
 #define CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
 #ifdef CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
@@ -2052,6 +2053,18 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				else
 					STP_WARN_FUNC("Now it's inband reset process and drop packet.\n");
 			} else {
+				if (g_echo_stp_crc_diag_count < 2) {
+					pr_err("ECHO_STP_CRC: type=%u len=%u rx_crc=%04x calc=%04x bytes=%02x %02x %02x %02x %02x %02x %02x %02x\n",
+					       stp_core_ctx.parser.type,
+					       stp_core_ctx.parser.length,
+					       stp_core_ctx.parser.crc,
+					       osal_crc16(stp_core_ctx.rx_buf, stp_core_ctx.rx_counter),
+					       stp_core_ctx.rx_buf[0], stp_core_ctx.rx_buf[1],
+					       stp_core_ctx.rx_buf[2], stp_core_ctx.rx_buf[3],
+					       stp_core_ctx.rx_buf[4], stp_core_ctx.rx_buf[5],
+					       stp_core_ctx.rx_buf[6], stp_core_ctx.rx_buf[7]);
+					g_echo_stp_crc_diag_count++;
+				}
 				STP_ERR_FUNC("The CRC of packet is error !!!\n");
 				/* George FIXME: error handling mechanism shall be refined */
 				stp_change_rx_state(MTKSTP_RESYNC1);
