@@ -202,11 +202,21 @@ static UINT8 echo_stp_frame_byte(const UINT8 *buffer, UINT32 length,
 	return (index == (length + 4)) ? (UINT8)(crc & 0xff) : (UINT8)(crc >> 8);
 }
 
+static UINT32 echo_stp_pack_be32(const UINT8 *buffer)
+{
+	return ((UINT32)buffer[0] << 24) | ((UINT32)buffer[1] << 16) |
+		((UINT32)buffer[2] << 8) | (UINT32)buffer[3];
+}
+
 static VOID echo_capture_crc_failure(UINT8 *buffer, UINT32 length,
 				     UINT16 received_crc, UINT16 calculated_crc)
 {
 	UINT8 header[4];
+	UINT8 frame_meta[16] = { 0 };
+	UINT8 btif_meta[16] = { 0 };
 	UINT32 frame_len = length + 6;
+	UINT32 copy_len;
+	UINT32 tail_offset;
 	UINT32 i;
 	struct echo_patch_position patch;
 
@@ -280,10 +290,47 @@ static VOID echo_capture_crc_failure(UINT8 *buffer, UINT32 length,
 		   sizeof(g_echo_btif_tail));
 	osal_memcpy(g_echo_stp_crc_snapshot.btif_previous, g_echo_btif_previous,
 		   sizeof(g_echo_btif_previous));
+
+	copy_len = g_echo_stp_crc_snapshot.frame_capture_len < sizeof(frame_meta) ?
+		g_echo_stp_crc_snapshot.frame_capture_len : sizeof(frame_meta);
+	if (copy_len)
+		osal_memcpy(frame_meta, g_echo_stp_crc_snapshot.frame, copy_len);
+	copy_len = g_echo_btif_tail_len < sizeof(btif_meta) ?
+		g_echo_btif_tail_len : sizeof(btif_meta);
+	tail_offset = g_echo_btif_tail_len - copy_len;
+	if (copy_len)
+		osal_memcpy(btif_meta, g_echo_btif_tail + tail_offset, copy_len);
+
 	aee_sram_fiq_save_bin((const char *)&g_echo_stp_crc_snapshot,
 			      sizeof(g_echo_stp_crc_snapshot));
 	aee_rr_rec_fiq_step(0xe8);
-	STP_ERR_FUNC("ECHO_STP_CRC_SNAPSHOT\n");
+	STP_ERR_FUNC("ECHO_STP_CRC_META ps=%u tc=%u s=%u t=%u a=%u es=%u dl=%u fl=%u rx=%04x cc=%04x p=%u f=%u ds=%u off=%u pl=%u rem=%u fst=%u lst=%u wa=%u cb=%u/%u frn=%u btn=%u fr=%08x%08x%08x%08x bt=%08x%08x%08x%08x\n",
+		     (UINT32)g_echo_stp_crc_snapshot.parser_state,
+		     (UINT32)g_echo_stp_crc_snapshot.transaction_class,
+		     (UINT32)g_echo_stp_crc_snapshot.parser_seq,
+		     (UINT32)g_echo_stp_crc_snapshot.parser_type,
+		     (UINT32)g_echo_stp_crc_snapshot.parser_ack,
+		     (UINT32)g_echo_stp_crc_snapshot.expected_seq,
+		     (UINT32)g_echo_stp_crc_snapshot.declared_payload_len,
+		     (UINT32)g_echo_stp_crc_snapshot.assembled_frame_len,
+		     (UINT32)g_echo_stp_crc_snapshot.received_crc,
+		     (UINT32)g_echo_stp_crc_snapshot.calculated_crc,
+		     (UINT32)patch.patch_index, (UINT32)patch.fragment_index,
+		     patch.download_seq, patch.file_offset, patch.fragment_len,
+		     patch.bytes_remaining, (UINT32)patch.first_fragment,
+		     (UINT32)patch.last_fragment, (UINT32)patch.awaiting_ack,
+		     g_echo_stp_crc_snapshot.last_callback_len,
+		     g_echo_stp_crc_snapshot.previous_callback_len,
+		     (UINT32)g_echo_stp_crc_snapshot.frame_capture_len,
+		     (UINT32)g_echo_stp_crc_snapshot.btif_tail_len,
+		     echo_stp_pack_be32(frame_meta),
+		     echo_stp_pack_be32(frame_meta + 4),
+		     echo_stp_pack_be32(frame_meta + 8),
+		     echo_stp_pack_be32(frame_meta + 12),
+		     echo_stp_pack_be32(btif_meta),
+		     echo_stp_pack_be32(btif_meta + 4),
+		     echo_stp_pack_be32(btif_meta + 8),
+		     echo_stp_pack_be32(btif_meta + 12));
 }
 
 static VOID echo_btif_capture(UINT8 *buffer, UINT32 length)
