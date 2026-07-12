@@ -2313,8 +2313,31 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 			if (MTK_WCN_BOOL_TRUE == wmt_plat_dump_BGF_irq_status())
 				wmt_plat_BGF_irq_dump_status();
 #endif
-			if (STP_IS_READY(stp_core_ctx))
-				mtk_wcn_stp_dbg_dump_package();
+			/*
+			 * The legacy packet dump can block in btif_log_buf_dmp_out()
+			 * before an assertion payload is consumed. Preserve the first
+			 * bounded payload bytes and let the FW-message handler continue.
+			 */
+			if (stp_core_ctx.rx_counter == 0) {
+				UINT32 echo_fw_len = stp_core_ctx.parser.length;
+				UINT32 echo_fw_idx;
+				char echo_fw_msg[33];
+
+				if (echo_fw_len > (UINT32) i)
+					echo_fw_len = (UINT32) i;
+				if (echo_fw_len > sizeof(echo_fw_msg) - 1)
+					echo_fw_len = sizeof(echo_fw_msg) - 1;
+				for (echo_fw_idx = 0; echo_fw_idx < echo_fw_len; echo_fw_idx++) {
+					UINT8 byte = p_data[echo_fw_idx];
+
+					echo_fw_msg[echo_fw_idx] =
+						(byte >= 0x20 && byte <= 0x7e) ? byte : '.';
+				}
+				echo_fw_msg[echo_fw_len] = '\0';
+				pr_err("ECHO_STP_FW_MSG len=%u rx=%u avail=%d type=%u data=\"%s\"\n",
+				       stp_core_ctx.parser.length, stp_core_ctx.rx_counter, i,
+				       stp_core_ctx.parser.type, echo_fw_msg);
+			}
 
 			STP_SET_READY(stp_core_ctx, 0);
 			/*stp inband reset */
@@ -2386,14 +2409,12 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 					 && (stp_core_ctx.parser.type == INFO_TASK_INDX)) {
 					stp_dbg_log_pkt(g_mtkstp_dbg, STP_DBG_FW_LOG, STP_TASK_INDX, 5, 0, 0, 0,
 							(stp_core_ctx.rx_counter + 1), stp_core_ctx.rx_buf);
-					mtk_wcn_stp_dbg_dump_package();
 				}
 				/*Normal mode: whole chip reset */
 				else {
 					/*Aee Kernel Warning Message Shown First */
 					/* (*sys_dbg_assert_aee)("[MT662x]f/w Assert", stp_core_ctx.rx_buf); */
 					mtk_wcn_stp_coredump_start_ctrl(0);
-					mtk_wcn_stp_dbg_dump_package();
 
 					osal_dbg_assert_aee(stp_core_ctx.rx_buf, stp_core_ctx.rx_buf);
 					/*Whole Chip Reset Procedure Invoke */
