@@ -241,6 +241,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 	/* Arm before checking the queue so arrival cannot race waiter setup. */
 	wmt_dev_rx_wait_arm(&pDev->rWmtRxWq);
 	readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
+	echo_wmt_progress_queue_result(readLen);
 	echo_wmt_progress_wmt_read(readLen);
 
 	while (readLen == 0) {	/* got nothing, wait for STP's signal */
@@ -258,17 +259,24 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		WMT_LOUD_FUNC("wmt_dev_rx_timeout returned\n");
 
 		if (0 == waitRet) {
+			echo_wmt_progress_stage(0xe5);
 			WMT_ERR_FUNC("wmt_dev_rx_timeout: timeout,jiffies(%lu),timeoutvalue(%d)\n",
 				     jiffies, pDev->rWmtRxWq.timeoutValue);
 			return -1;
 		} else if (waitRet < 0) {
+			echo_wmt_progress_stage(0xe5);
 			WMT_WARN_FUNC("wmt_dev_rx_timeout: interrupted by signal (%ld)\n", waitRet);
 			return waitRet;
 		}
 		WMT_DBG_FUNC("wmt_dev_rx_timeout, iRet(%ld)\n", waitRet);
 		/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
 		readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
+		echo_wmt_progress_queue_result(readLen);
 		echo_wmt_progress_wmt_read(readLen);
+		if (readLen != 0)
+			echo_wmt_progress_stage(0xe6);
+		else
+			echo_wmt_progress_stage(0xe7);
 
 		if (0 == readLen)
 #ifdef CONFIG_MTK_WIFI_LOGGING_REDUCTION
@@ -286,6 +294,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		*readSize = readLen;
 
 	wmt_dev_rx_wait_disarm(&pDev->rWmtRxWq, "initial-read");
+	echo_wmt_progress_stage(0xe8);
 	return 0;
 
 }

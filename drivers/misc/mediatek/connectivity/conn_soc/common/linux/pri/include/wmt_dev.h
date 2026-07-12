@@ -30,6 +30,9 @@ extern VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent);
 extern VOID wmt_dev_rx_wait_disarm(P_OSAL_EVENT pEvent, const char *reason);
 extern INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent);
 
+VOID echo_wmt_progress_stage(UINT8 stage);
+VOID echo_wmt_progress_wait_result(INT32 result);
+VOID echo_wmt_progress_queue_result(INT32 result);
 VOID echo_wmt_progress_tx(UINT32 len);
 VOID echo_wmt_progress_btif_rx(UINT32 len, UINT8 parser_state);
 VOID echo_wmt_progress_stp_accept(UINT32 len, UINT8 parser_state);

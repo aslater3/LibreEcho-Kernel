@@ -103,6 +103,8 @@ struct echo_wmt_progress {
 	UINT8 expected_seq;
 	UINT8 cpu;
 	UINT8 reserved[3];
+	UINT32 wait_result;
+	UINT32 queue_read_result;
 };
 
 static struct echo_wmt_progress g_echo_wmt_progress;
@@ -111,9 +113,24 @@ static VOID echo_wmt_progress_checkpoint(UINT8 step)
 {
 	g_echo_wmt_progress.magic = 0x57505431;
 	g_echo_wmt_progress.cpu = smp_processor_id();
-	aee_rr_rec_fiq_step(step);
 	aee_sram_fiq_save_bin((const char *)&g_echo_wmt_progress,
 			      sizeof(g_echo_wmt_progress));
+	aee_rr_rec_fiq_step(step);
+}
+
+VOID echo_wmt_progress_stage(UINT8 stage)
+{
+	echo_wmt_progress_checkpoint(stage);
+}
+
+VOID echo_wmt_progress_wait_result(INT32 result)
+{
+	g_echo_wmt_progress.wait_result = (UINT32)result;
+}
+
+VOID echo_wmt_progress_queue_result(INT32 result)
+{
+	g_echo_wmt_progress.queue_read_result = (UINT32)result;
 }
 
 VOID echo_wmt_progress_tx(UINT32 len)
@@ -1587,6 +1604,8 @@ INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent)
 	else
 		lRet = wait_event_interruptible(pEvent->waitQueue, u4RxFlag != 0);
 
+	echo_wmt_progress_wait_result(lRet);
+	echo_wmt_progress_stage(0xe3);
 	wmt_dev_rx_wait_disarm(pEvent, lRet > 0 ? "wake" : "timeout-or-error");
 	return lRet;
 }
