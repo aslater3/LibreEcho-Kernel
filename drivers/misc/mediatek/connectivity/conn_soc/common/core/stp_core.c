@@ -18,6 +18,7 @@
 #include "btm_core.h"
 #include "stp_dbg.h"
 #include "stp_btif.h"
+#include "wmt_dev.h"
 
 #define PFX                         "[STP] "
 #define STP_LOG_DBG                  4
