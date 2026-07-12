@@ -109,6 +109,8 @@ struct echo_wmt_progress {
 };
 
 static struct echo_wmt_progress g_echo_wmt_progress;
+static struct echo_patch_position g_echo_patch_position;
+static DEFINE_SPINLOCK(gEchoPatchLock);
 
 static VOID echo_wmt_progress_checkpoint(UINT8 step)
 {
@@ -182,6 +184,54 @@ VOID echo_wmt_progress_wmt_read(UINT32 len)
 	g_echo_wmt_progress.waiting = 0;
 	if ((g_echo_wmt_progress.wmt_read_count & 31) == 0)
 		echo_wmt_progress_checkpoint(0xe4);
+}
+
+VOID echo_wmt_patch_before(UINT16 patch_index, UINT16 fragment_index,
+			   UINT32 download_seq, UINT32 file_offset,
+			   UINT32 fragment_len, UINT32 bytes_remaining,
+			   UINT8 first_fragment, UINT8 last_fragment,
+			   const UINT8 *name)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&gEchoPatchLock, flags);
+	g_echo_patch_position.patch_index = patch_index;
+	g_echo_patch_position.fragment_index = fragment_index;
+	g_echo_patch_position.download_seq = download_seq;
+	g_echo_patch_position.file_offset = file_offset;
+	g_echo_patch_position.fragment_len = fragment_len;
+	g_echo_patch_position.bytes_remaining = bytes_remaining;
+	g_echo_patch_position.first_fragment = first_fragment;
+	g_echo_patch_position.last_fragment = last_fragment;
+	g_echo_patch_position.awaiting_ack = 1;
+	g_echo_patch_position.reserved = 0;
+	osal_memset(g_echo_patch_position.name, 0,
+		   sizeof(g_echo_patch_position.name));
+	if (name)
+		osal_memcpy(g_echo_patch_position.name, name,
+			    sizeof(g_echo_patch_position.name));
+	spin_unlock_irqrestore(&gEchoPatchLock, flags);
+}
+
+VOID echo_wmt_patch_ack(VOID)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&gEchoPatchLock, flags);
+	g_echo_patch_position.awaiting_ack = 0;
+	spin_unlock_irqrestore(&gEchoPatchLock, flags);
+}
+
+VOID echo_wmt_patch_snapshot(struct echo_patch_position *position)
+{
+	unsigned long flags;
+
+	if (!position)
+		return;
+	spin_lock_irqsave(&gEchoPatchLock, flags);
+	osal_memcpy(position, &g_echo_patch_position,
+		   sizeof(g_echo_patch_position));
+	spin_unlock_irqrestore(&gEchoPatchLock, flags);
 }
 
 VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent)

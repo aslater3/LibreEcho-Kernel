@@ -19,6 +19,8 @@
 #include "stp_dbg.h"
 #include "stp_btif.h"
 #include "wmt_dev.h"
+#include <linux/atomic.h>
+#include <mt-plat/mtk_ram_console.h>
 
 #define PFX                         "[STP] "
 #define STP_LOG_DBG                  4
@@ -108,6 +110,66 @@ static mtkstp_context_struct stp_core_ctx = { 0 };
 static UINT32 mtkstp_tx_timeout = MTKSTP_TX_TIMEOUT;
 static mtkstp_parser_state prev_state = -1;
 
+#define ECHO_STP_CRC_MAGIC 0x45534331
+#define ECHO_STP_CRC_VERSION 1
+#define ECHO_STP_FRAME_CAPTURE_BYTES 48
+#define ECHO_STP_FRAME_PREFIX_BYTES 16
+#define ECHO_STP_FRAME_SUFFIX_BYTES 32
+#define ECHO_STP_BTIF_TAIL_BYTES 32
+#define ECHO_STP_BTIF_PREV_BYTES 16
+
+struct echo_stp_crc_snapshot {
+	UINT32 magic;
+	UINT32 version;
+	UINT8 parser_state;
+	UINT8 transaction_class;
+	UINT8 parser_seq;
+	UINT8 parser_type;
+	UINT8 parser_ack;
+	UINT8 expected_seq;
+	UINT8 last_accepted_seq;
+	UINT8 last_accepted_type;
+	UINT16 declared_payload_len;
+	UINT16 assembled_frame_len;
+	UINT16 received_crc;
+	UINT16 calculated_crc;
+	UINT16 last_accepted_len;
+	UINT16 frame_capture_len;
+	UINT8 frame_truncated;
+	UINT8 frame_prefix_len;
+	UINT8 frame_suffix_len;
+	UINT8 reserved0;
+	UINT32 btif_rx_bytes;
+	UINT32 stp_rx_bytes;
+	UINT32 accepted_frames;
+	UINT32 crc_failures;
+	UINT32 last_callback_len;
+	UINT32 previous_callback_len;
+	UINT16 btif_tail_len;
+	UINT16 btif_previous_len;
+	struct echo_patch_position patch;
+	UINT8 frame[ECHO_STP_FRAME_CAPTURE_BYTES];
+	UINT8 btif_tail[ECHO_STP_BTIF_TAIL_BYTES];
+	UINT8 btif_previous[ECHO_STP_BTIF_PREV_BYTES];
+	UINT8 reserved1[4];
+};
+
+static atomic_t echo_crc_snapshot_taken = ATOMIC_INIT(0);
+static struct echo_stp_crc_snapshot g_echo_stp_crc_snapshot __aligned(8);
+static UINT8 g_echo_btif_tail[ECHO_STP_BTIF_TAIL_BYTES];
+static UINT8 g_echo_btif_previous[ECHO_STP_BTIF_PREV_BYTES];
+static UINT16 g_echo_btif_tail_len;
+static UINT16 g_echo_btif_previous_len;
+static UINT32 g_echo_btif_last_callback_len;
+static UINT32 g_echo_btif_previous_callback_len;
+static UINT32 g_echo_btif_rx_bytes;
+static UINT32 g_echo_stp_rx_bytes;
+static UINT32 g_echo_stp_accepted_frames;
+static UINT32 g_echo_stp_crc_failures;
+static UINT8 g_echo_last_accepted_seq;
+static UINT8 g_echo_last_accepted_type;
+static UINT16 g_echo_last_accepted_len;
+
 #define CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
 #ifdef CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
 static MTKSTP_DBG_T *g_mtkstp_dbg;
@@ -129,6 +191,123 @@ static VOID stp_send_tx_queue(UINT32 txseq);
 static VOID stp_send_ack(UINT8 txAck, UINT8 nak);
 static INT32 stp_process_rxack(VOID);
 static VOID stp_process_packet(VOID);
+
+static UINT8 echo_stp_frame_byte(const UINT8 *buffer, UINT32 length,
+				const UINT8 *header, UINT16 crc, UINT32 index)
+{
+	if (index < 4)
+		return header[index];
+	if (index < (length + 4))
+		return buffer[index - 4];
+	return (index == (length + 4)) ? (UINT8)(crc & 0xff) : (UINT8)(crc >> 8);
+}
+
+static VOID echo_capture_crc_failure(UINT8 *buffer, UINT32 length,
+				     UINT16 received_crc, UINT16 calculated_crc)
+{
+	UINT8 header[4];
+	UINT32 frame_len = length + 6;
+	UINT32 i;
+	struct echo_patch_position patch;
+
+	if (atomic_cmpxchg(&echo_crc_snapshot_taken, 0, 1) != 0)
+		return;
+
+	osal_memset(&g_echo_stp_crc_snapshot, 0,
+		   sizeof(g_echo_stp_crc_snapshot));
+	header[0] = 0x80 | ((stp_core_ctx.parser.seq & 0x07) << 3) |
+		(stp_core_ctx.parser.ack & 0x07);
+	header[1] = (stp_core_ctx.parser.type << 4) | ((length >> 8) & 0x0f);
+	header[2] = length & 0xff;
+	header[3] = (header[0] + header[1] + header[2]) & 0xff;
+
+	g_echo_stp_crc_snapshot.magic = ECHO_STP_CRC_MAGIC;
+	g_echo_stp_crc_snapshot.version = ECHO_STP_CRC_VERSION;
+	g_echo_stp_crc_snapshot.parser_state = stp_core_ctx.parser.state;
+	g_echo_stp_crc_snapshot.parser_seq = stp_core_ctx.parser.seq;
+	g_echo_stp_crc_snapshot.parser_type = stp_core_ctx.parser.type;
+	g_echo_stp_crc_snapshot.parser_ack = stp_core_ctx.parser.ack;
+	g_echo_stp_crc_snapshot.expected_seq = stp_core_ctx.sequence.expected_rxseq;
+	g_echo_stp_crc_snapshot.last_accepted_seq = g_echo_last_accepted_seq;
+	g_echo_stp_crc_snapshot.last_accepted_type = g_echo_last_accepted_type;
+	g_echo_stp_crc_snapshot.declared_payload_len = length;
+	g_echo_stp_crc_snapshot.assembled_frame_len = frame_len;
+	g_echo_stp_crc_snapshot.received_crc = received_crc;
+	g_echo_stp_crc_snapshot.calculated_crc = calculated_crc;
+	g_echo_stp_crc_snapshot.last_accepted_len = g_echo_last_accepted_len;
+	g_echo_stp_crc_snapshot.btif_rx_bytes = g_echo_btif_rx_bytes;
+	g_echo_stp_crc_snapshot.stp_rx_bytes = g_echo_stp_rx_bytes;
+	g_echo_stp_crc_snapshot.accepted_frames = g_echo_stp_accepted_frames;
+	g_echo_stp_crc_snapshot.crc_failures = g_echo_stp_crc_failures;
+	g_echo_stp_crc_snapshot.last_callback_len = g_echo_btif_last_callback_len;
+	g_echo_stp_crc_snapshot.previous_callback_len = g_echo_btif_previous_callback_len;
+
+	echo_wmt_patch_snapshot(&patch);
+	g_echo_stp_crc_snapshot.patch = patch;
+	if (stp_core_ctx.parser.type == WMT_TASK_INDX) {
+		if (patch.awaiting_ack)
+			g_echo_stp_crc_snapshot.transaction_class = 1;
+		else if (length == 0)
+			g_echo_stp_crc_snapshot.transaction_class = 2;
+		else
+			g_echo_stp_crc_snapshot.transaction_class = 3;
+	} else {
+		g_echo_stp_crc_snapshot.transaction_class = 4;
+	}
+
+	if (frame_len <= ECHO_STP_FRAME_CAPTURE_BYTES) {
+		for (i = 0; i < frame_len; i++)
+			g_echo_stp_crc_snapshot.frame[i] =
+				echo_stp_frame_byte(buffer, length, header, received_crc, i);
+		g_echo_stp_crc_snapshot.frame_capture_len = frame_len;
+		g_echo_stp_crc_snapshot.frame_prefix_len = frame_len;
+	} else {
+		for (i = 0; i < ECHO_STP_FRAME_PREFIX_BYTES; i++)
+			g_echo_stp_crc_snapshot.frame[i] =
+				echo_stp_frame_byte(buffer, length, header, received_crc, i);
+		for (i = 0; i < ECHO_STP_FRAME_SUFFIX_BYTES; i++)
+			g_echo_stp_crc_snapshot.frame[ECHO_STP_FRAME_PREFIX_BYTES + i] =
+				echo_stp_frame_byte(buffer, length, header, received_crc,
+					   frame_len - ECHO_STP_FRAME_SUFFIX_BYTES + i);
+		g_echo_stp_crc_snapshot.frame_capture_len = ECHO_STP_FRAME_CAPTURE_BYTES;
+		g_echo_stp_crc_snapshot.frame_prefix_len = ECHO_STP_FRAME_PREFIX_BYTES;
+		g_echo_stp_crc_snapshot.frame_suffix_len = ECHO_STP_FRAME_SUFFIX_BYTES;
+		g_echo_stp_crc_snapshot.frame_truncated = 1;
+	}
+	g_echo_stp_crc_snapshot.btif_tail_len = g_echo_btif_tail_len;
+	g_echo_stp_crc_snapshot.btif_previous_len = g_echo_btif_previous_len;
+	osal_memcpy(g_echo_stp_crc_snapshot.btif_tail, g_echo_btif_tail,
+		   sizeof(g_echo_btif_tail));
+	osal_memcpy(g_echo_stp_crc_snapshot.btif_previous, g_echo_btif_previous,
+		   sizeof(g_echo_btif_previous));
+	aee_sram_fiq_save_bin((const char *)&g_echo_stp_crc_snapshot,
+			      sizeof(g_echo_stp_crc_snapshot));
+	aee_rr_rec_fiq_step(0xe8);
+	STP_ERR_FUNC("ECHO_STP_CRC_SNAPSHOT\n");
+}
+
+static VOID echo_btif_capture(UINT8 *buffer, UINT32 length)
+{
+	UINT32 copy_len;
+
+	g_echo_btif_previous_callback_len = g_echo_btif_last_callback_len;
+	g_echo_btif_last_callback_len = length;
+	g_echo_btif_rx_bytes += length;
+	g_echo_stp_rx_bytes += length;
+
+	copy_len = g_echo_btif_tail_len < ECHO_STP_BTIF_PREV_BYTES ?
+		g_echo_btif_tail_len : ECHO_STP_BTIF_PREV_BYTES;
+	if (copy_len)
+		osal_memcpy(g_echo_btif_previous,
+			   g_echo_btif_tail + g_echo_btif_tail_len - copy_len,
+			   copy_len);
+	g_echo_btif_previous_len = copy_len;
+
+	copy_len = length < ECHO_STP_BTIF_TAIL_BYTES ? length : ECHO_STP_BTIF_TAIL_BYTES;
+	if (copy_len)
+		osal_memcpy(g_echo_btif_tail, buffer + length - copy_len, copy_len);
+	g_echo_btif_tail_len = copy_len;
+}
 
 /*private functions*/
 
@@ -277,6 +456,8 @@ static MTK_WCN_BOOL stp_check_crc(UINT8 *buffer, UINT32 length, UINT16 crc)
 	if (checksum == crc)
 		return MTK_WCN_BOOL_TRUE;
 
+	g_echo_stp_crc_failures++;
+	echo_capture_crc_failure(buffer, length, crc, checksum);
 	STP_ERR_FUNC("CRC fail, length = %d, rx = %x, calc = %x \r\n", length, crc, checksum);
 	return MTK_WCN_BOOL_FALSE;
 
@@ -708,6 +889,10 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 	}
 
 	osal_unlock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
+	g_echo_stp_accepted_frames++;
+	g_echo_last_accepted_seq = stp_core_ctx.parser.seq;
+	g_echo_last_accepted_type = stp_core_ctx.parser.type;
+	g_echo_last_accepted_len = length;
 	echo_wmt_progress_stp_accept(length, stp_core_ctx.parser.state);
 
 	return 0;
@@ -1197,6 +1382,23 @@ INT32 mtk_wcn_stp_init(const mtkstp_callback * const cb_func)
 {
 	INT32 ret = 0;
 	INT32 i = 0;
+
+	atomic_set(&echo_crc_snapshot_taken, 0);
+	osal_memset(&g_echo_stp_crc_snapshot, 0,
+		   sizeof(g_echo_stp_crc_snapshot));
+	osal_memset(g_echo_btif_tail, 0, sizeof(g_echo_btif_tail));
+	osal_memset(g_echo_btif_previous, 0, sizeof(g_echo_btif_previous));
+	g_echo_btif_tail_len = 0;
+	g_echo_btif_previous_len = 0;
+	g_echo_btif_last_callback_len = 0;
+	g_echo_btif_previous_callback_len = 0;
+	g_echo_btif_rx_bytes = 0;
+	g_echo_stp_rx_bytes = 0;
+	g_echo_stp_accepted_frames = 0;
+	g_echo_stp_crc_failures = 0;
+	g_echo_last_accepted_seq = 0;
+	g_echo_last_accepted_type = 0;
+	g_echo_last_accepted_len = 0;
 
 	/* Function pointer to point to the currently used transmission interface
 	 */
@@ -2239,6 +2441,7 @@ int mtk_wcn_stp_parser_data(UINT8 *buffer, UINT32 length)
 	/*flags = (*sys_mutex_lock)(stp_core_ctx.stp_mutex); */
 	i = length;
 	p_data = (UINT8 *) buffer;
+	echo_btif_capture(buffer, length);
 	echo_wmt_progress_btif_rx(length, stp_core_ctx.parser.state);
 
 

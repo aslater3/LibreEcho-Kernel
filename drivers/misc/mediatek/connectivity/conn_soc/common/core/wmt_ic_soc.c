@@ -42,6 +42,7 @@
 #include "wmt_core.h"
 #include "wmt_lib.h"
 #include "stp_core.h"
+#include "wmt_dev.h"
 #include <upmu_common.h>
 
 /*******************************************************************************
@@ -2161,6 +2162,12 @@ static INT32 mtk_wcn_soc_patch_dwn(UINT32 index)
 		*(*kal_stp_tx)(pbuf + offset - sizeof(WMT_PATCH_CMD), fragSize + sizeof(WMT_PATCH_CMD),
 		*&u4Res);
 		*/
+		echo_wmt_patch_before((UINT16)(index + 1), (UINT16)fragSeq,
+				      ((index + 1) << 16) | fragSeq,
+				      fragSeq * patchSizePerFrag, fragSize,
+				      patchSize - (fragSeq * patchSizePerFrag + fragSize),
+				      fragSeq == 0, fragSeq == (fragNum - 1),
+				      gFullPatchName);
 		iRet =
 			wmt_core_tx(pbuf + offset - sizeof(WMT_PATCH_CMD), fragSize + sizeof(WMT_PATCH_CMD),
 				&u4Res, MTK_WCN_BOOL_FALSE);
@@ -2202,6 +2209,7 @@ static INT32 mtk_wcn_soc_patch_dwn(UINT32 index)
 			break;
 		}
 #endif
+		echo_wmt_patch_ack();
 		WMT_DBG_FUNC("wmt_core: read WMT_PATCH_EVT length(%d, %d) ok\n", sizeof(WMT_PATCH_EVT), u4Res);
 		offset += patchSizePerFrag;
 		++fragSeq;
@@ -2383,6 +2391,7 @@ static INT32 mtk_wcn_soc_patch_dwn(VOID)
 			break;
 		}
 #endif
+		echo_wmt_patch_ack();
 		WMT_DBG_FUNC("wmt_core: read WMT_PATCH_EVT length(%d, %d) ok\n", sizeof(WMT_PATCH_EVT), u4Res);
 		offset += patchSizePerFrag;
 		++fragSeq;

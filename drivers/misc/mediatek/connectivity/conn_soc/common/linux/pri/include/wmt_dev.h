@@ -39,6 +39,30 @@ VOID echo_wmt_progress_stp_accept(UINT32 len, UINT8 parser_state);
 VOID echo_wmt_progress_wmt_event(VOID);
 VOID echo_wmt_progress_wmt_wait(UINT8 waiting);
 VOID echo_wmt_progress_wmt_read(UINT32 len);
+
+#define ECHO_PATCH_NAME_LEN 32
+
+struct echo_patch_position {
+	UINT16 patch_index;
+	UINT16 fragment_index;
+	UINT32 download_seq;
+	UINT32 file_offset;
+	UINT32 fragment_len;
+	UINT32 bytes_remaining;
+	UINT8 first_fragment;
+	UINT8 last_fragment;
+	UINT8 awaiting_ack;
+	UINT8 reserved;
+	UINT8 name[ECHO_PATCH_NAME_LEN];
+};
+
+VOID echo_wmt_patch_before(UINT16 patch_index, UINT16 fragment_index,
+			   UINT32 download_seq, UINT32 file_offset,
+			   UINT32 fragment_len, UINT32 bytes_remaining,
+			   UINT8 first_fragment, UINT8 last_fragment,
+			   const UINT8 *name);
+VOID echo_wmt_patch_ack(VOID);
+VOID echo_wmt_patch_snapshot(struct echo_patch_position *position);
 extern INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch, INT32 padSzBuf);
 extern INT32 wmt_dev_patch_put(osal_firmware **ppPatch);
 extern VOID wmt_dev_patch_info_free(VOID);
