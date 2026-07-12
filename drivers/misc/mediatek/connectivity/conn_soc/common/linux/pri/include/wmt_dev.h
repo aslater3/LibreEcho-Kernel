@@ -29,6 +29,13 @@ extern VOID wmt_dev_rx_event_cb(VOID);
 extern VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent);
 extern VOID wmt_dev_rx_wait_disarm(P_OSAL_EVENT pEvent, const char *reason);
 extern INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent);
+
+VOID echo_wmt_progress_tx(UINT32 len);
+VOID echo_wmt_progress_btif_rx(UINT32 len, UINT8 parser_state);
+VOID echo_wmt_progress_stp_accept(UINT32 len, UINT8 parser_state);
+VOID echo_wmt_progress_wmt_event(VOID);
+VOID echo_wmt_progress_wmt_wait(UINT8 waiting);
+VOID echo_wmt_progress_wmt_read(UINT32 len);
 extern INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch, INT32 padSzBuf);
 extern INT32 wmt_dev_patch_put(osal_firmware **ppPatch);
 extern VOID wmt_dev_patch_info_free(VOID);

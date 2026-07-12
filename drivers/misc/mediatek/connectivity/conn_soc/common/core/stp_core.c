@@ -18,9 +18,6 @@
 #include "btm_core.h"
 #include "stp_dbg.h"
 #include "stp_btif.h"
-#include <linux/jiffies.h>
-#include <linux/smp.h>
-#include <mt-plat/mtk_ram_console.h>
 
 #define PFX                         "[STP] "
 #define STP_LOG_DBG                  4
@@ -109,42 +106,6 @@ static mtkstp_context_struct stp_core_ctx = { 0 };
 /*[PatchNeed]Need to calculate the timeout value*/
 static UINT32 mtkstp_tx_timeout = MTKSTP_TX_TIMEOUT;
 static mtkstp_parser_state prev_state = -1;
-static unsigned int g_echo_stp_rx_diag_count;
-static unsigned int g_echo_stp_crc_diag_count;
-static unsigned int g_echo_stp_rx_bytes;
-static unsigned int g_echo_stp_parser_calls;
-static unsigned int g_echo_stp_accepted_frames;
-static unsigned int g_echo_stp_raw_pos;
-static unsigned int g_echo_stp_raw_count;
-static UINT8 g_echo_stp_raw_ring[256];
-
-struct echo_stp_crc_record {
-	UINT32 magic;
-	UINT32 timestamp;
-	UINT16 parser_state;
-	UINT16 packet_len;
-	UINT16 rx_chunk_len;
-	UINT16 rx_chunk_offset;
-	UINT16 ring_pos;
-	UINT16 ring_count;
-	UINT16 crc_rx;
-	UINT16 crc_calc;
-	UINT8 packet_type;
-	UINT8 seq;
-	UINT8 expected_seq;
-	UINT8 cpu;
-	UINT32 rx_bytes;
-	UINT32 parser_calls;
-	UINT32 accepted_frames;
-	UINT32 crc_failures;
-	UINT8 raw_tail[64];
-	UINT8 frame[64];
-	UINT8 raw_ring[256];
-	UINT8 reserved[4];
-} __aligned(8);
-
-static struct echo_stp_crc_record g_echo_stp_crc_record;
-static unsigned int g_echo_stp_crc_saved;
 
 #define CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
 #ifdef CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
@@ -167,71 +128,6 @@ static VOID stp_send_tx_queue(UINT32 txseq);
 static VOID stp_send_ack(UINT8 txAck, UINT8 nak);
 static INT32 stp_process_rxack(VOID);
 static VOID stp_process_packet(VOID);
-
-static VOID echo_stp_raw_rx_capture(const UINT8 *buffer, UINT32 length)
-{
-	UINT32 i;
-
-	for (i = 0; i < length; i++) {
-		g_echo_stp_raw_ring[g_echo_stp_raw_pos] = buffer[i];
-		g_echo_stp_raw_pos = (g_echo_stp_raw_pos + 1) & 0xff;
-		if (g_echo_stp_raw_count < 256)
-			g_echo_stp_raw_count++;
-	}
-	g_echo_stp_rx_bytes += length;
-	g_echo_stp_parser_calls++;
-}
-
-static VOID echo_stp_save_crc_record(UINT32 length, UINT32 offset)
-{
-	UINT32 i;
-	UINT32 available;
-	UINT32 start;
-	UINT32 frame_len;
-	UINT16 crc_calc;
-
-	if (g_echo_stp_crc_saved)
-		return;
-
-	crc_calc = osal_crc16(stp_core_ctx.rx_buf, stp_core_ctx.rx_counter);
-	osal_memset(&g_echo_stp_crc_record, 0, sizeof(g_echo_stp_crc_record));
-	g_echo_stp_crc_record.magic = 0x43524331;
-	g_echo_stp_crc_record.timestamp = (UINT32)jiffies;
-	g_echo_stp_crc_record.parser_state = stp_core_ctx.parser.state;
-	g_echo_stp_crc_record.packet_len = stp_core_ctx.parser.length;
-	g_echo_stp_crc_record.rx_chunk_len = length;
-	g_echo_stp_crc_record.rx_chunk_offset = offset;
-	g_echo_stp_crc_record.ring_pos = g_echo_stp_raw_pos;
-	g_echo_stp_crc_record.ring_count = g_echo_stp_raw_count;
-	g_echo_stp_crc_record.crc_rx = stp_core_ctx.parser.crc;
-	g_echo_stp_crc_record.crc_calc = crc_calc;
-	g_echo_stp_crc_record.packet_type = stp_core_ctx.parser.type;
-	g_echo_stp_crc_record.seq = stp_core_ctx.parser.seq;
-	g_echo_stp_crc_record.expected_seq = stp_core_ctx.sequence.expected_rxseq;
-	g_echo_stp_crc_record.cpu = smp_processor_id();
-	g_echo_stp_crc_record.rx_bytes = g_echo_stp_rx_bytes;
-	g_echo_stp_crc_record.parser_calls = g_echo_stp_parser_calls;
-	g_echo_stp_crc_record.accepted_frames = g_echo_stp_accepted_frames;
-	g_echo_stp_crc_record.crc_failures = g_echo_stp_crc_diag_count + 1;
-
-	available = g_echo_stp_raw_count < 64 ? g_echo_stp_raw_count : 64;
-	start = (g_echo_stp_raw_pos + 256 - available) & 0xff;
-	for (i = 0; i < available; i++)
-		g_echo_stp_crc_record.raw_tail[64 - available + i] =
-			g_echo_stp_raw_ring[(start + i) & 0xff];
-
-	frame_len = stp_core_ctx.rx_counter < sizeof(g_echo_stp_crc_record.frame) ?
-		stp_core_ctx.rx_counter : sizeof(g_echo_stp_crc_record.frame);
-	osal_memcpy(g_echo_stp_crc_record.frame, stp_core_ctx.rx_buf, frame_len);
-	osal_memcpy(g_echo_stp_crc_record.raw_ring, g_echo_stp_raw_ring,
-			 sizeof(g_echo_stp_crc_record.raw_ring));
-
-	g_echo_stp_crc_saved = 1;
-	aee_rr_rec_fiq_step(0xea);
-	aee_sram_fiq_save_bin((const char *)&g_echo_stp_crc_record,
-			      sizeof(g_echo_stp_crc_record));
-	aee_rr_rec_fiq_step(0xeb);
-}
 
 /*private functions*/
 
@@ -785,11 +681,8 @@ static VOID stp_add_to_tx_queue(const UINT8 *buffer, UINT32 length)
 static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 {
 	UINT32 roomLeft, last_len;
-	UINT32 read_p, write_p;
 
 	osal_lock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
-	read_p = stp_core_ctx.ring[type].read_p;
-	write_p = stp_core_ctx.ring[type].write_p;
 
 	if (stp_core_ctx.ring[type].read_p <= stp_core_ctx.ring[type].write_p)
 		roomLeft = MTKSTP_BUFFER_SIZE - stp_core_ctx.ring[type].write_p + stp_core_ctx.ring[type].read_p - 1;
@@ -798,8 +691,6 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 
 	if (roomLeft < length) {
 		osal_unlock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
-		pr_err("ECHO_STP_QUEUE: DROP type=%u len=%u read=%u write=%u room=%u\n",
-		       type, length, read_p, write_p, roomLeft);
 		STP_ERR_FUNC("Queue is full !!!, type = %d\n", type);
 		osal_assert(0);
 		return -1;
@@ -816,12 +707,7 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 	}
 
 	osal_unlock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
-	if (g_echo_stp_rx_diag_count < 32)
-		pr_err("ECHO_STP_QUEUE: ACCEPT type=%u len=%u read=%u->%u write=%u->%u room=%u\n",
-		       type, length, read_p, stp_core_ctx.ring[type].read_p,
-		       write_p, stp_core_ctx.ring[type].write_p, roomLeft);
-	g_echo_stp_rx_diag_count++;
-	g_echo_stp_accepted_frames++;
+	echo_wmt_progress_stp_accept(length, stp_core_ctx.parser.state);
 
 	return 0;
 }
@@ -1909,7 +1795,6 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 {
 	INT32 remain_length;	/* GeorgeKuo: sync from MAUI, change to unsigned */
 	INT32 i = length;
-	UINT8 *input_base = p_data;
 
 	while (i > 0) {
 		switch (stp_core_ctx.parser.state) {
@@ -2157,9 +2042,6 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				else
 					STP_WARN_FUNC("Now it's inband reset process and drop packet.\n");
 			} else {
-				g_echo_stp_crc_diag_count++;
-				echo_stp_save_crc_record(length,
-							(UINT32)(p_data - input_base));
 				STP_ERR_FUNC("The CRC of packet is error !!!\n");
 				/* George FIXME: error handling mechanism shall be refined */
 				stp_change_rx_state(MTKSTP_RESYNC1);
@@ -2356,7 +2238,7 @@ int mtk_wcn_stp_parser_data(UINT8 *buffer, UINT32 length)
 	/*flags = (*sys_mutex_lock)(stp_core_ctx.stp_mutex); */
 	i = length;
 	p_data = (UINT8 *) buffer;
-	echo_stp_raw_rx_capture(p_data, length);
+	echo_wmt_progress_btif_rx(length, stp_core_ctx.parser.state);
 
 
 	/*STP is not enabled and only WMT can use Raw data path */

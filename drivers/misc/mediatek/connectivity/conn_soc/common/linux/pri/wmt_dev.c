@@ -57,6 +57,9 @@
 #define BUF_LEN_MAX 384
 #include <linux/proc_fs.h>
 #include <linux/spinlock.h>
+#include <linux/jiffies.h>
+#include <linux/smp.h>
+#include <mt-plat/mtk_ram_console.h>
 
 #define MTK_WMT_VERSION  "SOC Consys WMT Driver - v1.0"
 #define MTK_WMT_DATE     "2013/01/20"
@@ -75,8 +78,93 @@ P_OSAL_EVENT gpRxEvent = NULL;
 UINT32 u4RxFlag = 0x0;
 static atomic_t gRxCount = ATOMIC_INIT(0);
 static DEFINE_SPINLOCK(gRxLock);
-static unsigned int g_echo_wmt_rx_diag_count;
-static unsigned int g_echo_wmt_wait_diag_count;
+
+struct echo_wmt_progress {
+	UINT32 magic;
+	UINT32 patch_fragment;
+	UINT32 patch_offset;
+	UINT32 tx_count;
+	UINT32 btif_rx_count;
+	UINT32 stp_accept_count;
+	UINT32 wmt_event_count;
+	UINT32 wmt_read_count;
+	UINT32 last_tx_jiffies;
+	UINT32 last_btif_rx_jiffies;
+	UINT32 last_stp_accept_jiffies;
+	UINT32 last_wmt_event_jiffies;
+	UINT32 last_wmt_read_jiffies;
+	UINT16 last_tx_len;
+	UINT16 last_rx_len;
+	UINT16 last_stp_len;
+	UINT16 last_wmt_read_len;
+	UINT8 waiting;
+	UINT8 parser_state;
+	UINT8 last_seq;
+	UINT8 expected_seq;
+	UINT8 cpu;
+	UINT8 reserved[3];
+};
+
+static struct echo_wmt_progress g_echo_wmt_progress;
+
+static VOID echo_wmt_progress_checkpoint(UINT8 step)
+{
+	g_echo_wmt_progress.magic = 0x57505431;
+	g_echo_wmt_progress.cpu = smp_processor_id();
+	aee_rr_rec_fiq_step(step);
+	aee_sram_fiq_save_bin((const char *)&g_echo_wmt_progress,
+			      sizeof(g_echo_wmt_progress));
+}
+
+VOID echo_wmt_progress_tx(UINT32 len)
+{
+	g_echo_wmt_progress.patch_fragment++;
+	g_echo_wmt_progress.patch_offset += len;
+	g_echo_wmt_progress.tx_count++;
+	g_echo_wmt_progress.last_tx_len = len;
+	g_echo_wmt_progress.last_tx_jiffies = (UINT32)jiffies;
+	if ((g_echo_wmt_progress.tx_count & 31) == 0)
+		echo_wmt_progress_checkpoint(0xe1);
+}
+
+VOID echo_wmt_progress_btif_rx(UINT32 len, UINT8 parser_state)
+{
+	g_echo_wmt_progress.btif_rx_count++;
+	g_echo_wmt_progress.last_rx_len = len;
+	g_echo_wmt_progress.last_btif_rx_jiffies = (UINT32)jiffies;
+	g_echo_wmt_progress.parser_state = parser_state;
+}
+
+VOID echo_wmt_progress_stp_accept(UINT32 len, UINT8 parser_state)
+{
+	g_echo_wmt_progress.stp_accept_count++;
+	g_echo_wmt_progress.last_stp_len = len;
+	g_echo_wmt_progress.last_stp_accept_jiffies = (UINT32)jiffies;
+	g_echo_wmt_progress.parser_state = parser_state;
+}
+
+VOID echo_wmt_progress_wmt_event(VOID)
+{
+	g_echo_wmt_progress.wmt_event_count++;
+	g_echo_wmt_progress.last_wmt_event_jiffies = (UINT32)jiffies;
+}
+
+VOID echo_wmt_progress_wmt_wait(UINT8 waiting)
+{
+	g_echo_wmt_progress.waiting = waiting;
+	if (waiting)
+		echo_wmt_progress_checkpoint(0xe2);
+}
+
+VOID echo_wmt_progress_wmt_read(UINT32 len)
+{
+	g_echo_wmt_progress.wmt_read_count++;
+	g_echo_wmt_progress.last_wmt_read_len = len;
+	g_echo_wmt_progress.last_wmt_read_jiffies = (UINT32)jiffies;
+	g_echo_wmt_progress.waiting = 0;
+	if ((g_echo_wmt_progress.wmt_read_count & 31) == 0)
+		echo_wmt_progress_checkpoint(0xe4);
+}
 
 VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent)
 {
@@ -87,10 +175,6 @@ VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent)
 	u4RxFlag = 0;
 	atomic_set(&gRxCount, 0);
 	spin_unlock_irqrestore(&gRxLock, flags);
-	if (g_echo_wmt_wait_diag_count < 8) {
-		pr_err("ECHO_WMT_ARM: count=0 flag=0 event=%p\n", pEvent);
-		g_echo_wmt_wait_diag_count++;
-	}
 }
 
 VOID wmt_dev_rx_wait_disarm(P_OSAL_EVENT pEvent, const char *reason)
@@ -103,10 +187,6 @@ VOID wmt_dev_rx_wait_disarm(P_OSAL_EVENT pEvent, const char *reason)
 	u4RxFlag = 0;
 	atomic_set(&gRxCount, 0);
 	spin_unlock_irqrestore(&gRxLock, flags);
-	if (g_echo_wmt_wait_diag_count < 16 && strcmp(reason, "initial-read")) {
-		pr_err("ECHO_WMT_DISARM: reason=%s\n", reason);
-		g_echo_wmt_wait_diag_count++;
-	}
 }
 
 /* Linux UINT8 device */
@@ -1481,24 +1561,17 @@ VOID wmt_dev_rx_event_cb(VOID)
 {
 	unsigned long flags;
 	P_OSAL_EVENT pEvent;
-	INT32 before;
-	INT32 after;
 
 	spin_lock_irqsave(&gRxLock, flags);
 	pEvent = gpRxEvent;
-	before = atomic_read(&gRxCount);
 	if (pEvent != NULL) {
 		atomic_set(&gRxCount, 1);
 		u4RxFlag = 1;
 	}
-	after = atomic_read(&gRxCount);
 	spin_unlock_irqrestore(&gRxLock, flags);
 
-	if (pEvent != NULL && g_echo_wmt_rx_diag_count < 16)
-		pr_err("ECHO_WMT_EVENT: active=1 before=%d after=%d flag=%u event=%p\n",
-		       before, after, u4RxFlag, pEvent);
 	if (pEvent != NULL)
-		g_echo_wmt_rx_diag_count++;
+		echo_wmt_progress_wmt_event();
 	if (pEvent != NULL)
 		wake_up_interruptible(&pEvent->waitQueue);
 }
@@ -1507,14 +1580,8 @@ INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent)
 {
 	UINT32 ms = pEvent->timeoutValue;
 	long lRet = 0;
-	UINT32 before_flag;
 
-	before_flag = u4RxFlag;
-	if (g_echo_wmt_wait_diag_count < 16) {
-		pr_err("ECHO_WMT_WAIT: count=%d flag=%u timeout=%u event=%p\n",
-		       atomic_read(&gRxCount), before_flag, ms, pEvent);
-		g_echo_wmt_wait_diag_count++;
-	}
+	echo_wmt_progress_wmt_wait(1);
 	if (0 != ms)
 		lRet = wait_event_interruptible_timeout(pEvent->waitQueue, 0 != u4RxFlag, msecs_to_jiffies(ms));
 	else

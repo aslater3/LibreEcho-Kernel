@@ -127,7 +127,6 @@ static INT32 wmt_ctrl_get_patch_name(P_WMT_CTRL_DATA pWmtCtrlData);
 /* GeorgeKuo: Use designated initializers described in
  * http://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Designated-Inits.html
  */
-static unsigned int g_echo_wmt_ctrl_diag_count;
 static const WMT_CTRL_FUNC wmt_ctrl_func[] = {
 	[WMT_CTRL_HW_PWR_OFF] = wmt_ctrl_hw_pwr_off,
 	[WMT_CTRL_HW_PWR_ON] = wmt_ctrl_hw_pwr_on,
@@ -212,7 +211,6 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 {
 	P_DEV_WMT pDev = &gDevWmt;	/* single instance */
 	INT32 readLen;
-	unsigned int diag_no;
 	long waitRet = -1;
 	PUINT8 pBuff = (PUINT8) pWmtCtrlData->au4CtrlData[0];
 	UINT32 buffLen = pWmtCtrlData->au4CtrlData[1];
@@ -227,7 +225,6 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		osal_assert(buffLen);
 		return 0;
 	}
-	diag_no = g_echo_wmt_ctrl_diag_count++;
 #if 0
 	if (!pDev) {
 		WMT_WARN_FUNC("gpDevWmt = NULL\n");
@@ -241,15 +238,10 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		osal_assert(osal_test_bit(WMT_STAT_STP_OPEN, &pDev->state));
 		return -2;
 	}
-
-	if (diag_no < 8)
-		pr_err("ECHO_WMT_RX: enter buff=%u state=0x%lx\n", buffLen,
-		       pDev->state.data);
 	/* Arm before checking the queue so arrival cannot race waiter setup. */
 	wmt_dev_rx_wait_arm(&pDev->rWmtRxWq);
 	readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
-	if (diag_no < 8)
-		pr_err("ECHO_WMT_RX: initial_read=%d\n", readLen);
+	echo_wmt_progress_wmt_read(readLen);
 
 	while (readLen == 0) {	/* got nothing, wait for STP's signal */
 		WMT_LOUD_FUNC("before wmt_dev_rx_timeout\n");
@@ -264,8 +256,6 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		waitRet = wmt_dev_rx_timeout(&pDev->rWmtRxWq);
 
 		WMT_LOUD_FUNC("wmt_dev_rx_timeout returned\n");
-		if (diag_no < 8)
-			pr_err("ECHO_WMT_RX: wait_ret=%ld\n", waitRet);
 
 		if (0 == waitRet) {
 			WMT_ERR_FUNC("wmt_dev_rx_timeout: timeout,jiffies(%lu),timeoutvalue(%d)\n",
@@ -278,6 +268,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		WMT_DBG_FUNC("wmt_dev_rx_timeout, iRet(%ld)\n", waitRet);
 		/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
 		readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
+		echo_wmt_progress_wmt_read(readLen);
 
 		if (0 == readLen)
 #ifdef CONFIG_MTK_WIFI_LOGGING_REDUCTION
@@ -285,9 +276,6 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 #else
 			WMT_WARN_FUNC("wmt_ctrl_rx be signaled, but no rx data(%ld)\n", waitRet);
 #endif
-
-		if (diag_no < 8 || readLen == 0)
-			pr_err("ECHO_WMT_RX: post_wait_read=%d\n", readLen);
 		if (readLen == 0)
 			wmt_dev_rx_wait_arm(&pDev->rWmtRxWq);
 
@@ -340,6 +328,7 @@ INT32 wmt_ctrl_tx_ex(const PUINT8 pData, const UINT32 size, PUINT32 writtenSize,
 
 	if (writtenSize)
 		*writtenSize = iRet;
+	echo_wmt_progress_tx(size);
 
 	return 0;
 
