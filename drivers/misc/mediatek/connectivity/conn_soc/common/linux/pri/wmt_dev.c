@@ -113,7 +113,7 @@ static struct echo_wmt_progress g_echo_wmt_progress;
 static VOID echo_wmt_progress_checkpoint(UINT8 step)
 {
 	g_echo_wmt_progress.magic = 0x57505431;
-	g_echo_wmt_progress.cpu = smp_processor_id();
+	g_echo_wmt_progress.cpu = raw_smp_processor_id();
 	aee_sram_fiq_save_bin((const char *)&g_echo_wmt_progress,
 			      sizeof(g_echo_wmt_progress));
 	aee_rr_rec_fiq_step(step);
