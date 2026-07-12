@@ -26,6 +26,8 @@
 #define CFG_WMT_PROC_FOR_AEE 1
 
 extern VOID wmt_dev_rx_event_cb(VOID);
+extern VOID wmt_dev_rx_event_arm(P_OSAL_EVENT pEvent);
+extern VOID wmt_dev_rx_event_disarm(P_OSAL_EVENT pEvent);
 extern VOID wmt_dev_stp_error_arm(VOID);
 extern UINT32 wmt_dev_stp_error_generation(VOID);
 extern UINT32 wmt_dev_stp_error_snapshot(VOID);

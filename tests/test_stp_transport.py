@@ -462,7 +462,11 @@ class CrcWakeupTests(unittest.TestCase):
         self.assertLess(arm_pos, send_pos)
         self.assertIn("wmt_dev_stp_error_snapshot", ctrl)
         self.assertRegex(ctrl, r"waitRet\s*==\s*-EBADMSG")
-        self.assertRegex(ctrl, r"return\s+waitRet")
+        if "wmt_dev_rx_event_disarm" in ctrl:
+            self.assertRegex(ctrl, r"iRet\s*=\s*waitRet")
+            self.assertRegex(ctrl, r"return\s+iRet")
+        else:
+            self.assertRegex(ctrl, r"return\s+waitRet")
 
     def test_hard_tx_errors_mark_stream_and_init_retries_once(self) -> None:
         ctrl_tx = extract_function(WMT_CTRL.read_text(), "wmt_ctrl_tx_ex")
@@ -477,6 +481,25 @@ class CrcWakeupTests(unittest.TestCase):
         self.assertIn("wmt_dev_stp_error_generation", pwr_on)
         self.assertRegex(pwr_on, r"if\s*\(\s*stream_recovery_active\s*\)")
         self.assertRegex(pwr_on, r"if\s*\(\s*0\s*<\s*retry--\s*\)")
+
+    def test_synchronized_waiter_lifecycle_clears_event_pointer(self) -> None:
+        source = WMT_DEV.read_text()
+        timeout = extract_function(source, "wmt_dev_rx_timeout")
+        arm = extract_function(source, "wmt_dev_rx_event_arm")
+        disarm = extract_function(source, "wmt_dev_rx_event_disarm")
+        ctrl_rx = extract_function(WMT_CTRL.read_text(), "wmt_ctrl_rx")
+        event_cb = extract_function(source, "wmt_dev_rx_event_cb")
+        error_cb = extract_function(source, "wmt_dev_stp_error_notify")
+        self.assertIn("DEFINE_SPINLOCK(gRxEventLock)", source)
+        self.assertIn("spin_lock_irqsave", arm)
+        self.assertIn("spin_lock_irqsave", disarm)
+        self.assertIn("gpRxEvent = NULL", disarm)
+        self.assertNotIn("gpRxEvent =", timeout)
+        self.assertIn("spin_lock_irqsave", timeout)
+        self.assertLess(ctrl_rx.find("wmt_dev_rx_event_arm"), ctrl_rx.find("mtk_wcn_stp_receive_data"))
+        self.assertIn("wmt_dev_rx_event_disarm", ctrl_rx)
+        self.assertIn("spin_lock_irqsave", event_cb)
+        self.assertIn("spin_lock_irqsave", error_cb)
 
     def test_transport_diagnostics_are_counted_and_rate_limited(self) -> None:
         stp = STP_CORE.read_text()

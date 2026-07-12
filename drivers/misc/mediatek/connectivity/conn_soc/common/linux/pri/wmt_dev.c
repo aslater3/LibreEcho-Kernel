@@ -75,6 +75,31 @@ UINT32 u4RxFlag = 0x0;
 static atomic_t gRxCount = ATOMIC_INIT(0);
 static atomic_t stp_error_generation = ATOMIC_INIT(0);
 static atomic_t stp_error_snapshot = ATOMIC_INIT(0);
+static DEFINE_SPINLOCK(gRxEventLock);
+
+VOID wmt_dev_rx_event_arm(P_OSAL_EVENT pEvent)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&gRxEventLock, flags);
+	u4RxFlag = 0;
+	atomic_set(&gRxCount, 0);
+	gpRxEvent = pEvent;
+	spin_unlock_irqrestore(&gRxEventLock, flags);
+}
+
+VOID wmt_dev_rx_event_disarm(P_OSAL_EVENT pEvent)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&gRxEventLock, flags);
+	if (gpRxEvent == pEvent) {
+		gpRxEvent = NULL;
+		u4RxFlag = 0;
+		atomic_set(&gRxCount, 0);
+	}
+	spin_unlock_irqrestore(&gRxEventLock, flags);
+}
 
 VOID wmt_dev_stp_error_arm(VOID)
 {
@@ -94,9 +119,12 @@ UINT32 wmt_dev_stp_error_snapshot(VOID)
 VOID wmt_dev_stp_error_notify(VOID)
 {
 	P_OSAL_EVENT pEvent;
+	unsigned long flags;
 
 	atomic_inc(&stp_error_generation);
+	spin_lock_irqsave(&gRxEventLock, flags);
 	pEvent = gpRxEvent;
+	spin_unlock_irqrestore(&gRxEventLock, flags);
 	if (pEvent)
 		wake_up_interruptible(&pEvent->waitQueue);
 }
@@ -1471,16 +1499,19 @@ INT32 wmt_dev_proc_for_aee_remove(VOID)
 
 VOID wmt_dev_rx_event_cb(VOID)
 {
-	u4RxFlag = 1;
-	atomic_inc(&gRxCount);
-	if (NULL != gpRxEvent) {
-		/* u4RxFlag = 1; */
-		/* atomic_inc(&gRxCount); */
-		wake_up_interruptible(&gpRxEvent->waitQueue);
-	} else {
-		/* WMT_ERR_FUNC("null gpRxEvent, flush rx!\n"); */
-		/* wmt_lib_flush_rx(); */
+	P_OSAL_EVENT pEvent;
+	unsigned long flags;
+
+	spin_lock_irqsave(&gRxEventLock, flags);
+	pEvent = gpRxEvent;
+	if (pEvent) {
+		u4RxFlag = 1;
+		atomic_inc(&gRxCount);
 	}
+	spin_unlock_irqrestore(&gRxEventLock, flags);
+
+	if (pEvent)
+		wake_up_interruptible(&pEvent->waitQueue);
 }
 
 INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent, UINT32 error_generation)
@@ -1489,25 +1520,32 @@ INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent, UINT32 error_generation)
 	UINT32 ms = pEvent->timeoutValue;
 	long lRet = 0;
 	MTK_WCN_BOOL protocol_error;
+	INT32 rxCount = 0;
+	unsigned long flags;
 
-	gpRxEvent = pEvent;
 	if (0 != ms)
-		lRet = wait_event_interruptible_timeout(gpRxEvent->waitQueue,
+		lRet = wait_event_interruptible_timeout(pEvent->waitQueue,
 				0 != u4RxFlag || error_generation != wmt_dev_stp_error_generation(),
 				msecs_to_jiffies(ms));
 	else
-		lRet = wait_event_interruptible(gpRxEvent->waitQueue,
+		lRet = wait_event_interruptible(pEvent->waitQueue,
 				u4RxFlag != 0 || error_generation != wmt_dev_stp_error_generation());
 
 	protocol_error = error_generation != wmt_dev_stp_error_generation();
 	if (protocol_error)
 		return -EBADMSG;
 
+	spin_lock_irqsave(&gRxEventLock, flags);
 	u4RxFlag = 0;
-	if (atomic_read(&gRxCount) > 0 && atomic_dec_return(&gRxCount)) {
-		WMT_ERR_FUNC("gRxCount != 0 (%d), reset it!\n", atomic_read(&gRxCount));
-		atomic_set(&gRxCount, 0);
+	if (atomic_read(&gRxCount) > 0) {
+		rxCount = atomic_dec_return(&gRxCount);
+		if (rxCount)
+			atomic_set(&gRxCount, 0);
 	}
+	spin_unlock_irqrestore(&gRxEventLock, flags);
+
+	if (rxCount)
+		WMT_ERR_FUNC("gRxCount != 0 (%d), reset it!\n", rxCount);
 
 	return lRet;
 }
