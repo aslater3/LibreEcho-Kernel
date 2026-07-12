@@ -1055,33 +1055,6 @@ static VOID echoWlanCpuHistDump(VOID)
 	}
 }
 
-static BOOLEAN echoWlanCpuHistSample(IN P_ADAPTER_T prAdapter)
-{
-	UINT_32 u4Wcir, u4Cpupcr;
-
-	HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Wcir);
-	u4Cpupcr = wmt_plat_read_cpupcr();
-	echoWlanCpuHistRecord(u4Cpupcr);
-	return (u4Wcir & WCIR_WLAN_READY) ? TRUE : FALSE;
-}
-
-static BOOLEAN echoWlanCpuHistWarmup(IN P_ADAPTER_T prAdapter)
-{
-	UINT_32 i;
-
-	for (i = 0; i < 200; i++) {
-		if (echoWlanCpuHistSample(prAdapter) == TRUE)
-			return TRUE;
-		udelay(10);
-	}
-	for (i = 0; i < 180; i++) {
-		if (echoWlanCpuHistSample(prAdapter) == TRUE)
-			return TRUE;
-		udelay(100);
-	}
-	return FALSE;
-}
-
 static VOID echoWlanHifSnapshot(IN P_ADAPTER_T prAdapter, IN const char *pszStage)
 {
 	UINT_32 wc, lp, whisr, whier, wasr, h2d, d2h0, d2h1;
@@ -1602,9 +1575,10 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		pr_err("ECHO_WLAN_STAGE: 120 enter firmware-ready wait cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
 		echoWlanPersistStage(ECHO_WLAN_PERSIST_READY_POLL);
-		echoWlanCpuHistWarmup(prAdapter);
-		pr_err("ECHO_WLAN_STAGE: 120 histogram warmup complete entries=%u cpu=%u jiffies=%lu\n",
-		       u4EchoFwCpuHistEntries, raw_smp_processor_id(), jiffies);
+		/* Keep the ready-boundary candidate low-noise; no pre-poll MMIO warmup. */
+		u4EchoFwCpuHistEntries = 0;
+		pr_err("ECHO_WLAN_STAGE: 120 histogram warmup skipped cpu=%u jiffies=%lu\n",
+		       raw_smp_processor_id(), jiffies);
 		DBGLOG(INIT, TRACE, "wlanAdapterStart(): Waiting for Ready bit..\n");
 		/* 4 <5> check Wi-Fi FW asserts ready bit */
 		i = 0;
@@ -1613,9 +1587,9 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 				pr_err("ECHO_WLAN_STAGE: 121 ready poll before read iter=%u mask=0x%08x cpu=%u jiffies=%lu\n",
 				       i, (UINT_32) WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
-			echoWlanCpuHistRecord(wmt_plat_read_cpupcr());
 			if (i < 5 || (i % 100) == 0) {
 				u4PollCpupcr = wmt_plat_read_cpupcr();
+				echoWlanCpuHistRecord(u4PollCpupcr);
 				HAL_MCR_RD(prAdapter, MCR_D2HRM0R, &u4PollD2h0);
 				HAL_MCR_RD(prAdapter, MCR_D2HRM1R, &u4PollD2h1);
 				if ((u4PollCpupcr & 0xf0000000) == 0xf0000000)
