@@ -970,6 +970,8 @@
 
 extern UINT32 wmt_plat_read_cpupcr(VOID);
 extern VOID wmt_plat_dump_ap_state(const char *pszStage);
+extern INT32 mtk_wcn_stp_coredump_start_ctrl(UINT32 value);
+extern INT32 mtk_wcn_stp_coredump_start_get(VOID);
 
 #define ECHO_WLAN_PERSIST_DOWNLOAD 0xE2
 #define ECHO_WLAN_PERSIST_START 0xE3
@@ -977,6 +979,7 @@ extern VOID wmt_plat_dump_ap_state(const char *pszStage);
 #define ECHO_WLAN_PERSIST_MAIN_EXEC 0xE5
 #define ECHO_WLAN_PERSIST_READY_POLL 0xE6
 #define ECHO_WLAN_PERSIST_TIMEOUT 0xE7
+#define ECHO_WLAN_PERSIST_FW_ASSERT 0xEB
 
 static VOID echoWlanPersistStage(IN UINT_8 ucStage)
 {
@@ -1058,20 +1061,22 @@ static VOID echoWlanCpuHistDump(VOID)
 
 static VOID echoWlanHifSnapshot(IN P_ADAPTER_T prAdapter, IN const char *pszStage)
 {
-	UINT_32 wc, lp, whisr, whier, wasr, h2d, d2h0, d2h1;
+	UINT_32 wc, lp, whisr, whier, wasr, h2d0, h2d1, d2h0, d2h1;
 
 	HAL_MCR_RD(prAdapter, MCR_WCIR, &wc);
 	HAL_MCR_RD(prAdapter, MCR_WHLPCR, &lp);
 	HAL_MCR_RD(prAdapter, MCR_WHISR, &whisr);
 	HAL_MCR_RD(prAdapter, MCR_WHIER, &whier);
 	HAL_MCR_RD(prAdapter, MCR_WASR, &wasr);
-	HAL_MCR_RD(prAdapter, MCR_H2DSM0R, &h2d);
+	HAL_MCR_RD(prAdapter, MCR_H2DSM0R, &h2d0);
+	HAL_MCR_RD(prAdapter, MCR_H2DSM1R, &h2d1);
 	HAL_MCR_RD(prAdapter, MCR_D2HRM0R, &d2h0);
 	HAL_MCR_RD(prAdapter, MCR_D2HRM1R, &d2h1);
 	pr_err("ECHO_FW_STATE: %s WCIR=0x%08x WHLPCR=0x%08x WHISR=0x%08x "
-	       "WHIER=0x%08x WASR=0x%08x H2DSM0=0x%08x D2HRM0=0x%08x D2HRM1=0x%08x cpu=%u jiffies=%lu\n",
-	       pszStage, wc, lp, whisr, whier, wasr, h2d, d2h0, d2h1,
-	       raw_smp_processor_id(), jiffies);
+	       "WHIER=0x%08x WASR=0x%08x H2DSM0=0x%08x H2DSM1=0x%08x "
+	       "D2HRM0=0x%08x D2HRM1=0x%08x FWOWN=%u cpu=%u jiffies=%lu\n",
+	       pszStage, wc, lp, whisr, whier, wasr, h2d0, h2d1, d2h0, d2h1,
+	       (UINT_32)prAdapter->fgIsFwOwn, raw_smp_processor_id(), jiffies);
 }
 #endif
 
@@ -1552,6 +1557,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 #endif
 
 		/* 4. send Wi-Fi Start command */
+		mtk_wcn_stp_coredump_start_ctrl(0);
 		echoWlanCpuHistReset();
 		echoWlanPersistStage(ECHO_WLAN_PERSIST_DOWNLOAD);
 		pr_err("ECHO_WLAN_STAGE: 114 firmware download/ACK path complete cpu=%u jiffies=%lu\n",
@@ -1563,10 +1569,15 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		       prRegInfo->u4StartAddress, CFG_OVERRIDE_FW_START_ADDRESS,
 		       raw_smp_processor_id(), jiffies);
 #if CFG_OVERRIDE_FW_START_ADDRESS
-		wlanConfigWifiFunc(prAdapter, TRUE, prRegInfo->u4StartAddress);
+		u4Status = wlanConfigWifiFunc(prAdapter, TRUE, prRegInfo->u4StartAddress);
 #else
-		wlanConfigWifiFunc(prAdapter, FALSE, 0);
+		u4Status = wlanConfigWifiFunc(prAdapter, FALSE, 0);
 #endif
+		if (u4Status != WLAN_STATUS_SUCCESS) {
+			pr_err("ECHO_FW_START_SUBMIT: command submission failed status=%u\n",
+			       u4Status);
+			break;
+		}
 		echoWlanPersistStage(ECHO_WLAN_PERSIST_START);
 		pr_err("ECHO_WLAN_STAGE: 116 after Wi-Fi start command cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
@@ -1584,6 +1595,15 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		/* 4 <5> check Wi-Fi FW asserts ready bit */
 		i = 0;
 		while (1) {
+			if (mtk_wcn_stp_coredump_start_get()) {
+				pr_err("ECHO_WLAN_FW_ASSERT: before ready read iter=%u; aborting startup\n", i);
+				wmt_plat_dump_ap_state("firmware-assert-before-ready-read");
+				echoWlanHifSnapshot(prAdapter, "firmware-assert-before-ready-read");
+				echoWlanExecutionSnapshot(prAdapter, "firmware-assert-before-ready-read");
+				echoWlanPersistStage(ECHO_WLAN_PERSIST_FW_ASSERT);
+				u4Status = WLAN_STATUS_FAILURE;
+				break;
+			}
 			if (i == 0)
 				wmt_plat_dump_ap_state("before-ready-read");
 			if (i < 5 || (i % 100) == 0)
@@ -1592,6 +1612,16 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			aee_rr_rec_fiq_step(0xFC);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
 			aee_rr_rec_fiq_step(0xFD);
+			if (mtk_wcn_stp_coredump_start_get()) {
+				pr_err("ECHO_WLAN_FW_ASSERT: after ready read iter=%u WCIR=0x%08x; aborting startup\n",
+				       i, u4Value);
+				wmt_plat_dump_ap_state("firmware-assert-after-ready-read");
+				echoWlanHifSnapshot(prAdapter, "firmware-assert-after-ready-read");
+				echoWlanExecutionSnapshot(prAdapter, "firmware-assert-after-ready-read");
+				echoWlanPersistStage(ECHO_WLAN_PERSIST_FW_ASSERT);
+				u4Status = WLAN_STATUS_FAILURE;
+				break;
+			}
 			if (i < 5 || (i % 100) == 0) {
 				u4PollCpupcr = wmt_plat_read_cpupcr();
 				echoWlanCpuHistRecord(u4PollCpupcr);

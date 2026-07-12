@@ -117,6 +117,8 @@ static mtkstp_parser_state prev_state = -1;
 #define ECHO_STP_FRAME_SUFFIX_BYTES 32
 #define ECHO_STP_BTIF_TAIL_BYTES 32
 #define ECHO_STP_BTIF_PREV_BYTES 16
+#define ECHO_STP_FW_FRAME_LIMIT 4
+#define ECHO_STP_FW_PAYLOAD_LIMIT 128
 
 struct echo_stp_crc_snapshot {
 	UINT32 magic;
@@ -155,6 +157,7 @@ struct echo_stp_crc_snapshot {
 };
 
 static atomic_t echo_crc_snapshot_taken = ATOMIC_INIT(0);
+static atomic_t echo_fw_assert_latched = ATOMIC_INIT(0);
 static struct echo_stp_crc_snapshot g_echo_stp_crc_snapshot __aligned(8);
 static UINT8 g_echo_btif_tail[ECHO_STP_BTIF_TAIL_BYTES];
 static UINT8 g_echo_btif_previous[ECHO_STP_BTIF_PREV_BYTES];
@@ -169,6 +172,9 @@ static UINT32 g_echo_stp_crc_failures;
 static UINT8 g_echo_last_accepted_seq;
 static UINT8 g_echo_last_accepted_type;
 static UINT16 g_echo_last_accepted_len;
+static MTK_WCN_BOOL g_echo_fw_capture_active;
+static UINT32 g_echo_fw_frame_count;
+static UINT32 g_echo_fw_payload_bytes;
 
 #define CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
 #ifdef CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
@@ -354,6 +360,51 @@ static VOID echo_btif_capture(UINT8 *buffer, UINT32 length)
 	if (copy_len)
 		osal_memcpy(g_echo_btif_tail, buffer + length - copy_len, copy_len);
 	g_echo_btif_tail_len = copy_len;
+}
+
+static VOID echo_stp_capture_frame(const UINT8 *payload, UINT32 length,
+				   UINT16 raw_crc, MTK_WCN_BOOL crc_present,
+				   UINT32 bytes_remaining, MTK_WCN_BOOL start_capture)
+{
+	static const char hex_digits[] = "0123456789abcdef";
+	char payload_hex[ECHO_STP_FW_PAYLOAD_LIMIT * 2 + 1];
+	char payload_text[ECHO_STP_FW_PAYLOAD_LIMIT + 1];
+	UINT32 capture_len;
+	UINT32 available;
+	UINT32 index;
+	UINT16 calculated_crc;
+
+	if (start_capture && !g_echo_fw_capture_active) {
+		g_echo_fw_capture_active = MTK_WCN_BOOL_TRUE;
+		g_echo_fw_frame_count = 0;
+		g_echo_fw_payload_bytes = 0;
+	}
+	if (!g_echo_fw_capture_active ||
+	    g_echo_fw_frame_count >= ECHO_STP_FW_FRAME_LIMIT ||
+	    g_echo_fw_payload_bytes >= ECHO_STP_FW_PAYLOAD_LIMIT)
+		return;
+
+	available = ECHO_STP_FW_PAYLOAD_LIMIT - g_echo_fw_payload_bytes;
+	capture_len = length < available ? length : available;
+	for (index = 0; index < capture_len; index++) {
+		UINT8 byte = payload[index];
+
+		payload_hex[index * 2] = hex_digits[byte >> 4];
+		payload_hex[index * 2 + 1] = hex_digits[byte & 0x0f];
+		payload_text[index] = (byte >= 0x20 && byte <= 0x7e) ? byte : '.';
+	}
+	payload_hex[capture_len * 2] = '\0';
+	payload_text[capture_len] = '\0';
+	calculated_crc = osal_crc16((PUINT8)payload, length);
+
+	pr_err("ECHO_STP_FW_FRAME idx=%u type=%u seq=%u ack=%u len=%u cap=%u trunc=%u crc_present=%u crc=%04x calc=%04x rem=%u hex=%s text=\"%s\"\n",
+	       g_echo_fw_frame_count, (UINT32)stp_core_ctx.parser.type,
+	       (UINT32)stp_core_ctx.parser.seq, (UINT32)stp_core_ctx.parser.ack,
+	       length, capture_len, capture_len != length, (UINT32)crc_present,
+	       (UINT32)raw_crc, (UINT32)calculated_crc, bytes_remaining,
+	       payload_hex, payload_text);
+	g_echo_fw_frame_count++;
+	g_echo_fw_payload_bytes += capture_len;
 }
 
 /*private functions*/
@@ -2287,6 +2338,12 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 #endif
 			if (stp_check_crc(stp_core_ctx.rx_buf, stp_core_ctx.rx_counter, stp_core_ctx.parser.crc)
 			    == MTK_WCN_BOOL_TRUE) {
+				echo_stp_capture_frame(stp_core_ctx.rx_buf,
+						       stp_core_ctx.rx_counter,
+						       stp_core_ctx.parser.crc,
+						       MTK_WCN_BOOL_TRUE,
+						       i > 0 ? i - 1 : 0,
+						       MTK_WCN_BOOL_FALSE);
 				if (stp_core_ctx.inband_rst_set == 0)
 					stp_process_packet();
 				else
@@ -2313,32 +2370,6 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 			if (MTK_WCN_BOOL_TRUE == wmt_plat_dump_BGF_irq_status())
 				wmt_plat_BGF_irq_dump_status();
 #endif
-			/*
-			 * The legacy packet dump can block in btif_log_buf_dmp_out()
-			 * before an assertion payload is consumed. Preserve the first
-			 * bounded payload bytes and let the FW-message handler continue.
-			 */
-			if (stp_core_ctx.rx_counter == 0) {
-				UINT32 echo_fw_len = stp_core_ctx.parser.length;
-				UINT32 echo_fw_idx;
-				char echo_fw_msg[33];
-
-				if (echo_fw_len > (UINT32) i)
-					echo_fw_len = (UINT32) i;
-				if (echo_fw_len > sizeof(echo_fw_msg) - 1)
-					echo_fw_len = sizeof(echo_fw_msg) - 1;
-				for (echo_fw_idx = 0; echo_fw_idx < echo_fw_len; echo_fw_idx++) {
-					UINT8 byte = p_data[echo_fw_idx];
-
-					echo_fw_msg[echo_fw_idx] =
-						(byte >= 0x20 && byte <= 0x7e) ? byte : '.';
-				}
-				echo_fw_msg[echo_fw_len] = '\0';
-				pr_err("ECHO_STP_FW_MSG len=%u rx=%u avail=%d type=%u data=\"%s\"\n",
-				       stp_core_ctx.parser.length, stp_core_ctx.rx_counter, i,
-				       stp_core_ctx.parser.type, echo_fw_msg);
-			}
-
 			STP_SET_READY(stp_core_ctx, 0);
 			/*stp inband reset */
 			if (stp_core_ctx.parser.type == STP_TASK_INDX &&
@@ -2373,6 +2404,14 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				i -= remain_length;
 				p_data += remain_length;
 				stp_core_ctx.rx_counter = stp_core_ctx.parser.length;
+				echo_stp_capture_frame(stp_core_ctx.rx_buf,
+						       stp_core_ctx.rx_counter,
+						       i >= 2 ?
+						       ((UINT16)p_data[0] | ((UINT16)p_data[1] << 8)) : 0,
+						       i >= 2 ? MTK_WCN_BOOL_TRUE : MTK_WCN_BOOL_FALSE,
+						       i >= 2 ? i - 2 : 0,
+						       stp_core_ctx.parser.type == STP_TASK_INDX ?
+						       MTK_WCN_BOOL_TRUE : MTK_WCN_BOOL_FALSE);
 				stp_change_rx_state(MTKSTP_SYNC);
 				*(stp_core_ctx.rx_buf + stp_core_ctx.rx_counter) = '\0';
 				/* STP_ERR_FUNC("%s [%d]\n", stp_core_ctx.rx_buf, stp_core_ctx.rx_counter); */
@@ -2410,21 +2449,13 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 					stp_dbg_log_pkt(g_mtkstp_dbg, STP_DBG_FW_LOG, STP_TASK_INDX, 5, 0, 0, 0,
 							(stp_core_ctx.rx_counter + 1), stp_core_ctx.rx_buf);
 				}
-				/*Normal mode: whole chip reset */
+				/* Diagnostic mode: preserve controller state and let WLAN unwind. */
 				else {
-					/*Aee Kernel Warning Message Shown First */
-					/* (*sys_dbg_assert_aee)("[MT662x]f/w Assert", stp_core_ctx.rx_buf); */
-					mtk_wcn_stp_coredump_start_ctrl(0);
-
-					osal_dbg_assert_aee(stp_core_ctx.rx_buf, stp_core_ctx.rx_buf);
-					/*Whole Chip Reset Procedure Invoke */
-					if (STP_IS_ENABLE_RST(stp_core_ctx)) {
-						STP_SET_READY(stp_core_ctx, 0);
-						stp_btm_notify_wmt_rst_wq(STP_BTM_CORE(stp_core_ctx));
-					} else {
-						STP_INFO_FUNC
-						    ("No to launch whole chip reset! for debugging purpose\n");
-					}
+					mtk_wcn_stp_coredump_start_ctrl(1);
+					pr_err("ECHO_STP_FW_ASSERT_LATCHED type=%u seq=%u len=%u; reset deferred to WLAN failure unwind\n",
+					       (UINT32)stp_core_ctx.parser.type,
+					       (UINT32)stp_core_ctx.parser.seq,
+					       (UINT32)stp_core_ctx.rx_counter);
 				}
 				/*discard CRC */
 				if (i >= 2) {
@@ -2630,6 +2661,12 @@ INT32 mtk_wcn_stp_coredump_start_ctrl(UINT32 value)
 	STP_INFO_FUNC("set f/w assert (%d)\n", value);
 
 	STP_SET_FW_COREDUMP_FLAG(stp_core_ctx, value);
+	atomic_set(&echo_fw_assert_latched, !!value);
+	if (!value) {
+		g_echo_fw_capture_active = MTK_WCN_BOOL_FALSE;
+		g_echo_fw_frame_count = 0;
+		g_echo_fw_payload_bytes = 0;
+	}
 
 	return 0;
 }
@@ -2650,7 +2687,7 @@ INT32 _mtk_wcn_stp_coredump_start_get(VOID)
 INT32 mtk_wcn_stp_coredump_start_get(VOID)
 #endif
 {
-	return STP_FW_COREDUMP_FLAG(stp_core_ctx);
+	return atomic_read(&echo_fw_assert_latched);
 }
 
 /* mtk_wcn_stp_set_wmt_last_close -- set the state of link(UART or SDIO)

@@ -2106,6 +2106,13 @@ WLAN_STATUS nicTxInitCmd(IN P_ADAPTER_T prAdapter, IN P_CMD_INFO_T prCmdInfo, IN
 
 	/* <3> Copy CMD Header to command buffer (by using pucCoalescingBufCached) */
 	kalMemCopy((PVOID)&pucOutputBuf[0], (PVOID) prCmdInfo->pucInfoBuffer, prCmdInfo->u2InfoBufLen);
+	if (prInitTxHeader->rInitWifiCmd.ucCID == INIT_CMD_ID_WIFI_START &&
+	    prCmdInfo->u2InfoBufLen == 16)
+		pr_err("ECHO_FW_START_CMD len=16 bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+		       pucOutputBuf[0], pucOutputBuf[1], pucOutputBuf[2], pucOutputBuf[3],
+		       pucOutputBuf[4], pucOutputBuf[5], pucOutputBuf[6], pucOutputBuf[7],
+		       pucOutputBuf[8], pucOutputBuf[9], pucOutputBuf[10], pucOutputBuf[11],
+		       pucOutputBuf[12], pucOutputBuf[13], pucOutputBuf[14], pucOutputBuf[15]);
 
 	ASSERT(u2OverallBufferLength <= prAdapter->u4CoalescingBufCachedSize);
 
