@@ -26,6 +26,8 @@
 #define CFG_WMT_PROC_FOR_AEE 1
 
 extern VOID wmt_dev_rx_event_cb(VOID);
+extern VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent);
+extern VOID wmt_dev_rx_wait_disarm(P_OSAL_EVENT pEvent, const char *reason);
 extern INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent);
 extern INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch, INT32 padSzBuf);
 extern INT32 wmt_dev_patch_put(osal_firmware **ppPatch);

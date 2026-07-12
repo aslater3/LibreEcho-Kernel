@@ -175,8 +175,6 @@ static int g_max_pkg_len = G_MAX_PKG_LEN; /*DMA vFIFO is set to 8 * 1024, we set
 static int g_max_pding_data_size = BTIF_RX_BUFFER_SIZE * 3 / 4;
 
 static int mtk_btif_dbg_lvl = BTIF_LOG_INFO;
-static unsigned int g_echo_btif_tx_diag_count;
-static unsigned int g_echo_btif_rx_diag_count;
 
 /*-----------Platform bus related structures----------------*/
 #define DRV_NAME "mtk_btif"
@@ -1067,15 +1065,6 @@ unsigned int btif_dma_rx_data_receiver(P_MTK_DMA_INFO_STR p_dma_info,
 #endif
 
 	btif_bbs_write(&(p_btif->btif_buf), p_buf, buf_len);
-	if (g_echo_btif_rx_diag_count < 8) {
-		pr_err("ECHO_BTIF_RX: len=%u bytes=%02x %02x %02x %02x\n",
-		       buf_len,
-		       buf_len > 0 ? p_buf[0] : 0,
-		       buf_len > 1 ? p_buf[1] : 0,
-		       buf_len > 2 ? p_buf[2] : 0,
-		       buf_len > 3 ? p_buf[3] : 0);
-		g_echo_btif_rx_diag_count++;
-	}
 /*save DMA Rx packet here*/
 	if (0 < buf_len)
 		btif_log_buf_dmp_in(&p_btif->rx_log, p_buf, buf_len);
@@ -2627,17 +2616,6 @@ int _btif_dma_write(p_mtk_btif p_btif,
 	unsigned int max_tx_retry = 10;
 
 	P_MTK_DMA_INFO_STR p_dma_info = p_btif->p_tx_dma->p_dma_info;
-	int tx_allow;
-	unsigned int tx_room;
-	unsigned int diag_no;
-
-	diag_no = g_echo_btif_tx_diag_count++;
-	tx_allow = hal_dma_is_tx_allow(p_dma_info);
-	tx_room = hal_dma_get_ava_room(p_dma_info);
-	if (diag_no < 8 || !tx_allow || tx_room < buf_len)
-		pr_err("ECHO_BTIF_WRITE: len=%u state=%u mode=%u allow=%d room=%u\n",
-		       buf_len, p_btif->state, p_btif->tx_mode,
-		       tx_allow, tx_room);
 
 	_btif_irq_ctrl_sync(p_dma_info->p_irq, false);
 
@@ -2660,8 +2638,6 @@ int _btif_dma_write(p_mtk_btif p_btif,
 			i_ret = 0;
 	} while (0);
 	_btif_irq_ctrl_sync(p_dma_info->p_irq, true);
-	if (i_ret == 0 || diag_no < 8)
-		pr_err("ECHO_BTIF_WRITE: return=%u len=%u\n", i_ret, buf_len);
 	return i_ret;
 }
 

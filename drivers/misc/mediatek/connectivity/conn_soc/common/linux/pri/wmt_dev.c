@@ -56,6 +56,7 @@
 #endif
 #define BUF_LEN_MAX 384
 #include <linux/proc_fs.h>
+#include <linux/spinlock.h>
 
 #define MTK_WMT_VERSION  "SOC Consys WMT Driver - v1.0"
 #define MTK_WMT_DATE     "2013/01/20"
@@ -73,7 +74,33 @@ P_OSAL_EVENT gpRxEvent = NULL;
 
 UINT32 u4RxFlag = 0x0;
 static atomic_t gRxCount = ATOMIC_INIT(0);
+static DEFINE_SPINLOCK(gRxLock);
 static unsigned int g_echo_wmt_rx_diag_count;
+
+VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&gRxLock, flags);
+	gpRxEvent = pEvent;
+	u4RxFlag = 0;
+	atomic_set(&gRxCount, 0);
+	spin_unlock_irqrestore(&gRxLock, flags);
+	pr_err("ECHO_WMT_ARM: count=0 flag=0 event=%p\n", pEvent);
+}
+
+VOID wmt_dev_rx_wait_disarm(P_OSAL_EVENT pEvent, const char *reason)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&gRxLock, flags);
+	if (gpRxEvent == pEvent)
+		gpRxEvent = NULL;
+	u4RxFlag = 0;
+	atomic_set(&gRxCount, 0);
+	spin_unlock_irqrestore(&gRxLock, flags);
+	pr_err("ECHO_WMT_DISARM: reason=%s\n", reason);
+}
 
 /* Linux UINT8 device */
 static int gWmtMajor = WMT_DEV_MAJOR;
@@ -1445,54 +1472,45 @@ INT32 wmt_dev_proc_for_aee_remove(VOID)
 
 VOID wmt_dev_rx_event_cb(VOID)
 {
-	INT32 before = atomic_read(&gRxCount);
-	INT32 after = atomic_inc_return(&gRxCount);
+	unsigned long flags;
+	P_OSAL_EVENT pEvent;
+	INT32 before;
+	INT32 after;
 
-	u4RxFlag = 1;
-	if (g_echo_wmt_rx_diag_count < 32 || after <= 0)
-		pr_err("ECHO_WMT_EVENT: before=%d after=%d flag=%u event=%p\n",
-		       before, after, u4RxFlag, gpRxEvent);
-	g_echo_wmt_rx_diag_count++;
-	if (NULL != gpRxEvent) {
-		/* u4RxFlag = 1; */
-		/* atomic_inc(&gRxCount); */
-		wake_up_interruptible(&gpRxEvent->waitQueue);
-	} else {
-		/* WMT_ERR_FUNC("null gpRxEvent, flush rx!\n"); */
-		/* wmt_lib_flush_rx(); */
+	spin_lock_irqsave(&gRxLock, flags);
+	pEvent = gpRxEvent;
+	before = atomic_read(&gRxCount);
+	if (pEvent != NULL) {
+		atomic_set(&gRxCount, 1);
+		u4RxFlag = 1;
 	}
+	after = atomic_read(&gRxCount);
+	spin_unlock_irqrestore(&gRxLock, flags);
+
+	if (g_echo_wmt_rx_diag_count < 32)
+		pr_err("ECHO_WMT_EVENT: active=%d before=%d after=%d flag=%u event=%p\n",
+		       pEvent != NULL, before, after, u4RxFlag, pEvent);
+	g_echo_wmt_rx_diag_count++;
+	if (pEvent != NULL)
+		wake_up_interruptible(&pEvent->waitQueue);
 }
 
 INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent)
 {
 	UINT32 ms = pEvent->timeoutValue;
 	long lRet = 0;
-	INT32 before_count;
-	INT32 after_count;
 	UINT32 before_flag;
 
-	gpRxEvent = pEvent;
-	before_count = atomic_read(&gRxCount);
 	before_flag = u4RxFlag;
 	if (g_echo_wmt_rx_diag_count < 32)
-		pr_err("ECHO_WMT_WAIT: before_count=%d flag=%u timeout=%u event=%p\n",
-		       before_count, before_flag, ms, pEvent);
+		pr_err("ECHO_WMT_WAIT: count=%d flag=%u timeout=%u event=%p\n",
+		       atomic_read(&gRxCount), before_flag, ms, pEvent);
 	if (0 != ms)
-		lRet = wait_event_interruptible_timeout(gpRxEvent->waitQueue, 0 != u4RxFlag, msecs_to_jiffies(ms));
+		lRet = wait_event_interruptible_timeout(pEvent->waitQueue, 0 != u4RxFlag, msecs_to_jiffies(ms));
 	else
-		lRet = wait_event_interruptible(gpRxEvent->waitQueue, u4RxFlag != 0);
+		lRet = wait_event_interruptible(pEvent->waitQueue, u4RxFlag != 0);
 
-	u4RxFlag = 0;
-/* gpRxEvent = NULL; */
-	after_count = atomic_dec_return(&gRxCount);
-	if (g_echo_wmt_rx_diag_count < 32 || after_count != 0 || lRet <= 0)
-		pr_err("ECHO_WMT_WAIT: ret=%ld after_count=%d flag=%u\n",
-		       lRet, after_count, u4RxFlag);
-	if (after_count) {
-		WMT_ERR_FUNC("gRxCount != 0 (%d), reset it!\n", atomic_read(&gRxCount));
-		atomic_set(&gRxCount, 0);
-	}
-
+	wmt_dev_rx_wait_disarm(pEvent, lRet > 0 ? "wake" : "timeout-or-error");
 	return lRet;
 }
 

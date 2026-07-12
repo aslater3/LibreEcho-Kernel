@@ -243,8 +243,8 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 	if (g_echo_wmt_ctrl_diag_count < 32)
 		pr_err("ECHO_WMT_RX: enter buff=%u state=0x%lx\n", buffLen,
 		       pDev->state.data);
-	/* sanity ok, proceeding rx operation */
-	/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
+	/* Arm before checking the queue so arrival cannot race waiter setup. */
+	wmt_dev_rx_wait_arm(&pDev->rWmtRxWq);
 	readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
 	if (g_echo_wmt_ctrl_diag_count < 32)
 		pr_err("ECHO_WMT_RX: initial_read=%d\n", readLen);
@@ -288,12 +288,16 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 			pr_err("ECHO_WMT_RX: post_wait_read=%d\n", readLen);
 		g_echo_wmt_ctrl_diag_count++;
 
+		if (readLen == 0)
+			wmt_dev_rx_wait_arm(&pDev->rWmtRxWq);
+
 		WMT_DBG_FUNC("readLen(%d)\n", readLen);
 	}
 
 	if (readSize)
 		*readSize = readLen;
 
+	wmt_dev_rx_wait_disarm(&pDev->rWmtRxWq, "initial-read");
 	return 0;
 
 }
