@@ -966,8 +966,21 @@
 */
 #include "precomp.h"
 #include "mgmt/ais_fsm.h"
+#include <mt-plat/mtk_ram_console.h>
 
 extern UINT32 wmt_plat_read_cpupcr(VOID);
+
+#define ECHO_WLAN_PERSIST_DOWNLOAD 0xE2
+#define ECHO_WLAN_PERSIST_START 0xE3
+#define ECHO_WLAN_PERSIST_FIRST_EXEC 0xE4
+#define ECHO_WLAN_PERSIST_MAIN_EXEC 0xE5
+#define ECHO_WLAN_PERSIST_READY_POLL 0xE6
+#define ECHO_WLAN_PERSIST_TIMEOUT 0xE7
+
+static VOID echoWlanPersistStage(IN UINT_8 ucStage)
+{
+	aee_rr_rec_fiq_step(ucStage);
+}
 
 #if CFG_ENABLE_FW_DOWNLOAD
 static VOID echoWlanExecutionSnapshot(IN P_ADAPTER_T prAdapter, IN const char *pszStage)
@@ -1566,6 +1579,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 
 		/* 4. send Wi-Fi Start command */
 		echoWlanCpuHistReset();
+		echoWlanPersistStage(ECHO_WLAN_PERSIST_DOWNLOAD);
 		pr_err("ECHO_WLAN_STAGE: 114 firmware download/ACK path complete cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
 		echoWlanHifSnapshot(prAdapter, "before-start");
@@ -1579,6 +1593,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 #else
 		wlanConfigWifiFunc(prAdapter, FALSE, 0);
 #endif
+		echoWlanPersistStage(ECHO_WLAN_PERSIST_START);
 		pr_err("ECHO_WLAN_STAGE: 116 after Wi-Fi start command cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
 		echoWlanHifSnapshot(prAdapter, "after-start");
@@ -1586,6 +1601,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 
 		pr_err("ECHO_WLAN_STAGE: 120 enter firmware-ready wait cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
+		echoWlanPersistStage(ECHO_WLAN_PERSIST_READY_POLL);
 		echoWlanCpuHistWarmup(prAdapter);
 		pr_err("ECHO_WLAN_STAGE: 120 histogram warmup complete entries=%u cpu=%u jiffies=%lu\n",
 		       u4EchoFwCpuHistEntries, raw_smp_processor_id(), jiffies);
@@ -1602,6 +1618,8 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 				u4PollCpupcr = wmt_plat_read_cpupcr();
 				HAL_MCR_RD(prAdapter, MCR_D2HRM0R, &u4PollD2h0);
 				HAL_MCR_RD(prAdapter, MCR_D2HRM1R, &u4PollD2h1);
+				if ((u4PollCpupcr & 0xf0000000) == 0xf0000000)
+					echoWlanPersistStage(ECHO_WLAN_PERSIST_MAIN_EXEC);
 				pr_err("ECHO_FW_POLL: iter=%u CPUPCR=0x%08x WCIR=0x%08x "
 				       "D2HRM0=0x%08x D2HRM1=0x%08x cpu=%u jiffies=%lu\n",
 				       i, u4PollCpupcr, u4Value, u4PollD2h0, u4PollD2h1,
@@ -1633,6 +1651,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 					DBGLOG(INIT, ERROR, "Waiting for Ready bit: Timeout, ID=%u\n",
 							     (u4MailBox0 & 0x0000FFFF));
 					u4Status = WLAN_STATUS_FAILURE;
+					echoWlanPersistStage(ECHO_WLAN_PERSIST_TIMEOUT);
 					break;
 				}
 				i++;
@@ -3332,6 +3351,7 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 		}
 
 		echoWlanExecutionSnapshot(prAdapter, "after-start-0us");
+		echoWlanPersistStage(ECHO_WLAN_PERSIST_FIRST_EXEC);
 		udelay(10);
 		echoWlanExecutionSnapshot(prAdapter, "after-start-10us");
 		udelay(90);

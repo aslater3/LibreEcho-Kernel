@@ -141,6 +141,7 @@
 ********************************************************************************
 */
 #include <linux/interrupt.h>
+#include <mt-plat/mtk_ram_console.h>
 /* #include <linux/kernel.h> */
 #include <linux/device.h>
 /* #include <linux/errno.h> */
@@ -1737,7 +1738,10 @@ static int HifAhbProbe(VOID)
 {
 	int Ret = 0;
 	int i4ProbeRet;
+	int i4PreviousStage = aee_rr_curr_fiq_step();
 
+	pr_err("ECHO_RET: previous persistent stage=0x%02x\n", i4PreviousStage);
+	aee_rr_rec_fiq_step(0xE1);
 	pr_err("ECHO_RET: HifAhbProbe enter cpu=%u jiffies=%lu\n",
 	       raw_smp_processor_id(), jiffies);
 
@@ -1794,6 +1798,7 @@ static int HifAhbProbe(VOID)
 
 	pr_err("ECHO_RET: HifAhbProbe return=%d cpu=%u jiffies=%lu\n",
 	       Ret, raw_smp_processor_id(), jiffies);
+	aee_rr_rec_fiq_step(0xE8);
 	return Ret;
 }
 
