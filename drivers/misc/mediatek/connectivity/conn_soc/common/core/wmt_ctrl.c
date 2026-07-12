@@ -212,6 +212,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 {
 	P_DEV_WMT pDev = &gDevWmt;	/* single instance */
 	INT32 readLen;
+	unsigned int diag_no;
 	long waitRet = -1;
 	PUINT8 pBuff = (PUINT8) pWmtCtrlData->au4CtrlData[0];
 	UINT32 buffLen = pWmtCtrlData->au4CtrlData[1];
@@ -226,6 +227,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		osal_assert(buffLen);
 		return 0;
 	}
+	diag_no = g_echo_wmt_ctrl_diag_count++;
 #if 0
 	if (!pDev) {
 		WMT_WARN_FUNC("gpDevWmt = NULL\n");
@@ -240,13 +242,13 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		return -2;
 	}
 
-	if (g_echo_wmt_ctrl_diag_count < 32)
+	if (diag_no < 8)
 		pr_err("ECHO_WMT_RX: enter buff=%u state=0x%lx\n", buffLen,
 		       pDev->state.data);
 	/* Arm before checking the queue so arrival cannot race waiter setup. */
 	wmt_dev_rx_wait_arm(&pDev->rWmtRxWq);
 	readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
-	if (g_echo_wmt_ctrl_diag_count < 32)
+	if (diag_no < 8)
 		pr_err("ECHO_WMT_RX: initial_read=%d\n", readLen);
 
 	while (readLen == 0) {	/* got nothing, wait for STP's signal */
@@ -262,7 +264,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		waitRet = wmt_dev_rx_timeout(&pDev->rWmtRxWq);
 
 		WMT_LOUD_FUNC("wmt_dev_rx_timeout returned\n");
-		if (g_echo_wmt_ctrl_diag_count < 32)
+		if (diag_no < 8)
 			pr_err("ECHO_WMT_RX: wait_ret=%ld\n", waitRet);
 
 		if (0 == waitRet) {
@@ -284,10 +286,8 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 			WMT_WARN_FUNC("wmt_ctrl_rx be signaled, but no rx data(%ld)\n", waitRet);
 #endif
 
-		if (g_echo_wmt_ctrl_diag_count < 32 || readLen == 0)
+		if (diag_no < 8 || readLen == 0)
 			pr_err("ECHO_WMT_RX: post_wait_read=%d\n", readLen);
-		g_echo_wmt_ctrl_diag_count++;
-
 		if (readLen == 0)
 			wmt_dev_rx_wait_arm(&pDev->rWmtRxWq);
 

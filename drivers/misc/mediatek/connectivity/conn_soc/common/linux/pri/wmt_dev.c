@@ -76,6 +76,7 @@ UINT32 u4RxFlag = 0x0;
 static atomic_t gRxCount = ATOMIC_INIT(0);
 static DEFINE_SPINLOCK(gRxLock);
 static unsigned int g_echo_wmt_rx_diag_count;
+static unsigned int g_echo_wmt_wait_diag_count;
 
 VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent)
 {
@@ -86,7 +87,10 @@ VOID wmt_dev_rx_wait_arm(P_OSAL_EVENT pEvent)
 	u4RxFlag = 0;
 	atomic_set(&gRxCount, 0);
 	spin_unlock_irqrestore(&gRxLock, flags);
-	pr_err("ECHO_WMT_ARM: count=0 flag=0 event=%p\n", pEvent);
+	if (g_echo_wmt_wait_diag_count < 8) {
+		pr_err("ECHO_WMT_ARM: count=0 flag=0 event=%p\n", pEvent);
+		g_echo_wmt_wait_diag_count++;
+	}
 }
 
 VOID wmt_dev_rx_wait_disarm(P_OSAL_EVENT pEvent, const char *reason)
@@ -99,7 +103,10 @@ VOID wmt_dev_rx_wait_disarm(P_OSAL_EVENT pEvent, const char *reason)
 	u4RxFlag = 0;
 	atomic_set(&gRxCount, 0);
 	spin_unlock_irqrestore(&gRxLock, flags);
-	pr_err("ECHO_WMT_DISARM: reason=%s\n", reason);
+	if (g_echo_wmt_wait_diag_count < 16 && strcmp(reason, "initial-read")) {
+		pr_err("ECHO_WMT_DISARM: reason=%s\n", reason);
+		g_echo_wmt_wait_diag_count++;
+	}
 }
 
 /* Linux UINT8 device */
@@ -1487,10 +1494,11 @@ VOID wmt_dev_rx_event_cb(VOID)
 	after = atomic_read(&gRxCount);
 	spin_unlock_irqrestore(&gRxLock, flags);
 
-	if (g_echo_wmt_rx_diag_count < 32)
-		pr_err("ECHO_WMT_EVENT: active=%d before=%d after=%d flag=%u event=%p\n",
-		       pEvent != NULL, before, after, u4RxFlag, pEvent);
-	g_echo_wmt_rx_diag_count++;
+	if (pEvent != NULL && g_echo_wmt_rx_diag_count < 16)
+		pr_err("ECHO_WMT_EVENT: active=1 before=%d after=%d flag=%u event=%p\n",
+		       before, after, u4RxFlag, pEvent);
+	if (pEvent != NULL)
+		g_echo_wmt_rx_diag_count++;
 	if (pEvent != NULL)
 		wake_up_interruptible(&pEvent->waitQueue);
 }
@@ -1502,9 +1510,11 @@ INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent)
 	UINT32 before_flag;
 
 	before_flag = u4RxFlag;
-	if (g_echo_wmt_rx_diag_count < 32)
+	if (g_echo_wmt_wait_diag_count < 16) {
 		pr_err("ECHO_WMT_WAIT: count=%d flag=%u timeout=%u event=%p\n",
 		       atomic_read(&gRxCount), before_flag, ms, pEvent);
+		g_echo_wmt_wait_diag_count++;
+	}
 	if (0 != ms)
 		lRet = wait_event_interruptible_timeout(pEvent->waitQueue, 0 != u4RxFlag, msecs_to_jiffies(ms));
 	else
