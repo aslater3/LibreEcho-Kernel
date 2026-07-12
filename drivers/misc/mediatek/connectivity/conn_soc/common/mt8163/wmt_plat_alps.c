@@ -927,6 +927,37 @@ UINT32 wmt_plat_read_cpupcr(void)
 }
 EXPORT_SYMBOL(wmt_plat_read_cpupcr);
 
+VOID wmt_plat_dump_ap_state(const char *pszStage)
+{
+	UINT32 pwr, ack, ack_s, rst, axi_en, axi_sta;
+	UINT32 infra0_sta, infra1_sta, osc;
+
+	if (!conn_reg.spm_base || !conn_reg.ap_rgu_base || !conn_reg.topckgen_base) {
+		WMT_PLAT_ERR_FUNC("ECHO_AP_STATE: %s bases unavailable\n", pszStage);
+		return;
+	}
+
+	pwr = CONSYS_REG_READ(conn_reg.spm_base + CONSYS_TOP1_PWR_CTRL_OFFSET);
+	ack = CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_OFFSET);
+	ack_s = CONSYS_REG_READ(conn_reg.spm_base + CONSYS_PWR_CONN_ACK_S_OFFSET);
+	rst = CONSYS_REG_READ(conn_reg.ap_rgu_base + CONSYS_CPU_SW_RST_OFFSET);
+	axi_en = CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_EN_OFFSET);
+	axi_sta = CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_TOPAXI_PROT_STA1_OFFSET);
+	/* infracfg is the second 0x1000 window in the DT-mapped 0x2000 region. */
+	infra0_sta = CONSYS_REG_READ(conn_reg.topckgen_base + 0x1090);
+	infra1_sta = CONSYS_REG_READ(conn_reg.topckgen_base + 0x1094);
+	osc = CONSYS_REG_READ(conn_reg.topckgen_base + CONSYS_AP2CONN_OSC_EN_OFFSET);
+
+	WMT_PLAT_ERR_FUNC("ECHO_AP_STATE: %s pwr=0x%08x ack=0x%08x ack_s=0x%08x "
+			  "rst=0x%08x axi_en=0x%08x axi_sta=0x%08x "
+			  "infra0_sta=0x%08x infra1_sta=0x%08x osc=0x%08x "
+			  "pmic_conn=%u wifi_dma=%u\n",
+			  pszStage, pwr, ack, ack_s, rst, axi_en, axi_sta,
+			  infra0_sta, infra1_sta, osc,
+			  !!(infra0_sta & BIT(3)), !!(infra1_sta & BIT(18)));
+}
+EXPORT_SYMBOL(wmt_plat_dump_ap_state);
+
 UINT32 wmt_plat_read_dmaregs(UINT32 type)
 {
 	return 0;

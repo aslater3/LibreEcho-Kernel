@@ -969,6 +969,7 @@
 #include <mt-plat/mtk_ram_console.h>
 
 extern UINT32 wmt_plat_read_cpupcr(VOID);
+extern VOID wmt_plat_dump_ap_state(const char *pszStage);
 
 #define ECHO_WLAN_PERSIST_DOWNLOAD 0xE2
 #define ECHO_WLAN_PERSIST_START 0xE3
@@ -1553,6 +1554,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		/* 4. send Wi-Fi Start command */
 		echoWlanCpuHistReset();
 		echoWlanPersistStage(ECHO_WLAN_PERSIST_DOWNLOAD);
+		wmt_plat_dump_ap_state("before-start");
 		pr_err("ECHO_WLAN_STAGE: 114 firmware download/ACK path complete cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
 		echoWlanHifSnapshot(prAdapter, "before-start");
@@ -1569,6 +1571,11 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		echoWlanPersistStage(ECHO_WLAN_PERSIST_START);
 		pr_err("ECHO_WLAN_STAGE: 116 after Wi-Fi start command cpu=%u jiffies=%lu\n",
 		       raw_smp_processor_id(), jiffies);
+		wmt_plat_dump_ap_state("after-start-0us");
+		udelay(100);
+		wmt_plat_dump_ap_state("after-start-100us");
+		udelay(900);
+		wmt_plat_dump_ap_state("after-start-1ms");
 		echoWlanHifSnapshot(prAdapter, "after-start");
 #endif
 
@@ -1583,6 +1590,8 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		/* 4 <5> check Wi-Fi FW asserts ready bit */
 		i = 0;
 		while (1) {
+			if (i == 0)
+				wmt_plat_dump_ap_state("before-ready-read");
 			if (i < 5 || (i % 100) == 0)
 				pr_err("ECHO_WLAN_STAGE: 121 ready poll before read iter=%u mask=0x%08x cpu=%u jiffies=%lu\n",
 				       i, (UINT_32) WCIR_WLAN_READY, raw_smp_processor_id(), jiffies);
