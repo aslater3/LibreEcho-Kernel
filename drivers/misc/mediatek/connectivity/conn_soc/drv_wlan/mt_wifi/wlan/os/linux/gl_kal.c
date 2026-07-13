@@ -798,7 +798,7 @@ static VOID echoFirmwareCleanupMarker(UINT_8 ucStage, const char *pszLabel,
 					      PVOID pvBuffer)
 {
 	aee_rr_rec_fiq_step(ucStage);
-	pr_err("ECHO_FW_CLEANUP stage=0x%02x label=%s pid=%d comm=%s cpu=%u jiffies=%lu preempt=%u irq=%u interrupt=%u buf=%p filp=%p cred=%p uid=%u gid=%u\n",
+	pr_err("ECHO_FW_CLEANUP stage=0x%02x label=%s pid=%d comm=%s cpu=%u jiffies=%lu preempt=%u irq=%u interrupt=%lu buf=%p filp=%p cred=%p uid=%u gid=%u\n",
 		ucStage, pszLabel, current->pid, current->comm,
 		raw_smp_processor_id(), jiffies, preempt_count(),
 		irqs_disabled(), in_interrupt(), pvBuffer, filp,
@@ -807,7 +807,7 @@ static VOID echoFirmwareCleanupMarker(UINT_8 ucStage, const char *pszLabel,
 
 static VOID echoFirmwareTaskMarker(const char *pszLabel)
 {
-	pr_err("ECHO_FW_%s pid=%d comm=%s cpu=%u jiffies=%lu preempt=%u irq=%u interrupt=%u filp=%p cred=%p uid=%u gid=%u\n",
+	pr_err("ECHO_FW_%s pid=%d comm=%s cpu=%u jiffies=%lu preempt=%u irq=%u interrupt=%lu filp=%p cred=%p uid=%u gid=%u\n",
 		pszLabel, current->pid, current->comm, raw_smp_processor_id(),
 		jiffies, preempt_count(), irqs_disabled(), in_interrupt(), filp,
 		current_cred(), orgfsuid, orgfsgid);
@@ -828,6 +828,7 @@ static VOID echoFirmwareTaskMarker(const char *pszLabel)
 WLAN_STATUS kalFirmwareOpen(IN P_GLUE_INFO_T prGlueInfo)
 {
 	UINT_8 aucFilePath[50];
+	struct cred *cred;
 
 	echoFirmwareTaskMarker("OPEN");
 
@@ -837,7 +838,7 @@ WLAN_STATUS kalFirmwareOpen(IN P_GLUE_INFO_T prGlueInfo)
 
 	/* save uid and gid used for filesystem access.
 	 * set user and group to 0(root) */
-	struct cred *cred = (struct cred *)get_current_cred();
+	cred = (struct cred *)get_current_cred();
 
 	orgfsuid = cred->fsuid.val;
 	orgfsgid = cred->fsgid.val;
