@@ -2430,9 +2430,10 @@ static int _btif_rx_btm_sched(p_mtk_btif p_btif)
 	}
 
 	if (BTIF_THREAD_CTX == p_btif->btm_type) {
+		aee_rr_rec_fiq_step(0xDB); /* before completion wakeup */
 		complete(&p_btif->rx_comp);
-		btif_ftrace_print("%s:schedule btif_rx_thread!\n", __func__);
-		BTIF_DBG_FUNC("schedule btif_rx_thread\n");
+		aee_rr_rec_fiq_step(0xDC); /* after completion wakeup */
+		aee_rr_rec_fiq_step(0xDF); /* return from scheduling handoff */
 	} else if (BTIF_WQ_CTX == p_btif->btm_type) {
 		queue_work(p_btif->p_rx_wq, &(p_btif->rx_work));
 		BTIF_DBG_FUNC("schedule btif_rx_worker\n");
