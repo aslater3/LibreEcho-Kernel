@@ -1653,6 +1653,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 				if (i < 5)
 					pr_err("ECHO_WLAN_STAGE: 121 card/bus check passed iter=%u cpu=%u jiffies=%lu\n",
 					       i, raw_smp_processor_id(), jiffies);
+				aee_rr_rec_fiq_step(0xB0); /* after card check */
 				if (i >= CFG_RESPONSE_POLLING_TIMEOUT) {
 					UINT_32 u4MailBox0;
 
@@ -1663,14 +1664,12 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 					echoWlanPersistStage(ECHO_WLAN_PERSIST_TIMEOUT);
 					break;
 				}
+				aee_rr_rec_fiq_step(0xB1); /* after timeout test */
 				i++;
-				if (i <= 5)
-					pr_err("ECHO_WLAN_STAGE: 121 before ready sleep iter=%u cpu=%u jiffies=%lu\n",
-					       i, raw_smp_processor_id(), jiffies);
+				aee_rr_rec_fiq_step(0xB2); /* after increment */
+				aee_rr_rec_fiq_step(0xB3); /* immediately before sleep */
 				kalMsleep(10);
-				if (i <= 5)
-					pr_err("ECHO_WLAN_STAGE: 121 after ready sleep iter=%u cpu=%u jiffies=%lu\n",
-					       i, raw_smp_processor_id(), jiffies);
+				aee_rr_rec_fiq_step(0xB4); /* sleep returned */
 			}
 		}
 
