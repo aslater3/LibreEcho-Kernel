@@ -508,7 +508,8 @@ class CrcWakeupTests(unittest.TestCase):
         self.assertLess(arm_pos, send_pos)
         self.assertIn("wmt_dev_stp_error_snapshot", ctrl)
         self.assertRegex(ctrl, r"waitRet\s*==\s*-EBADMSG")
-        self.assertRegex(ctrl, r"return\s+waitRet")
+        self.assertRegex(ctrl, r"iRet\s*=\s*waitRet")
+        self.assertRegex(ctrl, r"return\s+iRet")
 
     def test_protocol_error_precedes_immediate_queued_data(self) -> None:
         ctrl = extract_function(WMT_CTRL.read_text(), "wmt_ctrl_rx")

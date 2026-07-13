@@ -211,6 +211,7 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 {
 	P_DEV_WMT pDev = &gDevWmt;	/* single instance */
 	INT32 readLen;
+	INT32 iRet = 0;
 	long waitRet = -1;
 	UINT32 errorGeneration;
 	PUINT8 pBuff = (PUINT8) pWmtCtrlData->au4CtrlData[0];
@@ -247,13 +248,18 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 	 * a stale response was already queued before this receive starts.
 	 */
 	errorGeneration = wmt_dev_stp_error_snapshot();
-	if (wmt_dev_stp_error_generation() != errorGeneration)
-		return -EBADMSG;
+	wmt_dev_rx_event_arm(&pDev->rWmtRxWq);
+	if (wmt_dev_stp_error_generation() != errorGeneration) {
+		iRet = -EBADMSG;
+		goto rx_done;
+	}
 	/* sanity ok, proceeding rx operation */
 	/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
 	readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
-	if (wmt_dev_stp_error_generation() != errorGeneration)
-		return -EBADMSG;
+	if (wmt_dev_stp_error_generation() != errorGeneration) {
+		iRet = -EBADMSG;
+		goto rx_done;
+	}
 
 	while (readLen == 0) {	/* got nothing, wait for STP's signal */
 		WMT_LOUD_FUNC("before wmt_dev_rx_timeout\n");
@@ -271,20 +277,25 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 
 		if (waitRet == -EBADMSG) {
 			WMT_ERR_FUNC("STP protocol error while waiting for WMT response\n");
-			return waitRet;
+			iRet = waitRet;
+			goto rx_done;
 		} else if (0 == waitRet) {
 			WMT_ERR_FUNC("wmt_dev_rx_timeout: timeout,jiffies(%lu),timeoutvalue(%d)\n",
 				     jiffies, pDev->rWmtRxWq.timeoutValue);
-			return -1;
+			iRet = -1;
+			goto rx_done;
 		} else if (waitRet < 0) {
 			WMT_WARN_FUNC("wmt_dev_rx_timeout: interrupted by signal (%ld)\n", waitRet);
-			return waitRet;
+			iRet = waitRet;
+			goto rx_done;
 		}
 		WMT_DBG_FUNC("wmt_dev_rx_timeout, iRet(%ld)\n", waitRet);
 		/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
 		readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
-		if (wmt_dev_stp_error_generation() != errorGeneration)
-			return -EBADMSG;
+		if (wmt_dev_stp_error_generation() != errorGeneration) {
+			iRet = -EBADMSG;
+			goto rx_done;
+		}
 
 		if (0 == readLen)
 #ifdef CONFIG_MTK_WIFI_LOGGING_REDUCTION
@@ -299,7 +310,9 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 	if (readSize)
 		*readSize = readLen;
 
-	return 0;
+rx_done:
+	wmt_dev_rx_event_disarm(&pDev->rWmtRxWq);
+	return iRet;
 
 }
 
