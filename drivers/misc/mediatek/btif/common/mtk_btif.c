@@ -2,6 +2,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <mt-plat/mtk_ram_console.h>
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/platform_device.h>
@@ -1028,6 +1029,8 @@ irqreturn_t btif_rx_dma_irq_handler(int irq, void *data)
 	p_mtk_btif_dma p_rx_dma = p_btif->p_rx_dma;
 	P_MTK_DMA_INFO_STR p_rx_dma_info = p_rx_dma->p_dma_info;
 
+	aee_rr_rec_fiq_step(0xD0); /* RX DMA IRQ entry */
+
 	BTIF_DBG_FUNC("++, p_btif(0x%p)\n", data);
 
 	_btif_irq_ctrl(p_rx_dma_info->p_irq, false);
@@ -1037,7 +1040,9 @@ irqreturn_t btif_rx_dma_irq_handler(int irq, void *data)
 	hal_btif_dma_clk_ctrl(p_rx_dma_info, CLK_OUT_ENABLE);
 #endif
 
+	aee_rr_rec_fiq_step(0xD1); /* before HAL RX handler */
 	hal_rx_dma_irq_handler(p_rx_dma_info, NULL, 0);
+	aee_rr_rec_fiq_step(0xD5); /* after HAL RX handler */
 
 #if MTK_BTIF_ENABLE_CLK_REF_COUNTER
 	hal_btif_dma_clk_ctrl(p_rx_dma_info, CLK_OUT_DISABLE);
@@ -1046,7 +1051,9 @@ irqreturn_t btif_rx_dma_irq_handler(int irq, void *data)
 
 	_btif_irq_ctrl(p_rx_dma_info->p_irq, true);
 
+	aee_rr_rec_fiq_step(0xD6); /* before RX thread scheduling */
 	_btif_rx_btm_sched(p_btif);
+	aee_rr_rec_fiq_step(0xD7); /* after RX thread scheduling */
 
 	BTIF_DBG_FUNC("--\n");
 
@@ -2087,9 +2094,11 @@ we record wr_idx here*/
 					    (wr_idx - (p_bbs)->rd_idx) :
 					    BBS_SIZE(p_bbs) -
 					    ((p_bbs)->rd_idx - wr_idx);
-					if (p_btif->rx_cb)
+					if (p_btif->rx_cb) {
+						aee_rr_rec_fiq_step(0xD9); /* before STP callback */
 						(*(p_btif->rx_cb)) (p_buf, length);
-					else
+						aee_rr_rec_fiq_step(0xDA); /* after STP callback */
+					} else
 						BTIF_ERR_FUNC("p_btif->rx_cb is NULL\n");
 					/*update rx data read index*/
 					p_bbs->rd_idx = wr_idx;
@@ -2098,17 +2107,21 @@ we record wr_idx here*/
 					    BBS_SIZE(p_bbs) - (p_bbs)->rd_idx;
 					/*p_buf = &(p_bbs->buf[p_bbs->->rd_idx]);*/
 					p_buf = BBS_PTR(p_bbs, p_bbs->rd_idx);
-					if (p_btif->rx_cb)
+					if (p_btif->rx_cb) {
+						aee_rr_rec_fiq_step(0xD9); /* before STP callback */
 						(*(p_btif->rx_cb)) (p_buf, len_tail);
-					else
+						aee_rr_rec_fiq_step(0xDA); /* after STP callback */
+					} else
 						BTIF_ERR_FUNC("p_btif->rx_cb is NULL\n");
 					length = BBS_COUNT_CUR(p_bbs, wr_idx);
 					length -= len_tail;
 					/*p_buf = &(p_bbs->buf[0]);*/
 					p_buf = BBS_PTR(p_bbs, 0);
-					if (p_btif->rx_cb)
+					if (p_btif->rx_cb) {
+						aee_rr_rec_fiq_step(0xD9); /* before STP callback */
 						(*(p_btif->rx_cb)) (p_buf, length);
-					else
+						aee_rr_rec_fiq_step(0xDA); /* after STP callback */
+					} else
 						BTIF_ERR_FUNC("p_btif->rx_cb is NULL\n");
 					/*update rx data read index*/
 					p_bbs->rd_idx = wr_idx;
@@ -2149,6 +2162,7 @@ static int btif_rx_thread(void *p_data)
 			wait_for_completion_interruptible(&p_btif->rx_comp);
 		}
 #endif
+		aee_rr_rec_fiq_step(0xD8); /* btif_rxd awakened */
 		if (kthread_should_stop()) {
 			BTIF_WARN_FUNC("btif rx thread stoping ...\n");
 			break;

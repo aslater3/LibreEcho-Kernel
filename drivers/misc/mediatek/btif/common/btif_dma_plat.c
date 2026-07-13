@@ -1042,6 +1042,7 @@ int hal_rx_dma_irq_handler(P_MTK_DMA_INFO_STR p_dma_info,
 							vfifo);
 	unsigned long flag = 0;
 
+	aee_rr_rec_fiq_step(0xD2); /* HAL RX handler entry */
 	spin_lock_irqsave(&(g_clk_cg_spinlock), flag);
 #if defined(CONFIG_MTK_CLKMGR)
 	if (0 == clock_is_on(MTK_BTIF_APDMA_CLK_CG)) {
@@ -1065,6 +1066,7 @@ int hal_rx_dma_irq_handler(P_MTK_DMA_INFO_STR p_dma_info,
 		    ("rx interrupt, no data available in Rx DMA, wpt(0x%08x), rpt(0x%08x)\n",
 		     rpt, wpt);
 	}
+	aee_rr_rec_fiq_step(0xD3); /* after first RX DMA snapshot */
 
 	i_ret = 0;
 
@@ -1136,6 +1138,7 @@ int hal_rx_dma_irq_handler(P_MTK_DMA_INFO_STR p_dma_info,
 	}
 
 /*enable DMA Rx IER*/
+	aee_rr_rec_fiq_step(0xD4); /* HAL RX normal exit */
 	hal_btif_dma_ier_ctrl(p_dma_info, true);
 
 	spin_unlock_irqrestore(&(g_clk_cg_spinlock), flag);
