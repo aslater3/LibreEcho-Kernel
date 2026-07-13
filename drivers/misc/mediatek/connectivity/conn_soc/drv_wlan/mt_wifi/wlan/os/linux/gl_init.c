@@ -673,6 +673,7 @@
 #include "gl_wext.h"
 #include "gl_cfg80211.h"
 #include "precomp.h"
+#include <mt-plat/mtk_ram_console.h>
 #if CFG_SUPPORT_AGPS_ASSIST
 #include "gl_kal.h"
 #endif
@@ -687,6 +688,7 @@
 ********************************************************************************
 */
 /* #define MAX_IOREQ_NUM   10 */
+#define ECHO_WLAN_PERSIST_CLEANUP_DONE 0xDE
 
 BOOLEAN fgIsUnderSuspend = false;
 
@@ -3957,6 +3959,7 @@ static INT_32 wlanProbe(PVOID pvData)
 			}
 
 			kalFirmwareImageUnmapping(prGlueInfo, NULL, prFwBuffer);
+			aee_rr_rec_fiq_step(ECHO_WLAN_PERSIST_CLEANUP_DONE);
 			pr_err("ECHO_WLAN_STAGE: 142 firmware unmapped status=%d cpu=%u jiffies=%lu\n",
 			       i4Status, raw_smp_processor_id(), jiffies);
 

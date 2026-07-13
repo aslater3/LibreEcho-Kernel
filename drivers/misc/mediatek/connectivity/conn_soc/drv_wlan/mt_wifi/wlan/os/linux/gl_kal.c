@@ -699,6 +699,7 @@
 #include "gl_os.h"
 #include "gl_wext.h"
 #include "precomp.h"
+#include <mt-plat/mtk_ram_console.h>
 #if defined(CONFIG_MTK_TC1_FEATURE)
 #include <tc1_partition.h>
 #endif
@@ -778,6 +779,40 @@ static uid_t orgfsuid;
 static gid_t orgfsgid;
 static mm_segment_t orgfs;
 
+#define ECHO_FW_CLEANUP_ENTER 0xD0
+#define ECHO_FW_CLEANUP_BEFORE_VFREE 0xD1
+#define ECHO_FW_CLEANUP_AFTER_VFREE 0xD2
+#define ECHO_FW_CLEANUP_BEFORE_CLOSE 0xD3
+#define ECHO_FW_CLEANUP_CLOSE_ENTER 0xD4
+#define ECHO_FW_CLEANUP_BEFORE_FILP_CLOSE 0xD5
+#define ECHO_FW_CLEANUP_AFTER_FILP_CLOSE 0xD6
+#define ECHO_FW_CLEANUP_BEFORE_FS_RESTORE 0xD7
+#define ECHO_FW_CLEANUP_AFTER_FS_RESTORE 0xD8
+#define ECHO_FW_CLEANUP_BEFORE_CRED_RESTORE 0xD9
+#define ECHO_FW_CLEANUP_AFTER_CRED_RESTORE 0xDA
+#define ECHO_FW_CLEANUP_CLOSE_RETURN 0xDB
+#define ECHO_FW_CLEANUP_AFTER_CLOSE 0xDC
+#define ECHO_FW_CLEANUP_RETURN 0xDD
+
+static VOID echoFirmwareCleanupMarker(UINT_8 ucStage, const char *pszLabel,
+					      PVOID pvBuffer)
+{
+	aee_rr_rec_fiq_step(ucStage);
+	pr_err("ECHO_FW_CLEANUP stage=0x%02x label=%s pid=%d comm=%s cpu=%u jiffies=%lu preempt=%u irq=%u interrupt=%u buf=%p filp=%p cred=%p uid=%u gid=%u\n",
+		ucStage, pszLabel, current->pid, current->comm,
+		raw_smp_processor_id(), jiffies, preempt_count(),
+		irqs_disabled(), in_interrupt(), pvBuffer, filp,
+		current_cred(), orgfsuid, orgfsgid);
+}
+
+static VOID echoFirmwareTaskMarker(const char *pszLabel)
+{
+	pr_err("ECHO_FW_%s pid=%d comm=%s cpu=%u jiffies=%lu preempt=%u irq=%u interrupt=%u filp=%p cred=%p uid=%u gid=%u\n",
+		pszLabel, current->pid, current->comm, raw_smp_processor_id(),
+		jiffies, preempt_count(), irqs_disabled(), in_interrupt(), filp,
+		current_cred(), orgfsuid, orgfsgid);
+}
+
 /*----------------------------------------------------------------------------*/
 /*!
 * \brief This function is provided by GLUE Layer for internal driver stack to
@@ -793,6 +828,8 @@ static mm_segment_t orgfs;
 WLAN_STATUS kalFirmwareOpen(IN P_GLUE_INFO_T prGlueInfo)
 {
 	UINT_8 aucFilePath[50];
+
+	echoFirmwareTaskMarker("OPEN");
 
 	/* FIX ME: since we don't have hotplug script in the filesystem
 	 * , so the request_firmware() KAPI can not work properly
@@ -855,6 +892,7 @@ WLAN_STATUS kalFirmwareOpen(IN P_GLUE_INFO_T prGlueInfo)
 open_success:
 #endif
 	DBGLOG(INIT, TRACE, "Open FW image: %s done\n", CFG_FW_FILENAME);
+	echoFirmwareTaskMarker("OPEN_SUCCESS");
 	return WLAN_STATUS_SUCCESS;
 
 error_open:
@@ -881,26 +919,41 @@ error_open:
 WLAN_STATUS kalFirmwareClose(IN P_GLUE_INFO_T prGlueInfo)
 {
 	ASSERT(prGlueInfo);
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_CLOSE_ENTER,
+					  "close-enter", NULL);
 
 	if ((filp != NULL) && !IS_ERR(filp)) {
 		/* close firmware file */
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_FILP_CLOSE,
+					  "before-filp-close", NULL);
 		filp_close(filp, NULL);
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_FILP_CLOSE,
+					  "after-filp-close", NULL);
 
 		/* restore */
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_FS_RESTORE,
+					  "before-fs-restore", NULL);
 		set_fs(orgfs);
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_FS_RESTORE,
+					  "after-fs-restore", NULL);
 		{
 			struct cred *cred = (struct cred *)get_current_cred();
 
+			echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_CRED_RESTORE,
+						  "before-cred-restore", NULL);
 			cred->fsuid.val = orgfsuid;
 			cred->fsgid.val = orgfsgid;
 			put_cred(cred);
+			echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_CRED_RESTORE,
+						  "after-cred-restore", NULL);
+			filp = NULL;
 		}
-		filp = NULL;
 	}
 
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_CLOSE_RETURN,
+					  "close-return", NULL);
 	return WLAN_STATUS_SUCCESS;
 }
-
 /*----------------------------------------------------------------------------*/
 /*!
 * \brief This function is provided by GLUE Layer for internal driver stack to
@@ -1025,14 +1078,27 @@ PVOID kalFirmwareImageMapping(IN P_GLUE_INFO_T prGlueInfo, OUT PPVOID ppvMapFile
 VOID kalFirmwareImageUnmapping(IN P_GLUE_INFO_T prGlueInfo, IN PVOID prFwHandle, IN PVOID pvMapFileBuf)
 {
 	DEBUGFUNC("kalFirmwareImageUnmapping");
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_ENTER,
+					  "unmapping-enter", pvMapFileBuf);
 
 	ASSERT(prGlueInfo);
 
 	/* pvMapFileBuf might be NULL when file doesn't exist */
-	if (pvMapFileBuf)
+	if (pvMapFileBuf) {
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_VFREE,
+					  "before-vfree", pvMapFileBuf);
 		vfree(pvMapFileBuf);
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_VFREE,
+					  "after-vfree", NULL);
+	}
 
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_CLOSE,
+					  "before-close", NULL);
 	kalFirmwareClose(prGlueInfo);
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_CLOSE,
+					  "after-close", NULL);
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_RETURN,
+					  "unmapping-return", NULL);
 }
 
 #endif
