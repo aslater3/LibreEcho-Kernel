@@ -927,7 +927,9 @@ WLAN_STATUS kalFirmwareClose(IN P_GLUE_INFO_T prGlueInfo)
 		/* close firmware file */
 		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_FILP_CLOSE,
 					  "before-filp-close", NULL);
+		WRITE_ONCE(echo_fw_close_target, filp);
 		filp_close(filp, NULL);
+		WRITE_ONCE(echo_fw_close_target, NULL);
 		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_FILP_CLOSE,
 					  "after-filp-close", NULL);
 
