@@ -55,13 +55,7 @@
 
 #include "musb_core.h"
 
-/* Amazon debug symbols - declared extern in musb_core.h but never defined
- * in the open-source tree. Define as zeros to satisfy the linker. */
-struct usb_ep *ep_in;
-struct usb_ep *ep_out;
-int bitdebug_enabled;
-unsigned bitdebug_writeCnt;
-unsigned bitdebug_readCnt;
+/* Amazon debug symbols are provided by the enabled Android ADB gadget. */
 
 /* AUXADC IMM stubs - keep only when the AUXADC driver is not built. */
 #if !defined(CONFIG_MTK_AUXADC)
