@@ -120,6 +120,17 @@ static mtkstp_parser_state prev_state = -1;
 #define ECHO_STP_FW_FRAME_LIMIT 4
 #define ECHO_STP_FW_PAYLOAD_LIMIT 128
 
+#define ECHO_STP_ASSERT_FIQ_FW_MSG_COMPLETE 0xC0
+#define ECHO_STP_ASSERT_FIQ_LATCH_BEFORE    0xC1
+#define ECHO_STP_ASSERT_FIQ_LATCH_AFTER     0xC2
+#define ECHO_STP_ASSERT_FIQ_CTX_SAVE_BEFORE 0xC3
+#define ECHO_STP_ASSERT_FIQ_CTX_SAVE_AFTER  0xC4
+#define ECHO_STP_ASSERT_FIQ_DUMP_BEFORE     0xC5
+#define ECHO_STP_ASSERT_FIQ_DUMP_AFTER      0xC6
+#define ECHO_STP_ASSERT_FIQ_TRACE_BEFORE    0xC7
+#define ECHO_STP_ASSERT_FIQ_TRACE_AFTER     0xC8
+#define ECHO_STP_ASSERT_FIQ_HANDLER_RETURN  0xC9
+
 struct echo_stp_crc_snapshot {
 	UINT32 magic;
 	UINT32 version;
@@ -175,6 +186,16 @@ static UINT16 g_echo_last_accepted_len;
 static MTK_WCN_BOOL g_echo_fw_capture_active;
 static UINT32 g_echo_fw_frame_count;
 static UINT32 g_echo_fw_payload_bytes;
+
+static VOID echo_stp_assert_boundary(UINT8 step, const char *name)
+{
+	aee_rr_rec_fiq_step(step);
+	pr_err("ECHO_STP_ASSERT_BOUNDARY %s step=0x%02x type=%u seq=%u len=%u latched=%u\n",
+	       name, step, (UINT32)stp_core_ctx.parser.type,
+	       (UINT32)stp_core_ctx.parser.seq,
+	       (UINT32)stp_core_ctx.rx_counter,
+	       (UINT32)atomic_read(&echo_fw_assert_latched));
+}
 
 #define CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
 #ifdef CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
@@ -2412,6 +2433,16 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 						       i >= 2 ? i - 2 : 0,
 						       stp_core_ctx.parser.type == STP_TASK_INDX ?
 						       MTK_WCN_BOOL_TRUE : MTK_WCN_BOOL_FALSE);
+				if (stp_core_ctx.parser.type == STP_TASK_INDX &&
+				    stp_core_ctx.rx_counter != 0) {
+					echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_FW_MSG_COMPLETE,
+								 "FW_MSG_COMPLETE");
+					echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_LATCH_BEFORE,
+								 "FW_ASSERT_LATCH_BEFORE");
+					mtk_wcn_stp_coredump_start_ctrl(1);
+					echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_LATCH_AFTER,
+								 "FW_ASSERT_LATCH_AFTER");
+				}
 				stp_change_rx_state(MTKSTP_SYNC);
 				*(stp_core_ctx.rx_buf + stp_core_ctx.rx_counter) = '\0';
 				/* STP_ERR_FUNC("%s [%d]\n", stp_core_ctx.rx_buf, stp_core_ctx.rx_counter); */
@@ -2427,13 +2458,27 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 #endif
 				/*Trace32 Dump */
 				if (STP_IS_ENABLE_DBG(stp_core_ctx) &&
-					(stp_core_ctx.parser.type == STP_TASK_INDX)) {
-					if (0 != stp_core_ctx.rx_counter) {
+				    (stp_core_ctx.parser.type == STP_TASK_INDX)) {
+					if (mtk_wcn_stp_coredump_start_get()) {
+						pr_err("ECHO_STP_ASSERT_BYPASS: bounded assertion frame captured; legacy core-dump work skipped\n");
+					} else if (0 != stp_core_ctx.rx_counter) {
 						STP_SET_READY(stp_core_ctx, 0);
+						echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_CTX_SAVE_BEFORE,
+								 "BEFORE_STP_CTX_SAVE");
 						mtk_wcn_stp_ctx_save();
+						echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_CTX_SAVE_AFTER,
+								 "AFTER_STP_CTX_SAVE");
 						STP_INFO_FUNC("++ start to read paged dump and paged trace ++\n");
+						echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_DUMP_BEFORE,
+								 "BEFORE_NOTIFY_DUMP_WQ");
 						stp_btm_notify_wmt_dmp_wq(stp_core_ctx.btm);
+						echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_DUMP_AFTER,
+								 "AFTER_NOTIFY_DUMP_WQ");
+						echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_TRACE_BEFORE,
+								 "BEFORE_NOTIFY_TRACE_WQ");
 						stp_btm_notify_wmt_trace_wq(stp_core_ctx.btm);
+						echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_TRACE_AFTER,
+								 "AFTER_NOTIFY_TRACE_WQ");
 						STP_INFO_FUNC("++ start to read paged dump and paged trace --\n");
 
 					}
@@ -2441,8 +2486,7 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 						stp_core_ctx.rx_counter,
 						stp_core_ctx.parser.type,
 						stp_core_ctx.rx_buf);
-					}
-
+				}
 				/*Runtime FW Log */
 				else if (STP_IS_ENABLE_DBG(stp_core_ctx)
 					 && (stp_core_ctx.parser.type == INFO_TASK_INDX)) {
@@ -2451,7 +2495,8 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				}
 				/* Diagnostic mode: preserve controller state and let WLAN unwind. */
 				else {
-					mtk_wcn_stp_coredump_start_ctrl(1);
+					if (!mtk_wcn_stp_coredump_start_get())
+						mtk_wcn_stp_coredump_start_ctrl(1);
 					pr_err("ECHO_STP_FW_ASSERT_LATCHED type=%u seq=%u len=%u; reset deferred to WLAN failure unwind\n",
 					       (UINT32)stp_core_ctx.parser.type,
 					       (UINT32)stp_core_ctx.parser.seq,
@@ -2464,6 +2509,8 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 					if (i > 0)
 						p_data += 2;
 				}
+				echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_HANDLER_RETURN,
+							 "FW_MSG_HANDLER_RETURN");
 				continue;
 			} else {	/* only copy by data length */
 
