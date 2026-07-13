@@ -190,11 +190,7 @@ static UINT32 g_echo_fw_payload_bytes;
 static VOID echo_stp_assert_boundary(UINT8 step, const char *name)
 {
 	aee_rr_rec_fiq_step(step);
-	pr_err("ECHO_STP_ASSERT_BOUNDARY %s step=0x%02x type=%u seq=%u len=%u latched=%u\n",
-	       name, step, (UINT32)stp_core_ctx.parser.type,
-	       (UINT32)stp_core_ctx.parser.seq,
-	       (UINT32)stp_core_ctx.rx_counter,
-	       (UINT32)atomic_read(&echo_fw_assert_latched));
+	(void)name;
 }
 
 #define CONFIG_DEBUG_STP_TRAFFIC_SUPPORT
@@ -2460,7 +2456,7 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				if (STP_IS_ENABLE_DBG(stp_core_ctx) &&
 				    (stp_core_ctx.parser.type == STP_TASK_INDX)) {
 					if (mtk_wcn_stp_coredump_start_get()) {
-						pr_err("ECHO_STP_ASSERT_BYPASS: bounded assertion frame captured; legacy core-dump work skipped\n");
+						/* Bounded assertion capture: skip legacy core-dump work. */
 					} else if (0 != stp_core_ctx.rx_counter) {
 						STP_SET_READY(stp_core_ctx, 0);
 						echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_CTX_SAVE_BEFORE,
@@ -2497,11 +2493,8 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				else {
 					if (!mtk_wcn_stp_coredump_start_get())
 						mtk_wcn_stp_coredump_start_ctrl(1);
-					pr_err("ECHO_STP_FW_ASSERT_LATCHED type=%u seq=%u len=%u; reset deferred to WLAN failure unwind\n",
-					       (UINT32)stp_core_ctx.parser.type,
-					       (UINT32)stp_core_ctx.parser.seq,
-					       (UINT32)stp_core_ctx.rx_counter);
 				}
+
 				/*discard CRC */
 				if (i >= 2) {
 					STP_DBG_FUNC("crc discard.. i = %d\n", i);

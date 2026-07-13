@@ -1643,17 +1643,24 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 				       i, u4Value, raw_smp_processor_id(), jiffies);
 				break;
 			} else {
-				if (i < 5)
-					pr_err("ECHO_WLAN_STAGE: 121 before card/bus check iter=%u cpu=%u jiffies=%lu\n",
-					       i, raw_smp_processor_id(), jiffies);
-				if (kalIsCardRemoved(prAdapter->prGlueInfo) == TRUE || fgIsBusAccessFailed == TRUE) {
+				BOOLEAN fgCardRemoved;
+				BOOLEAN fgBusFailed;
+
+				aee_rr_rec_fiq_step(0xB0); /* before kalIsCardRemoved */
+				fgCardRemoved = kalIsCardRemoved(prAdapter->prGlueInfo);
+				aee_rr_rec_fiq_step(0xB1); /* after kalIsCardRemoved */
+
+				aee_rr_rec_fiq_step(0xB2); /* before bus-failure load */
+				fgBusFailed = READ_ONCE(fgIsBusAccessFailed);
+				aee_rr_rec_fiq_step(0xB3); /* after bus-failure load */
+
+				if (fgCardRemoved == TRUE || fgBusFailed == TRUE) {
+					aee_rr_rec_fiq_step(0xB4); /* card/bus failure */
 					u4Status = WLAN_STATUS_FAILURE;
 					break;
 				}
-				if (i < 5)
-					pr_err("ECHO_WLAN_STAGE: 121 card/bus check passed iter=%u cpu=%u jiffies=%lu\n",
-					       i, raw_smp_processor_id(), jiffies);
-				aee_rr_rec_fiq_step(0xB0); /* after card check */
+
+				aee_rr_rec_fiq_step(0xB5); /* card/bus condition passed */
 				if (i >= CFG_RESPONSE_POLLING_TIMEOUT) {
 					UINT_32 u4MailBox0;
 
@@ -1664,12 +1671,11 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 					echoWlanPersistStage(ECHO_WLAN_PERSIST_TIMEOUT);
 					break;
 				}
-				aee_rr_rec_fiq_step(0xB1); /* after timeout test */
+				aee_rr_rec_fiq_step(0xB6); /* after timeout test */
 				i++;
-				aee_rr_rec_fiq_step(0xB2); /* after increment */
-				aee_rr_rec_fiq_step(0xB3); /* immediately before sleep */
+				aee_rr_rec_fiq_step(0xB7); /* after increment */
 				kalMsleep(10);
-				aee_rr_rec_fiq_step(0xB4); /* sleep returned */
+				aee_rr_rec_fiq_step(0xB8); /* sleep returned */
 			}
 		}
 
