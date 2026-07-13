@@ -280,6 +280,9 @@ typedef struct {
 */
 
 INT32 stp_send_data_no_ps(UINT8 *buffer, UINT32 length, UINT8 type);
+VOID mtk_wcn_stp_diag_patch_before(UINT32 patch_number, UINT32 fragment,
+				   UINT32 offset);
+VOID mtk_wcn_stp_diag_patch_ack(UINT32 fragment);
 
 /*****************************************************************************
 * FUNCTION

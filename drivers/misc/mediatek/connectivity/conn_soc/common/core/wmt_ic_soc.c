@@ -2161,6 +2161,8 @@ static INT32 mtk_wcn_soc_patch_dwn(UINT32 index)
 		*(*kal_stp_tx)(pbuf + offset - sizeof(WMT_PATCH_CMD), fragSize + sizeof(WMT_PATCH_CMD),
 		*&u4Res);
 		*/
+		mtk_wcn_stp_diag_patch_before(index + 1, fragSeq,
+					      offset - sizeof(WMT_PATCH_CMD));
 		iRet =
 			wmt_core_tx(pbuf + offset - sizeof(WMT_PATCH_CMD), fragSize + sizeof(WMT_PATCH_CMD),
 				&u4Res, MTK_WCN_BOOL_FALSE);
@@ -2202,6 +2204,7 @@ static INT32 mtk_wcn_soc_patch_dwn(UINT32 index)
 			break;
 		}
 #endif
+		mtk_wcn_stp_diag_patch_ack(fragSeq);
 		WMT_DBG_FUNC("wmt_core: read WMT_PATCH_EVT length(%d, %d) ok\n", sizeof(WMT_PATCH_EVT), u4Res);
 		offset += patchSizePerFrag;
 		++fragSeq;
@@ -2342,6 +2345,8 @@ static INT32 mtk_wcn_soc_patch_dwn(VOID)
 		*	(*kal_stp_tx)(pbuf + offset - sizeof(WMT_PATCH_CMD), fragSize + sizeof(WMT_PATCH_CMD),
 		*	&u4Res);
 		*/
+		mtk_wcn_stp_diag_patch_before(1, fragSeq,
+					      offset - sizeof(WMT_PATCH_CMD));
 		iRet =
 		    wmt_core_tx(pbuf + offset - sizeof(WMT_PATCH_CMD), fragSize + sizeof(WMT_PATCH_CMD), &u4Res,
 				MTK_WCN_BOOL_FALSE);
@@ -2383,6 +2388,7 @@ static INT32 mtk_wcn_soc_patch_dwn(VOID)
 			break;
 		}
 #endif
+		mtk_wcn_stp_diag_patch_ack(fragSeq);
 		WMT_DBG_FUNC("wmt_core: read WMT_PATCH_EVT length(%d, %d) ok\n", sizeof(WMT_PATCH_EVT), u4Res);
 		offset += patchSizePerFrag;
 		++fragSeq;

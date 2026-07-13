@@ -18,6 +18,12 @@
 #include "btm_core.h"
 #include "stp_dbg.h"
 #include "stp_btif.h"
+#ifdef __KERNEL__
+#include <linux/atomic.h>
+#include <linux/bug.h>
+#include <linux/stddef.h>
+#include <mt-plat/mtk_ram_console.h>
+#endif
 
 #define PFX                         "[STP] "
 #define STP_LOG_DBG                  4
@@ -63,9 +69,255 @@ static MTK_WCN_BOOL stp_diag_should_log(UINT32 count)
 {
 	return count <= 4 || !(count & (count - 1));
 }
+
+static mtkstp_context_struct stp_core_ctx = { 0 };
+
+#ifdef __KERNEL__
+#define STP_DIAG_VERSION 1
+#define STP_TX_BOUNDARY_MAGIC 0x53545054U /* STPT */
+#define STP_CRC_SNAPSHOT_MAGIC 0x53545043U /* STPC */
+#define STP_DIAG_COMMIT_MARKER 0x434f4d54U /* COMT */
+#define STP_DIAG_STAGE_BEFORE 1
+#define STP_DIAG_STAGE_SUCCESS 2
+#define STP_DIAG_STAGE_FAILURE 3
+#define STP_DIAG_PAYLOAD_HEAD 32
+#define STP_DIAG_LAST_PAYLOAD 16
+#define STP_DIAG_RAW_TAIL 32
+
+struct stp_tx_boundary_record {
+	UINT32 magic;
+	UINT16 version;
+	UINT16 size;
+	UINT32 generation;
+	UINT32 stage;
+	UINT32 txseq;
+	UINT32 type;
+	UINT32 start;
+	UINT32 total;
+	UINT32 first_segment;
+	UINT32 second_segment;
+	INT32 callback_status;
+	UINT32 written;
+	UINT16 checksum;
+	UINT16 reserved;
+	UINT32 commit_marker;
+} __aligned(sizeof(long));
+
+struct stp_crc_snapshot {
+	UINT32 magic;
+	UINT16 version;
+	UINT16 size;
+	UINT32 generation;
+	UINT32 parser_state;
+	UINT32 rx_counter;
+	UINT8 header[MTKSTP_HEADER_SIZE];
+	UINT16 received_crc;
+	UINT16 calculated_crc;
+	UINT32 payload_length;
+	UINT8 payload_head[STP_DIAG_PAYLOAD_HEAD];
+	UINT8 last_type;
+	UINT8 last_seq;
+	UINT8 last_ack;
+	UINT8 reserved0;
+	UINT32 last_length;
+	UINT8 last_payload[STP_DIAG_LAST_PAYLOAD];
+	UINT32 raw_length;
+	UINT8 raw_tail[STP_DIAG_RAW_TAIL];
+	UINT64 btif_rx_bytes;
+	UINT64 stp_consumed_bytes;
+	UINT32 patch_number;
+	UINT32 patch_fragment;
+	UINT32 patch_offset;
+	UINT32 last_acked_fragment;
+	UINT16 checksum;
+	UINT16 reserved1;
+	UINT32 commit_marker;
+} __aligned(sizeof(long));
+
+static VOID stp_diag_build_asserts(VOID)
+{
+	BUILD_BUG_ON(sizeof(struct stp_tx_boundary_record) % sizeof(long));
+	BUILD_BUG_ON(sizeof(struct stp_crc_snapshot) % sizeof(long));
+	BUILD_BUG_ON(offsetof(struct stp_tx_boundary_record, commit_marker) %
+		     sizeof(UINT32));
+	BUILD_BUG_ON(offsetof(struct stp_crc_snapshot, commit_marker) %
+		     sizeof(UINT32));
+}
+
+static atomic_t stp_tx_boundary_taken = ATOMIC_INIT(0);
+static atomic_t stp_tx_boundary_generation = ATOMIC_INIT(0);
+static atomic_t stp_crc_snapshot_taken = ATOMIC_INIT(0);
+static atomic_t stp_crc_snapshot_generation = ATOMIC_INIT(0);
+static atomic64_t stp_diag_btif_rx_bytes = ATOMIC64_INIT(0);
+static atomic64_t stp_diag_stp_consumed_bytes = ATOMIC64_INIT(0);
+static atomic_t stp_diag_patch_number = ATOMIC_INIT(0);
+static atomic_t stp_diag_patch_fragment = ATOMIC_INIT(0);
+static atomic_t stp_diag_patch_offset = ATOMIC_INIT(0);
+static atomic_t stp_diag_patch_acked = ATOMIC_INIT(-1);
+static UINT8 stp_diag_raw_tail[STP_DIAG_RAW_TAIL];
+static UINT32 stp_diag_raw_length;
+static UINT8 stp_diag_last_payload[STP_DIAG_LAST_PAYLOAD];
+static UINT32 stp_diag_last_length;
+static UINT8 stp_diag_last_type;
+static UINT8 stp_diag_last_seq;
+static UINT8 stp_diag_last_ack;
+
+static VOID stp_diag_persist_record(VOID *record, UINT32 size,
+				    UINT16 *checksum, UINT32 *commit_marker)
+{
+	UINT32 checksum_len = (UINT8 *)checksum - (UINT8 *)record;
+
+	*checksum = 0;
+	*commit_marker = 0;
+	*checksum = osal_crc16((UINT8 *)record, checksum_len);
+	smp_wmb();
+	*commit_marker = STP_DIAG_COMMIT_MARKER;
+	smp_wmb();
+	aee_sram_fiq_save_bin((const char *)record, size);
+}
+
+static MTK_WCN_BOOL stp_diag_tx_boundary_begin(UINT32 txseq, UINT32 type,
+					       UINT32 start, UINT32 total,
+					       UINT32 first, UINT32 second,
+					       UINT32 *generation)
+{
+	struct stp_tx_boundary_record record;
+
+	if (type != WMT_TASK_INDX || atomic_cmpxchg(&stp_tx_boundary_taken, 0, 1))
+		return MTK_WCN_BOOL_FALSE;
+
+	osal_memset(&record, 0, sizeof(record));
+	record.magic = STP_TX_BOUNDARY_MAGIC;
+	record.version = STP_DIAG_VERSION;
+	record.size = sizeof(record);
+	record.generation = atomic_inc_return(&stp_tx_boundary_generation);
+	record.stage = STP_DIAG_STAGE_BEFORE;
+	record.txseq = txseq;
+	record.type = type;
+	record.start = start;
+	record.total = total;
+	record.first_segment = first;
+	record.second_segment = second;
+	*generation = record.generation;
+	stp_diag_persist_record(&record, sizeof(record), &record.checksum,
+				&record.commit_marker);
+	return MTK_WCN_BOOL_TRUE;
+}
+
+static VOID stp_diag_tx_boundary_finish(UINT32 generation, UINT32 txseq,
+					UINT32 type, UINT32 start, UINT32 total,
+					UINT32 first, UINT32 second,
+					INT32 callback_status, UINT32 written,
+					INT32 result)
+{
+	struct stp_tx_boundary_record record;
+
+	osal_memset(&record, 0, sizeof(record));
+	record.magic = STP_TX_BOUNDARY_MAGIC;
+	record.version = STP_DIAG_VERSION;
+	record.size = sizeof(record);
+	record.generation = generation;
+	record.stage = result ? STP_DIAG_STAGE_FAILURE : STP_DIAG_STAGE_SUCCESS;
+	record.txseq = txseq;
+	record.type = type;
+	record.start = start;
+	record.total = total;
+	record.first_segment = first;
+	record.second_segment = second;
+	record.callback_status = callback_status;
+	record.written = written;
+	stp_diag_persist_record(&record, sizeof(record), &record.checksum,
+				&record.commit_marker);
+}
+
+static VOID stp_diag_track_rx_chunk(const UINT8 *buffer, UINT32 length)
+{
+	UINT32 copy = length < STP_DIAG_RAW_TAIL ? length : STP_DIAG_RAW_TAIL;
+
+	stp_diag_raw_length = length;
+	if (copy)
+		osal_memcpy(stp_diag_raw_tail, buffer + length - copy, copy);
+	if (copy < STP_DIAG_RAW_TAIL)
+		osal_memset(stp_diag_raw_tail + copy, 0, STP_DIAG_RAW_TAIL - copy);
+	atomic64_add(length, &stp_diag_btif_rx_bytes);
+}
+
+static VOID stp_diag_track_accepted_frame(const UINT8 *buffer, UINT32 length,
+					  UINT8 type)
+{
+	UINT32 copy = length < STP_DIAG_LAST_PAYLOAD ? length : STP_DIAG_LAST_PAYLOAD;
+
+	stp_diag_last_type = type;
+	stp_diag_last_seq = stp_core_ctx.parser.seq;
+	stp_diag_last_ack = stp_core_ctx.parser.ack;
+	stp_diag_last_length = length;
+	if (copy)
+		osal_memcpy(stp_diag_last_payload, buffer, copy);
+	if (copy < STP_DIAG_LAST_PAYLOAD)
+		osal_memset(stp_diag_last_payload + copy, 0,
+			    STP_DIAG_LAST_PAYLOAD - copy);
+}
+
+static VOID stp_diag_crc_failure(const UINT8 *buffer, UINT32 length,
+				 UINT16 received_crc, UINT16 calculated_crc)
+{
+	struct stp_crc_snapshot record;
+	UINT32 copy;
+
+	if (atomic_cmpxchg(&stp_crc_snapshot_taken, 0, 1))
+		return;
+
+	osal_memset(&record, 0, sizeof(record));
+	record.magic = STP_CRC_SNAPSHOT_MAGIC;
+	record.version = STP_DIAG_VERSION;
+	record.size = sizeof(record);
+	record.generation = atomic_inc_return(&stp_crc_snapshot_generation);
+	record.parser_state = stp_core_ctx.parser.state;
+	record.rx_counter = stp_core_ctx.rx_counter;
+	record.header[0] = 0x80 + (stp_core_ctx.parser.seq << 3) + stp_core_ctx.parser.ack;
+	record.header[1] = (stp_core_ctx.parser.type << 4) +
+			   ((stp_core_ctx.parser.length >> 8) & 0x0f);
+	record.header[2] = stp_core_ctx.parser.length & 0xff;
+	record.header[3] = stp_core_ctx.parser.checksum;
+	record.received_crc = received_crc;
+	record.calculated_crc = calculated_crc;
+	record.payload_length = length;
+	copy = length < STP_DIAG_PAYLOAD_HEAD ? length : STP_DIAG_PAYLOAD_HEAD;
+	if (copy)
+		osal_memcpy(record.payload_head, buffer, copy);
+	record.last_type = stp_diag_last_type;
+	record.last_seq = stp_diag_last_seq;
+	record.last_ack = stp_diag_last_ack;
+	record.last_length = stp_diag_last_length;
+	osal_memcpy(record.last_payload, stp_diag_last_payload,
+		    sizeof(record.last_payload));
+	record.raw_length = stp_diag_raw_length;
+	osal_memcpy(record.raw_tail, stp_diag_raw_tail, sizeof(record.raw_tail));
+	record.btif_rx_bytes = atomic64_read(&stp_diag_btif_rx_bytes);
+	record.stp_consumed_bytes = atomic64_read(&stp_diag_stp_consumed_bytes);
+	record.patch_number = atomic_read(&stp_diag_patch_number);
+	record.patch_fragment = atomic_read(&stp_diag_patch_fragment);
+	record.patch_offset = atomic_read(&stp_diag_patch_offset);
+	record.last_acked_fragment = atomic_read(&stp_diag_patch_acked);
+	stp_diag_persist_record(&record, sizeof(record), &record.checksum,
+				&record.commit_marker);
+}
+
+VOID mtk_wcn_stp_diag_patch_before(UINT32 patch_number, UINT32 fragment,
+				   UINT32 offset)
+{
+	atomic_set(&stp_diag_patch_number, patch_number);
+	atomic_set(&stp_diag_patch_fragment, fragment);
+	atomic_set(&stp_diag_patch_offset, offset);
+}
+
+VOID mtk_wcn_stp_diag_patch_ack(UINT32 fragment)
+{
+	atomic_set(&stp_diag_patch_acked, fragment);
+}
+#endif
 /* kernel lib */
 /* int                g_block_tx = 0; */
-static mtkstp_context_struct stp_core_ctx = { 0 };
 
 #define STP_PSM_CORE(x)           ((x).psm)
 #define STP_SET_PSM_CORE(x, v)     ((x).psm = (v))
@@ -286,6 +538,9 @@ static MTK_WCN_BOOL stp_check_crc(UINT8 *buffer, UINT32 length, UINT16 crc)
 		return MTK_WCN_BOOL_TRUE;
 
 	stp_crc_failure_count++;
+#ifdef __KERNEL__
+	stp_diag_crc_failure(buffer, length, crc, checksum);
+#endif
 	if (stp_diag_should_log(stp_crc_failure_count))
 		STP_ERR_FUNC("CRC fail #%u, length=%u rx=%x calc=%x\n",
 			     stp_crc_failure_count, length, crc, checksum);
@@ -719,6 +974,9 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 	}
 
 	osal_unlock_unsleepable_lock(&stp_core_ctx.ring[type].mtx);
+#ifdef __KERNEL__
+	stp_diag_track_accepted_frame(buffer, length, type);
+#endif
 
 	return 0;
 }
@@ -733,17 +991,26 @@ static INT32 stp_add_to_rx_queue(UINT8 *buffer, UINT32 length, UINT8 type)
 * RETURNS
 *  void
 *****************************************************************************/
-static INT32 stp_if_tx_exact(UINT8 *buffer, UINT32 length)
+static INT32 stp_if_tx_exact(const UINT8 *buffer, UINT32 length,
+			     INT32 *callback_status, UINT32 *callback_written)
 {
 	UINT32 written = 0;
 	INT32 ret;
 
+	if (callback_status)
+		*callback_status = 0;
+	if (callback_written)
+		*callback_written = 0;
 	if (!buffer || !length)
 		return -EINVAL;
 	if (!sys_if_tx)
 		return -ENODEV;
 
-	ret = (*sys_if_tx)(buffer, length, &written);
+	ret = (*sys_if_tx)((PUINT8)buffer, length, &written);
+	if (callback_status)
+		*callback_status = ret;
+	if (callback_written)
+		*callback_written = written;
 	if (ret < 0) {
 		stp_tx_failure_count++;
 		if (stp_diag_should_log(stp_tx_failure_count))
@@ -767,7 +1034,17 @@ static INT32 stp_send_tx_queue(UINT32 txseq)
 	UINT32 tx_read;
 	UINT32 tx_length;
 	UINT32 first_length;
+	UINT32 second_length;
 	UINT8 *tx_buffer;
+#ifdef __KERNEL__
+	UINT32 header_offset;
+	UINT32 type;
+	UINT32 generation = 0;
+	UINT32 written = 0;
+	INT32 callback_status = 0;
+	INT32 result;
+	MTK_WCN_BOOL persist_boundary = MTK_WCN_BOOL_FALSE;
+#endif
 
 	if (txseq >= MTKSTP_SEQ_SIZE)
 		return -EINVAL;
@@ -780,7 +1057,10 @@ static INT32 stp_send_tx_queue(UINT32 txseq)
 
 	stp_update_tx_queue(txseq);
 	first_length = MTKSTP_BUFFER_SIZE - tx_read;
-	if (tx_length <= first_length) {
+	if (first_length > tx_length)
+		first_length = tx_length;
+	second_length = tx_length - first_length;
+	if (!second_length) {
 		tx_buffer = &stp_core_ctx.tx_buf[tx_read];
 	} else {
 		stp_tx_wrap_count++;
@@ -793,11 +1073,27 @@ static INT32 stp_send_tx_queue(UINT32 txseq)
 		osal_memcpy(stp_core_ctx.tx_linear_buf,
 			    &stp_core_ctx.tx_buf[tx_read], first_length);
 		osal_memcpy(stp_core_ctx.tx_linear_buf + first_length,
-			    &stp_core_ctx.tx_buf[0], tx_length - first_length);
+			    &stp_core_ctx.tx_buf[0], second_length);
 		tx_buffer = stp_core_ctx.tx_linear_buf;
 	}
 
-	return stp_if_tx_exact(tx_buffer, tx_length);
+#ifdef __KERNEL__
+	header_offset = (tx_read + (fgEnableDelimiter ? STP_DEL_SIZE : 0) + 1) %
+			MTKSTP_BUFFER_SIZE;
+	type = stp_core_ctx.tx_buf[header_offset] >> 4;
+	if (tx_read + tx_length >= MTKSTP_BUFFER_SIZE)
+		persist_boundary = stp_diag_tx_boundary_begin(txseq, type, tx_read,
+							tx_length, first_length,
+							second_length, &generation);
+	result = stp_if_tx_exact(tx_buffer, tx_length, &callback_status, &written);
+	if (persist_boundary)
+		stp_diag_tx_boundary_finish(generation, txseq, type, tx_read,
+					    tx_length, first_length, second_length,
+					    callback_status, written, result);
+	return result;
+#else
+	return stp_if_tx_exact(tx_buffer, tx_length, NULL, NULL);
+#endif
 }
 
 /*****************************************************************************
@@ -888,13 +1184,13 @@ INT32 stp_send_data_no_ps(UINT8 *buffer, UINT32 length, UINT8 type)
 		stp_dbg_pkt_log(type,
 				stp_core_ctx.sequence.txack,
 				stp_core_ctx.sequence.txseq, 0, PKT_DIR_TX, buffer, length);
-		(*sys_if_tx) (&stp_core_ctx.tx_buf[0], (MTKSTP_HEADER_SIZE + length + 2), &ret);
-		if ((MTKSTP_HEADER_SIZE + length + 2) != ret) {
-			STP_ERR_FUNC("stp send tx packet: %d, maybe stp_if_tx == NULL\n", ret);
-			osal_assert(0);
-			ret = 0;
+		tx_ret = stp_if_tx_exact(&stp_core_ctx.tx_buf[0],
+					 (MTKSTP_HEADER_SIZE + length + 2), NULL, NULL);
+		if (tx_ret) {
+			STP_ERR_FUNC("stp mandatory send failed: %d\n", tx_ret);
+			ret = tx_ret;
 		} else {
-			ret = (INT32) length;
+			ret = (INT32)length;
 		}
 
 		osal_printtimeofday("[ STP][SDIO][ E][W]");
@@ -1246,6 +1542,10 @@ INT32 mtk_wcn_stp_init(const mtkstp_callback * const cb_func)
 	INT32 ret = 0;
 	INT32 i = 0;
 
+#ifdef __KERNEL__
+	stp_diag_build_asserts();
+#endif
+
 	/* Function pointer to point to the currently used transmission interface
 	 */
 	sys_if_tx = cb_func->cb_if_tx;
@@ -1326,12 +1626,32 @@ INT32 mtk_wcn_stp_init(const mtkstp_callback * const cb_func)
 	goto RETURN;
 
 ERROR:
-	stp_psm_deinit(STP_PSM_CORE(stp_core_ctx));
+	osal_timer_stop_sync(&stp_core_ctx.tx_timer);
+	if (g_mtkstp_dbg) {
+		stp_dbg_deinit(g_mtkstp_dbg);
+		g_mtkstp_dbg = NULL;
+	}
+	if (STP_BTM_CORE(stp_core_ctx)) {
+		stp_btm_deinit(STP_BTM_CORE(stp_core_ctx));
+		STP_SET_BTM_CORE(stp_core_ctx, NULL);
+	}
+	if (STP_PSM_CORE(stp_core_ctx)) {
+		stp_psm_deinit(STP_PSM_CORE(stp_core_ctx));
+		STP_SET_PSM_CORE(stp_core_ctx, NULL);
+	}
 	if (stp_core_ctx.tx_linear_buf) {
 		osal_free(stp_core_ctx.tx_linear_buf);
 		stp_core_ctx.tx_linear_buf = NULL;
 		stp_core_ctx.tx_linear_buf_size = 0;
 	}
+	for (i = 0; i < MTKSTP_MAX_TASK_NUM; i++)
+		osal_unsleepable_lock_deinit(&stp_core_ctx.ring[i].mtx);
+	stp_ctx_lock_deinit(&stp_core_ctx);
+	sys_if_tx = NULL;
+	sys_event_set = NULL;
+	sys_event_tx_resume = NULL;
+	sys_check_function_status = NULL;
+	sys_protocol_error = NULL;
 
 RETURN:
 	return ret;
@@ -1358,9 +1678,19 @@ INT32 mtk_wcn_stp_deinit(void)
 	sys_check_function_status = NULL;
 	sys_protocol_error = NULL;
 
-	stp_dbg_deinit(g_mtkstp_dbg);
-	stp_btm_deinit(STP_BTM_CORE(stp_core_ctx));
-	stp_psm_deinit(STP_PSM_CORE(stp_core_ctx));
+	osal_timer_stop_sync(&stp_core_ctx.tx_timer);
+	if (g_mtkstp_dbg) {
+		stp_dbg_deinit(g_mtkstp_dbg);
+		g_mtkstp_dbg = NULL;
+	}
+	if (STP_BTM_CORE(stp_core_ctx)) {
+		stp_btm_deinit(STP_BTM_CORE(stp_core_ctx));
+		STP_SET_BTM_CORE(stp_core_ctx, NULL);
+	}
+	if (STP_PSM_CORE(stp_core_ctx)) {
+		stp_psm_deinit(STP_PSM_CORE(stp_core_ctx));
+		STP_SET_PSM_CORE(stp_core_ctx, NULL);
+	}
 	if (stp_core_ctx.tx_linear_buf) {
 		osal_free(stp_core_ctx.tx_linear_buf);
 		stp_core_ctx.tx_linear_buf = NULL;
@@ -2306,6 +2636,9 @@ int mtk_wcn_stp_parser_data(UINT8 *buffer, UINT32 length)
 	/*flags = (*sys_mutex_lock)(stp_core_ctx.stp_mutex); */
 	i = length;
 	p_data = (UINT8 *) buffer;
+#ifdef __KERNEL__
+	stp_diag_track_rx_chunk(buffer, length);
+#endif
 
 /* stp_dump_data(buffer, "rx queue", length); */
 
@@ -2333,6 +2666,9 @@ int mtk_wcn_stp_parser_data(UINT8 *buffer, UINT32 length)
 	/* George FIXME: WHY or HOW can we reduct the locked region? */
 	/*(*sys_mutex_unlock)(stp_core_ctx.stp_mutex, flags); */
 	STP_TRACE_FUNC("--\n");
+#ifdef __KERNEL__
+	atomic64_add(length, &stp_diag_stp_consumed_bytes);
+#endif
 	return ret;
 }
 #if !STP_EXP_HID_API_EXPORT
@@ -2525,7 +2861,11 @@ INT32 mtk_wcn_stp_send_data(const PUINT8 buffer, const UINT32 length, const UINT
 			if (!stp_psm_is_to_block_traffic(STP_PSM_CORE(stp_core_ctx))) {
 				if (stp_psm_has_pending_data(STP_PSM_CORE(stp_core_ctx))) {
 					STP_WARN_FUNC("***** Release psm hold data before send normal data *****\n");
-					stp_psm_release_data(STP_PSM_CORE(stp_core_ctx));
+					ret = stp_psm_release_data(STP_PSM_CORE(stp_core_ctx));
+					if (ret < 0) {
+						stp_psm_thread_lock_release(STP_PSM_CORE(stp_core_ctx));
+						return ret;
+					}
 				}
 			} else {
 				ret = stp_psm_hold_data(STP_PSM_CORE(stp_core_ctx), buffer, length, type);
@@ -2553,7 +2893,11 @@ INT32 mtk_wcn_stp_send_data(const PUINT8 buffer, const UINT32 length, const UINT
 				/* STP_INFO_FUNC("not to block !!\n"); */
 				if (stp_psm_has_pending_data(STP_PSM_CORE(stp_core_ctx))) {
 					STP_WARN_FUNC("***** Release psm hold data before send normal data *****\n");
-					stp_psm_release_data(STP_PSM_CORE(stp_core_ctx));
+					ret = stp_psm_release_data(STP_PSM_CORE(stp_core_ctx));
+					if (ret < 0) {
+						stp_psm_thread_lock_release(STP_PSM_CORE(stp_core_ctx));
+						return ret;
+					}
 				}
 				stp_psm_start_monitor(STP_PSM_CORE(stp_core_ctx));
 			} else {
@@ -2618,14 +2962,14 @@ DONT_MONITOR:
 		temp[1] = 0x00;
 		osal_memcpy(p_tx_buf, temp, 2);
 		stp_dbg_pkt_log(type, 0, 0, 0, PKT_DIR_TX, buffer, length);
-		(*sys_if_tx) (&stp_core_ctx.tx_buf[0], (MTKSTP_HEADER_SIZE + length + 2), &ret);
+		tx_ret = stp_if_tx_exact(&stp_core_ctx.tx_buf[0],
+					 (MTKSTP_HEADER_SIZE + length + 2), NULL, NULL);
 
-		if ((MTKSTP_HEADER_SIZE + length + 2) != ret) {
-			STP_ERR_FUNC("stp send tx packet: %d, maybe stp_if_tx == NULL\n", ret);
-			osal_assert(0);
-			ret = 0;
+		if (tx_ret) {
+			STP_ERR_FUNC("stp mandatory send failed: %d\n", tx_ret);
+			ret = tx_ret;
 		} else {
-			ret = (INT32) length;
+			ret = (INT32)length;
 		}
 
 		/* osal_printtimeofday("[ STP][SDIO][ E][W]"); */
@@ -2748,8 +3092,8 @@ INT32 _mtk_wcn_stp_send_data_raw(const PUINT8 buffer, const UINT32 length, const
 INT32 mtk_wcn_stp_send_data_raw(const PUINT8 buffer, const UINT32 length, const UINT8 type)
 #endif
 {
-	UINT32 written = 0;
-	INT32 ret = 0;
+	UINT8 old_pending_type;
+	INT32 ret;
 
 	if (0 != STP_WMT_LAST_CLOSE(stp_core_ctx)) {
 		STP_ERR_FUNC("WMT lats close,should not have tx request!");
@@ -2758,24 +3102,23 @@ INT32 mtk_wcn_stp_send_data_raw(const PUINT8 buffer, const UINT32 length, const 
 
 	STP_DBG_FUNC("mtk_wcn_stp_send_data_raw, type = %d, data = %x %x %x %x %x %x ", type, buffer[0], buffer[1],
 		     buffer[2], buffer[3], buffer[4], buffer[5]);
-	STP_SET_PENDING_TYPE(stp_core_ctx, type);	/* remember tx type, forward following rx to this type */
-
 	/* osal_lock_unsleepable_lock(&stp_core_ctx.stp_mutex); */
 	stp_ctx_lock(&stp_core_ctx);
+	old_pending_type = STP_PENDING_TYPE(stp_core_ctx);
+	STP_SET_PENDING_TYPE(stp_core_ctx, type); /* route an immediate response */
 	stp_dbg_pkt_log(type, 0, 0, 0, PKT_DIR_TX, buffer, 1);
-	(*sys_if_tx) (&buffer[0], length, &written);
+	ret = stp_if_tx_exact(buffer, length, NULL, NULL);
+	if (ret)
+		STP_SET_PENDING_TYPE(stp_core_ctx, old_pending_type);
 	/* osal_unlock_unsleepable_lock(&stp_core_ctx.stp_mutex); */
 	stp_ctx_unlock(&stp_core_ctx);
 
-	if (written == 0)
-		stp_dump_data(&buffer[0], "tx raw failed:", length);
+	if (ret) {
+		stp_dump_data(buffer, "tx raw failed:", length);
+		return ret;
+	}
 
-	if (written == length)
-		ret = (INT32) written;
-	else
-		ret = (-1);
-
-	return ret;
+	return (INT32)length;
 }
 #if !STP_EXP_HID_API_EXPORT
 EXPORT_SYMBOL(mtk_wcn_stp_send_data_raw);

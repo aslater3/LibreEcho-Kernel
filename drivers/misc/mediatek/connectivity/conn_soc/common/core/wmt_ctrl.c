@@ -240,11 +240,20 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		return -2;
 	}
 
-	/* Use the generation armed before TX so an early response error is not missed. */
+	/*
+	 * TX and RX belong to one single mtk_wmtd transaction, serialized by the
+	 * worker.  The TX path
+	 * arms this snapshot before sending, so reject a protocol error even when
+	 * a stale response was already queued before this receive starts.
+	 */
 	errorGeneration = wmt_dev_stp_error_snapshot();
+	if (wmt_dev_stp_error_generation() != errorGeneration)
+		return -EBADMSG;
 	/* sanity ok, proceeding rx operation */
 	/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
 	readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
+	if (wmt_dev_stp_error_generation() != errorGeneration)
+		return -EBADMSG;
 
 	while (readLen == 0) {	/* got nothing, wait for STP's signal */
 		WMT_LOUD_FUNC("before wmt_dev_rx_timeout\n");
@@ -274,6 +283,8 @@ INT32 wmt_ctrl_rx(P_WMT_CTRL_DATA pWmtCtrlData /*UINT8 *pBuff, UINT32 buffLen, U
 		WMT_DBG_FUNC("wmt_dev_rx_timeout, iRet(%ld)\n", waitRet);
 		/* read_len = mtk_wcn_stp_receive_data(data, size, WMT_TASK_INDX); */
 		readLen = mtk_wcn_stp_receive_data(pBuff, buffLen, WMT_TASK_INDX);
+		if (wmt_dev_stp_error_generation() != errorGeneration)
+			return -EBADMSG;
 
 		if (0 == readLen)
 #ifdef CONFIG_MTK_WIFI_LOGGING_REDUCTION

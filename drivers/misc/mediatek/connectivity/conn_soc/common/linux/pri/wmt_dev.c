@@ -2411,6 +2411,12 @@ static int WMT_init(void)
 	dev_t devID = MKDEV(gWmtMajor, 0);
 	INT32 cdevErr = -1;
 	INT32 ret = -1;
+	INT32 chrdev_registered = 0;
+	INT32 wmt_lib_initialized = 0;
+#if WMT_CREATE_NODE_DYNAMIC
+	INT32 class_created = 0;
+	INT32 device_created = 0;
+#endif
 
 	/* Guard against double-init from module_init + chip detection */
 	static int already_called = 0;
@@ -2424,13 +2430,21 @@ static int WMT_init(void)
 	gWmtInitDone = 0;
 	init_waitqueue_head((wait_queue_head_t *) &gWmtInitWq);
 
-	stp_drv_init();
+	ret = stp_drv_init();
+	if (ret) {
+		WMT_ERR_FUNC("stp_drv_init() failed (%d)\n", ret);
+		already_called = 0;
+		return ret;
+	}
 
 	ret = register_chrdev_region(devID, WMT_DEV_NUM, WMT_DRIVER_NAME);
 	if (ret) {
 		WMT_ERR_FUNC("fail to register chrdev\n");
+		stp_drv_exit();
+		already_called = 0;
 		return ret;
 	}
+	chrdev_registered = 1;
 
 	cdev_init(&gWmtCdev, &gWmtFops);
 	gWmtCdev.owner = THIS_MODULE;
@@ -2446,9 +2460,11 @@ static int WMT_init(void)
 	wmt_class = class_create(THIS_MODULE, "stpwmt");
 	if (IS_ERR(wmt_class))
 		goto error;
+	class_created = 1;
 	wmt_dev = device_create(wmt_class, NULL, devID, NULL, "stpwmt");
 	if (IS_ERR(wmt_dev))
 		goto error;
+	device_created = 1;
 #endif
 
 #if 0
@@ -2478,6 +2494,7 @@ static int WMT_init(void)
 		WMT_ERR_FUNC("wmt_lib_init() fails (%d)\n", ret);
 		goto error;
 	}
+	wmt_lib_initialized = 1;
 #if CFG_WMT_DBG_SUPPORT
 	wmt_dev_dbg_setup();
 #endif
@@ -2511,14 +2528,15 @@ static int WMT_init(void)
 	return 0;
 
 error:
-	wmt_lib_deinit();
+	if (wmt_lib_initialized)
+		wmt_lib_deinit();
 #if CFG_WMT_DBG_SUPPORT
 	wmt_dev_dbg_remove();
 #endif
 #if WMT_CREATE_NODE_DYNAMIC
-	if (!(IS_ERR(wmt_dev)))
+	if (device_created)
 		device_destroy(wmt_class, devID);
-	if (!(IS_ERR(wmt_class))) {
+	if (class_created) {
 		class_destroy(wmt_class);
 		wmt_class = NULL;
 	}
@@ -2527,10 +2545,10 @@ error:
 	if (cdevErr == 0)
 		cdev_del(&gWmtCdev);
 
-	if (ret == 0) {
+	if (chrdev_registered)
 		unregister_chrdev_region(devID, WMT_DEV_NUM);
-		gWmtMajor = -1;
-	}
+	stp_drv_exit();
+	already_called = 0;
 
 	WMT_ERR_FUNC("fail\n");
 

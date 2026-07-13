@@ -21,6 +21,9 @@ STP_BTIF = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/linux/pri/
 WMT_CTRL = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/core/wmt_ctrl.c"
 WMT_CORE = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/core/wmt_core.c"
 WMT_DEV = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/linux/pri/wmt_dev.c"
+WMT_LIB = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/core/wmt_lib.c"
+WMT_IC_SOC = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/core/wmt_ic_soc.c"
+PSM_CORE = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/core/psm_core.c"
 
 
 def extract_function(source: str, name: str) -> str:
@@ -184,6 +187,18 @@ class BtifExactWriteTests(unittest.TestCase):
 
 
 class StpRingBoundaryTests(unittest.TestCase):
+    def test_mandatory_mode_uses_strict_transport_result(self) -> None:
+        source = STP_CORE.read_text()
+        no_ps = extract_function(source, "stp_send_data_no_ps")
+        public_send = extract_function(source, "mtk_wcn_stp_send_data")
+        raw_send = extract_function(source, "mtk_wcn_stp_send_data_raw")
+        self.assertNotIn("(*sys_if_tx)", no_ps)
+        self.assertNotIn("(*sys_if_tx)", public_send)
+        self.assertNotIn("(*sys_if_tx)", raw_send)
+        self.assertIn("stp_if_tx_exact", no_ps)
+        self.assertIn("stp_if_tx_exact", public_send)
+        self.assertIn("stp_if_tx_exact", raw_send)
+
     def test_exact_end_and_wrap_use_one_exact_callback(self) -> None:
         source = STP_CORE.read_text()
         update = extract_function(source, "stp_update_tx_queue")
@@ -198,6 +213,7 @@ class StpRingBoundaryTests(unittest.TestCase):
             typedef int INT32;
             typedef unsigned int UINT32;
             typedef unsigned char UINT8;
+            typedef UINT8 *PUINT8;
             typedef void VOID;
             #define MTKSTP_BUFFER_SIZE 32
             #define MTKSTP_SEQ_SIZE 8
@@ -305,6 +321,36 @@ class StpRingBoundaryTests(unittest.TestCase):
         deinit = extract_function(source, "mtk_wcn_stp_deinit")
         self.assertRegex(init, r"tx_linear_buf\s*=\s*osal_malloc")
         self.assertRegex(deinit, r"osal_free\s*\(\s*stp_core_ctx\.tx_linear_buf\s*\)")
+
+    def test_init_failure_unwinds_resources_and_is_propagated(self) -> None:
+        init = extract_function(STP_CORE.read_text(), "mtk_wcn_stp_init")
+        wmt_init = extract_function(WMT_DEV.read_text(), "WMT_init")
+        self.assertIn("osal_timer_stop_sync", init)
+        self.assertIn("osal_unsleepable_lock_deinit", init)
+        self.assertIn("stp_ctx_lock_deinit", init)
+        self.assertIn("sys_if_tx = NULL", init)
+        self.assertRegex(wmt_init, r"ret\s*=\s*stp_drv_init\s*\(\s*\)")
+        self.assertRegex(wmt_init, r"if\s*\(\s*ret\s*\)")
+
+    def test_psm_release_propagates_transport_failure(self) -> None:
+        release = extract_function(PSM_CORE.read_text(), "_stp_psm_release_data")
+        self.assertRegex(release, r"ret\s*=\s*stp_send_data_no_ps")
+        self.assertRegex(release, r"if\s*\(\s*ret\s*<\s*0\s*\)")
+        self.assertRegex(release, r"return\s+ret")
+        wait = extract_function(PSM_CORE.read_text(), "_stp_psm_wait_wmt_event_wq")
+        self.assertGreaterEqual(wait.count("retval = _stp_psm_release_data"), 2)
+        self.assertGreaterEqual(len(re.findall(r"retval\s*=\s*_stp_psm_release_data.*?if\s*\(\s*retval\s*<\s*0\s*\)\s*return\s+retval", wait, re.S)), 2)
+        notify = extract_function(PSM_CORE.read_text(), "_stp_psm_notify_wmt")
+        self.assertGreaterEqual(notify.count("ret = _stp_psm_wait_wmt_event_wq"), 3)
+
+    def test_wmt_init_unregisters_region_on_every_late_failure(self) -> None:
+        wmt_init = extract_function(WMT_DEV.read_text(), "WMT_init")
+        self.assertIn("chrdev_registered", wmt_init)
+        self.assertIn("wmt_lib_initialized", wmt_init)
+        self.assertIn("class_created", wmt_init)
+        self.assertIn("device_created", wmt_init)
+        self.assertRegex(wmt_init, r"if\s*\(\s*chrdev_registered\s*\)\s*\{?\s*unregister_chrdev_region")
+        self.assertRegex(wmt_init, r"if\s*\(\s*wmt_lib_initialized\s*\)\s*\{?\s*wmt_lib_deinit")
 
 
 class WmtTransportPropagationTests(unittest.TestCase):
@@ -464,6 +510,21 @@ class CrcWakeupTests(unittest.TestCase):
         self.assertRegex(ctrl, r"waitRet\s*==\s*-EBADMSG")
         self.assertRegex(ctrl, r"return\s+waitRet")
 
+    def test_protocol_error_precedes_immediate_queued_data(self) -> None:
+        ctrl = extract_function(WMT_CTRL.read_text(), "wmt_ctrl_rx")
+        first_receive = ctrl.find("mtk_wcn_stp_receive_data")
+        first_generation_check = ctrl.find("wmt_dev_stp_error_generation")
+        self.assertGreaterEqual(first_generation_check, 0)
+        self.assertLess(first_generation_check, first_receive)
+        self.assertGreaterEqual(ctrl.count("wmt_dev_stp_error_generation"), 2)
+
+    def test_generation_snapshot_is_serialized_by_wmtd_worker(self) -> None:
+        worker = extract_function(WMT_LIB.read_text(), "wmtd_thread")
+        self.assertIn("wmt_core_opid", worker)
+        self.assertIn("rActiveOpQ", worker)
+        ctrl = extract_function(WMT_CTRL.read_text(), "wmt_ctrl_rx")
+        self.assertIn("single mtk_wmtd transaction", ctrl)
+
     def test_hard_tx_errors_mark_stream_and_init_retries_once(self) -> None:
         ctrl_tx = extract_function(WMT_CTRL.read_text(), "wmt_ctrl_tx_ex")
         stp_init = extract_function(WMT_CORE.read_text(), "wmt_core_stp_init")
@@ -490,6 +551,40 @@ class CrcWakeupTests(unittest.TestCase):
         self.assertIn("stp_btif_tx_failure_count", btif)
         self.assertIn("stp_diag_should_log", stp)
         self.assertIn("stp_btif_diag_should_log", btif)
+        self.assertIn("stp_tx_boundary_record", stp)
+        self.assertIn("stp_crc_snapshot", stp)
+        for field in ("magic", "version", "size", "generation", "checksum", "commit_marker"):
+            self.assertIn(field, stp)
+        self.assertIn("aee_sram_fiq_save_bin", stp)
+
+    def test_persistent_records_are_aligned_committed_and_one_shot(self) -> None:
+        stp = STP_CORE.read_text()
+        self.assertIn("BUILD_BUG_ON", stp)
+        self.assertRegex(stp, r"sizeof\s*\(\s*struct stp_tx_boundary_record\s*\)\s*%\s*sizeof\s*\(\s*long\s*\)")
+        self.assertRegex(stp, r"sizeof\s*\(\s*struct stp_crc_snapshot\s*\)\s*%\s*sizeof\s*\(\s*long\s*\)")
+        self.assertIn("atomic_cmpxchg(&stp_tx_boundary_taken", stp)
+        self.assertIn("atomic_cmpxchg(&stp_crc_snapshot_taken", stp)
+        persist = extract_function(stp, "stp_diag_persist_record")
+        self.assertLess(persist.find("*checksum = osal_crc16"), persist.find("*commit_marker = STP_DIAG_COMMIT_MARKER"))
+        self.assertLess(persist.find("*commit_marker = STP_DIAG_COMMIT_MARKER"), persist.find("aee_sram_fiq_save_bin"))
+
+    def test_patch_download_updates_persistent_progress(self) -> None:
+        soc = WMT_IC_SOC.read_text()
+        self.assertGreaterEqual(soc.count("mtk_wcn_stp_diag_patch_before"), 2)
+        self.assertGreaterEqual(soc.count("mtk_wcn_stp_diag_patch_ack"), 2)
+        downloads = re.findall(
+            r"static INT32 mtk_wcn_soc_patch_dwn\((?:UINT32 index|VOID)\)\n\{.*?\n\}",
+            soc,
+            re.S,
+        )
+        self.assertEqual(len(downloads), 2)
+        for download in downloads:
+            before = download.find("mtk_wcn_stp_diag_patch_before")
+            tx = download.find("wmt_core_tx(pbuf", before)
+            ack = download.find("mtk_wcn_stp_diag_patch_ack", tx)
+            self.assertGreaterEqual(before, 0)
+            self.assertGreater(tx, before)
+            self.assertGreater(ack, tx)
 
 
 if __name__ == "__main__":

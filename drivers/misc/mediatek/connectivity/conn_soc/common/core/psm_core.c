@@ -664,6 +664,9 @@ INT32 _stp_psm_release_data(MTKSTP_PSM_T *stp_psm)
 		if (len > STP_PSM_PACKET_SIZE_MAX) {
 			STP_PSM_ERR_FUNC("***psm packet's length too Long!****\n");
 			STP_PSM_INFO_FUNC("***reset psm's fifo***\n");
+			osal_fifo_reset(&stp_psm->hold_fifo);
+			osal_unlock_sleepable_lock(&stp_psm->hold_fifo_spinlock_global);
+			return STP_PSM_OPERATION_FAIL;
 		} else {
 			osal_memset(stp_psm->out_buf, 0, STP_PSM_TX_SIZE);
 			ret = osal_fifo_out(&stp_psm->hold_fifo, (PUINT8) stp_psm->out_buf, len);
@@ -673,12 +676,19 @@ INT32 _stp_psm_release_data(MTKSTP_PSM_T *stp_psm)
 
 		if (delimiter[0] == 0xbb && delimiter[1] == 0xbb) {
 			/* osal_buffer_dump(stp_psm->out_buf, "psm->out_buf", len, 32); */
-			stp_send_data_no_ps(stp_psm->out_buf, len, type);
+			ret = stp_send_data_no_ps(stp_psm->out_buf, len, type);
+			if (ret < 0) {
+				STP_PSM_ERR_FUNC("held packet transport failed: %d\n", ret);
+				osal_unlock_sleepable_lock(&stp_psm->hold_fifo_spinlock_global);
+				return ret;
+			}
 		} else {
 			STP_PSM_ERR_FUNC("***psm packet fifo parsing fail****\n");
 			STP_PSM_INFO_FUNC("***reset psm's fifo***\n");
 
 			osal_fifo_reset(&stp_psm->hold_fifo);
+			osal_unlock_sleepable_lock(&stp_psm->hold_fifo_spinlock_global);
+			return STP_PSM_OPERATION_FAIL;
 		}
 		i--;
 		osal_unlock_sleepable_lock(&stp_psm->hold_fifo_spinlock_global);
@@ -857,7 +867,9 @@ static inline INT32 _stp_psm_wait_wmt_event_wq(MTKSTP_PSM_T *stp_psm)
 		_stp_psm_dbg_dmp_in(g_stp_psm_dbg, stp_psm->flag.data, __LINE__);
 /* osal_lock_unsleepable_lock(&stp_psm->flagSpinlock); */
 		/* STP send data here: STP enqueue data to psm buffer. */
-		_stp_psm_release_data(stp_psm);
+		retval = _stp_psm_release_data(stp_psm);
+		if (retval < 0)
+			return retval;
 		/* STP send data here: STP enqueue data to psm buffer. We release packet by the next one. */
 		osal_clear_bit(STP_PSM_BLOCK_DATA_EN, &stp_psm->flag);
 		_stp_psm_dbg_dmp_in(g_stp_psm_dbg, stp_psm->flag.data, __LINE__);
@@ -886,7 +898,9 @@ static inline INT32 _stp_psm_wait_wmt_event_wq(MTKSTP_PSM_T *stp_psm)
 		_stp_psm_dbg_dmp_in(g_stp_psm_dbg, stp_psm->flag.data, __LINE__);
 		if (_stp_psm_get_state(stp_psm) == ACT_INACT) {
 			/* osal_lock_unsleepable_lock(&stp_psm->flagSpinlock); */
-			_stp_psm_release_data(stp_psm);
+			retval = _stp_psm_release_data(stp_psm);
+			if (retval < 0)
+				return retval;
 			osal_clear_bit(STP_PSM_BLOCK_DATA_EN, &stp_psm->flag);
 			_stp_psm_dbg_dmp_in(g_stp_psm_dbg, stp_psm->flag.data, __LINE__);
 			_stp_psm_set_state(stp_psm, ACT);
@@ -904,7 +918,6 @@ static inline INT32 _stp_psm_wait_wmt_event_wq(MTKSTP_PSM_T *stp_psm)
 		wcn_psm_flag_trigger_collect_ftrace();	/* trigger collect SYS_FTRACE */
 		_stp_psm_dbg_out_printk(g_stp_psm_dbg);
 	}
-	retval = STP_PSM_OPERATION_SUCCESS;
 
 	return retval;
 }
@@ -1063,18 +1076,22 @@ static inline INT32 _stp_psm_notify_wmt(MTKSTP_PSM_T *stp_psm, const MTKSTP_PSM_
 
 			_stp_psm_set_state(stp_psm, ACT_INACT);
 
-			_stp_psm_release_data(stp_psm);
+			ret = _stp_psm_release_data(stp_psm);
+			if (ret < 0) {
+				_stp_psm_set_state(stp_psm, ACT);
+				break;
+			}
 
 			if (stp_psm->wmt_notify) {
 				stp_psm->wmt_notify(SLEEP);
-				_stp_psm_wait_wmt_event_wq(stp_psm);
+				ret = _stp_psm_wait_wmt_event_wq(stp_psm);
 			} else {
 				STP_PSM_ERR_FUNC("stp_psm->wmt_notify = NULL\n");
 				ret = STP_PSM_OPERATION_FAIL;
 			}
 		} else if (action == WAKEUP || action == HOST_AWAKE) {
 			STP_PSM_INFO_FUNC("In ACT state, dont do WAKEUP/HOST_AWAKE again\n");
-			_stp_psm_release_data(stp_psm);
+			ret = _stp_psm_release_data(stp_psm);
 		} else {
 			STP_PSM_ERR_FUNC("invalid operation, the case should not happen\n");
 			STP_PSM_ERR_FUNC("state = %d, flag = %ld\n", stp_psm->work_state, stp_psm->flag.data);
@@ -1100,7 +1117,7 @@ static inline INT32 _stp_psm_notify_wmt(MTKSTP_PSM_T *stp_psm, const MTKSTP_PSM_
 				STP_PSM_DBG_FUNC("mt_combo_plt_exit_deep_idle--\n");
 
 				stp_psm->wmt_notify(WAKEUP);
-				_stp_psm_wait_wmt_event_wq(stp_psm);
+				ret = _stp_psm_wait_wmt_event_wq(stp_psm);
 			} else {
 				STP_PSM_ERR_FUNC("stp_psm->wmt_notify = NULL\n");
 				ret = STP_PSM_OPERATION_FAIL;
@@ -1120,7 +1137,7 @@ static inline INT32 _stp_psm_notify_wmt(MTKSTP_PSM_T *stp_psm, const MTKSTP_PSM_
 				STP_PSM_DBG_FUNC("mt_combo_plt_exit_deep_idle--\n");
 
 				stp_psm->wmt_notify(HOST_AWAKE);
-				_stp_psm_wait_wmt_event_wq(stp_psm);
+				ret = _stp_psm_wait_wmt_event_wq(stp_psm);
 			} else {
 				STP_PSM_ERR_FUNC("stp_psm->wmt_notify = NULL\n");
 				ret = STP_PSM_OPERATION_FAIL;
