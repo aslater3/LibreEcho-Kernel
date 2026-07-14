@@ -24,8 +24,6 @@ class BtifRxDmaGuardTests(unittest.TestCase):
         self.assertIn("unsigned int total_processed = 0;", handler)
         self.assertIn("if (wpt_wrap != rpt_wrap)", handler)
         self.assertNotIn("if (wpt_wrap != p_mtk_vfifo->last_wpt_wrap)", handler)
-        self.assertIn("aee_rr_rec_fiq_step(0xA1)", handler)
-        self.assertIn("aee_rr_rec_fiq_step(0xA2)", handler)
         self.assertIn("passes++ >= BTIF_RX_IRQ_MAX_PASSES", handler)
         self.assertIn("total_processed >= vff_size", handler)
 

@@ -21,6 +21,7 @@
 #include "wmt_dev.h"
 #include <linux/atomic.h>
 #include <mt-plat/mtk_ram_console.h>
+#include <mt-plat/echo_assert_unwind.h>
 
 #define PFX                         "[STP] "
 #define STP_LOG_DBG                  4
@@ -179,6 +180,12 @@ static UINT32 g_echo_btif_previous_callback_len;
 static UINT32 g_echo_btif_rx_bytes;
 static UINT32 g_echo_stp_rx_bytes;
 static UINT32 g_echo_stp_accepted_frames;
+
+bool echo_fw_asserted(void)
+{
+	return atomic_read(&echo_fw_assert_latched) != 0;
+}
+EXPORT_SYMBOL(echo_fw_asserted);
 static UINT32 g_echo_stp_crc_failures;
 static UINT8 g_echo_last_accepted_seq;
 static UINT8 g_echo_last_accepted_type;
@@ -2050,6 +2057,18 @@ static INT32 stp_parser_data_in_mand_mode(UINT32 length, UINT8 *p_data)
 				i -= remain_length;
 				p_data += remain_length;
 				stp_core_ctx.rx_counter = stp_core_ctx.parser.length;
+				if (stp_core_ctx.parser.type == STP_TASK_INDX &&
+				    stp_core_ctx.rx_counter != 0) {
+					aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E1);
+					if (!echo_fw_asserted()) {
+						STP_SET_FW_COREDUMP_FLAG(stp_core_ctx, 1);
+						atomic_set(&echo_fw_assert_latched, 1);
+						aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E2);
+					}
+					stp_change_rx_state(MTKSTP_SYNC);
+					stp_core_ctx.rx_counter = 0;
+					return 0;
+				}
 				*(stp_core_ctx.rx_buf + stp_core_ctx.rx_counter) = '\0';
 				/*Trace32 Dump */
 				if (stp_core_ctx.parser.type == STP_TASK_INDX) {
@@ -2421,23 +2440,26 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 				i -= remain_length;
 				p_data += remain_length;
 				stp_core_ctx.rx_counter = stp_core_ctx.parser.length;
-				echo_stp_capture_frame(stp_core_ctx.rx_buf,
+				if (stp_core_ctx.parser.type != STP_TASK_INDX)
+					echo_stp_capture_frame(stp_core_ctx.rx_buf,
 						       stp_core_ctx.rx_counter,
 						       i >= 2 ?
 						       ((UINT16)p_data[0] | ((UINT16)p_data[1] << 8)) : 0,
 						       i >= 2 ? MTK_WCN_BOOL_TRUE : MTK_WCN_BOOL_FALSE,
 						       i >= 2 ? i - 2 : 0,
-						       stp_core_ctx.parser.type == STP_TASK_INDX ?
-						       MTK_WCN_BOOL_TRUE : MTK_WCN_BOOL_FALSE);
+						       MTK_WCN_BOOL_FALSE);
 				if (stp_core_ctx.parser.type == STP_TASK_INDX &&
 				    stp_core_ctx.rx_counter != 0) {
-					echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_FW_MSG_COMPLETE,
-								 "FW_MSG_COMPLETE");
-					echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_LATCH_BEFORE,
-								 "FW_ASSERT_LATCH_BEFORE");
-					mtk_wcn_stp_coredump_start_ctrl(1);
-					echo_stp_assert_boundary(ECHO_STP_ASSERT_FIQ_LATCH_AFTER,
-								 "FW_ASSERT_LATCH_AFTER");
+					aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E1);
+					if (!echo_fw_asserted()) {
+						STP_SET_FW_COREDUMP_FLAG(stp_core_ctx, 1);
+						atomic_set(&echo_fw_assert_latched, 1);
+						aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E2);
+					}
+					stp_change_rx_state(MTKSTP_SYNC);
+					stp_core_ctx.rx_counter = 0;
+					/* Drop the remainder of this callback, including dump traffic. */
+					return 0;
 				}
 				stp_change_rx_state(MTKSTP_SYNC);
 				*(stp_core_ctx.rx_buf + stp_core_ctx.rx_counter) = '\0';
@@ -2580,6 +2602,11 @@ int mtk_wcn_stp_parser_data(UINT8 *buffer, UINT32 length)
 	/*flags = (*sys_mutex_lock)(stp_core_ctx.stp_mutex); */
 	i = length;
 	p_data = (UINT8 *) buffer;
+	/*
+	 * E0 is deliberately persistent-only: this callback is the first
+	 * boundary after the BTIF consumer hands bytes to STP.
+	 */
+	aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E0);
 	echo_btif_capture(buffer, length);
 	echo_wmt_progress_btif_rx(length, stp_core_ctx.parser.state);
 
@@ -2608,6 +2635,7 @@ int mtk_wcn_stp_parser_data(UINT8 *buffer, UINT32 length)
 	/* George FIXME: WHY or HOW can we reduct the locked region? */
 	/*(*sys_mutex_unlock)(stp_core_ctx.stp_mutex, flags); */
 	STP_TRACE_FUNC("--\n");
+	aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E3);
 	return ret;
 }
 #if !STP_EXP_HID_API_EXPORT
@@ -2727,7 +2755,7 @@ INT32 _mtk_wcn_stp_coredump_start_get(VOID)
 INT32 mtk_wcn_stp_coredump_start_get(VOID)
 #endif
 {
-	return atomic_read(&echo_fw_assert_latched);
+	return echo_fw_asserted();
 }
 
 /* mtk_wcn_stp_set_wmt_last_close -- set the state of link(UART or SDIO)

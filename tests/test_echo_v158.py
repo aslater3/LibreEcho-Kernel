@@ -3,14 +3,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-GL_KAL = ROOT / (
-    "drivers/misc/mediatek/connectivity/conn_soc/drv_wlan/mt_wifi/"
-    "wlan/os/linux/gl_kal.c"
-)
-GL_INIT = ROOT / (
-    "drivers/misc/mediatek/connectivity/conn_soc/drv_wlan/mt_wifi/"
-    "wlan/os/linux/gl_init.c"
-)
+GL_KAL = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/drv_wlan/mt_wifi/wlan/os/linux/gl_kal.c"
+GL_INIT = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/drv_wlan/mt_wifi/wlan/os/linux/gl_init.c"
+FS_OPEN = ROOT / "fs/open.c"
 
 
 class V158CleanupBoundaryTests(unittest.TestCase):

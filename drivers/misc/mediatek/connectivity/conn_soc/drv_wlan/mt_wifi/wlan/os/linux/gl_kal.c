@@ -700,6 +700,7 @@
 #include "gl_wext.h"
 #include "precomp.h"
 #include <mt-plat/mtk_ram_console.h>
+#include <mt-plat/echo_assert_unwind.h>
 #if defined(CONFIG_MTK_TC1_FEATURE)
 #include <tc1_partition.h>
 #endif
@@ -775,21 +776,15 @@ VOID kalHifAhbKalWakeLockTimeout(IN P_GLUE_INFO_T prGlueInfo)
 #if CFG_ENABLE_FW_DOWNLOAD
 
 static struct file *filp;
-static uid_t orgfsuid;
-static gid_t orgfsgid;
 static mm_segment_t orgfs;
+static const struct cred *echo_saved_cred;
+static struct cred *echo_override_cred;
 
 #define ECHO_FW_CLEANUP_ENTER 0xD0
 #define ECHO_FW_CLEANUP_BEFORE_VFREE 0xD1
 #define ECHO_FW_CLEANUP_AFTER_VFREE 0xD2
 #define ECHO_FW_CLEANUP_BEFORE_CLOSE 0xD3
 #define ECHO_FW_CLEANUP_CLOSE_ENTER 0xD4
-#define ECHO_FW_CLEANUP_BEFORE_FILP_CLOSE 0xD5
-#define ECHO_FW_CLEANUP_AFTER_FILP_CLOSE 0xD6
-#define ECHO_FW_CLEANUP_BEFORE_FS_RESTORE 0xD7
-#define ECHO_FW_CLEANUP_AFTER_FS_RESTORE 0xD8
-#define ECHO_FW_CLEANUP_BEFORE_CRED_RESTORE 0xD9
-#define ECHO_FW_CLEANUP_AFTER_CRED_RESTORE 0xDA
 #define ECHO_FW_CLEANUP_CLOSE_RETURN 0xDB
 #define ECHO_FW_CLEANUP_AFTER_CLOSE 0xDC
 #define ECHO_FW_CLEANUP_RETURN 0xDD
@@ -797,20 +792,14 @@ static mm_segment_t orgfs;
 static VOID echoFirmwareCleanupMarker(UINT_8 ucStage, const char *pszLabel,
 					      PVOID pvBuffer)
 {
+	(void)pszLabel;
+	(void)pvBuffer;
 	aee_rr_rec_fiq_step(ucStage);
-	pr_err("ECHO_FW_CLEANUP stage=0x%02x label=%s pid=%d comm=%s cpu=%u jiffies=%lu preempt=%u irq=%u interrupt=%lu buf=%p filp=%p cred=%p uid=%u gid=%u\n",
-		ucStage, pszLabel, current->pid, current->comm,
-		raw_smp_processor_id(), jiffies, preempt_count(),
-		irqs_disabled(), in_interrupt(), pvBuffer, filp,
-		current_cred(), orgfsuid, orgfsgid);
 }
 
 static VOID echoFirmwareTaskMarker(const char *pszLabel)
 {
-	pr_err("ECHO_FW_%s pid=%d comm=%s cpu=%u jiffies=%lu preempt=%u irq=%u interrupt=%lu filp=%p cred=%p uid=%u gid=%u\n",
-		pszLabel, current->pid, current->comm, raw_smp_processor_id(),
-		jiffies, preempt_count(), irqs_disabled(), in_interrupt(), filp,
-		current_cred(), orgfsuid, orgfsgid);
+	(void)pszLabel;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -828,23 +817,18 @@ static VOID echoFirmwareTaskMarker(const char *pszLabel)
 WLAN_STATUS kalFirmwareOpen(IN P_GLUE_INFO_T prGlueInfo)
 {
 	UINT_8 aucFilePath[50];
-	struct cred *cred;
 
-	echoFirmwareTaskMarker("OPEN");
+	ASSERT(prGlueInfo);
+
+	/* Use a private root credential set; never mutate get_current_cred(). */
+	echo_override_cred = prepare_kernel_cred(NULL);
+	if (!echo_override_cred)
+		return WLAN_STATUS_FAILURE;
+	echo_saved_cred = override_creds(echo_override_cred);
 
 	/* FIX ME: since we don't have hotplug script in the filesystem
 	 * , so the request_firmware() KAPI can not work properly
 	 */
-
-	/* save uid and gid used for filesystem access.
-	 * set user and group to 0(root) */
-	cred = (struct cred *)get_current_cred();
-
-	orgfsuid = cred->fsuid.val;
-	orgfsgid = cred->fsgid.val;
-	cred->fsuid.val = cred->fsgid.val = 0;
-
-	ASSERT(prGlueInfo);
 
 	orgfs = get_fs();
 	set_fs(get_ds());
@@ -899,9 +883,14 @@ open_success:
 error_open:
 	/* restore */
 	set_fs(orgfs);
-	cred->fsuid.val = orgfsuid;
-	cred->fsgid.val = orgfsgid;
-	put_cred(cred);
+	if (echo_saved_cred) {
+		revert_creds(echo_saved_cred);
+		echo_saved_cred = NULL;
+	}
+	if (echo_override_cred) {
+		put_cred(echo_override_cred);
+		echo_override_cred = NULL;
+	}
 	return WLAN_STATUS_FAILURE;
 }
 
@@ -920,41 +909,32 @@ error_open:
 WLAN_STATUS kalFirmwareClose(IN P_GLUE_INFO_T prGlueInfo)
 {
 	ASSERT(prGlueInfo);
-	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_CLOSE_ENTER,
-					  "close-enter", NULL);
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_F4, "close-enter", NULL);
 
 	if ((filp != NULL) && !IS_ERR(filp)) {
-		/* close firmware file */
-		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_FILP_CLOSE,
-					  "before-filp-close", NULL);
+		/* Preserve the target identity check in fs/open.c. */
 		WRITE_ONCE(echo_fw_close_target, filp);
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_F5,
+					  "before-filp-close", NULL);
 		filp_close(filp, NULL);
 		WRITE_ONCE(echo_fw_close_target, NULL);
-		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_FILP_CLOSE,
-					  "after-filp-close", NULL);
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_FC,
+					  "filp-close-returned", NULL);
 
-		/* restore */
-		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_FS_RESTORE,
-					  "before-fs-restore", NULL);
 		set_fs(orgfs);
-		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_FS_RESTORE,
-					  "after-fs-restore", NULL);
-		{
-			struct cred *cred = (struct cred *)get_current_cred();
-
-			echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_CRED_RESTORE,
-						  "before-cred-restore", NULL);
-			cred->fsuid.val = orgfsuid;
-			cred->fsgid.val = orgfsgid;
-			put_cred(cred);
-			echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_CRED_RESTORE,
-						  "after-cred-restore", NULL);
-			filp = NULL;
+		if (echo_saved_cred) {
+			revert_creds(echo_saved_cred);
+			echo_saved_cred = NULL;
 		}
+		if (echo_override_cred) {
+			put_cred(echo_override_cred);
+			echo_override_cred = NULL;
+		}
+		filp = NULL;
 	}
 
-	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_CLOSE_RETURN,
-					  "close-return", NULL);
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_FD,
+				      "kalFirmwareClose-returned", NULL);
 	return WLAN_STATUS_SUCCESS;
 }
 /*----------------------------------------------------------------------------*/
@@ -1081,27 +1061,25 @@ PVOID kalFirmwareImageMapping(IN P_GLUE_INFO_T prGlueInfo, OUT PPVOID ppvMapFile
 VOID kalFirmwareImageUnmapping(IN P_GLUE_INFO_T prGlueInfo, IN PVOID prFwHandle, IN PVOID pvMapFileBuf)
 {
 	DEBUGFUNC("kalFirmwareImageUnmapping");
-	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_ENTER,
-					  "unmapping-enter", pvMapFileBuf);
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_F0,
+					  "cleanup-entry", pvMapFileBuf);
 
 	ASSERT(prGlueInfo);
 
 	/* pvMapFileBuf might be NULL when file doesn't exist */
 	if (pvMapFileBuf) {
-		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_VFREE,
-					  "before-vfree", pvMapFileBuf);
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_F1,
+					  "before-firmware-unmap", pvMapFileBuf);
 		vfree(pvMapFileBuf);
-		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_VFREE,
-					  "after-vfree", NULL);
+		echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_F2,
+					  "after-firmware-unmap", NULL);
 	}
 
-	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_BEFORE_CLOSE,
-					  "before-close", NULL);
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_F3,
+					  "before-kalFirmwareClose", NULL);
 	kalFirmwareClose(prGlueInfo);
-	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_AFTER_CLOSE,
-					  "after-close", NULL);
-	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_RETURN,
-					  "unmapping-return", NULL);
+	echoFirmwareCleanupMarker(ECHO_FW_CLEANUP_FE,
+					  "cleanup-returned", NULL);
 }
 
 #endif

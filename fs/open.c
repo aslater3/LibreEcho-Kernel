@@ -31,6 +31,7 @@
 #include <linux/ima.h>
 #include <linux/dnotify.h>
 #include <linux/compat.h>
+#include <mt-plat/echo_assert_unwind.h>
 
 #include "internal.h"
 
@@ -40,19 +41,6 @@ extern void aee_rr_rec_fiq_step(u8 step);
 #else
 #define ECHO_FILP_CLOSE_FIQ_STEP(step) do { } while (0)
 #endif
-
-#define ECHO_FILP_CLOSE_FIQ_BEFORE_FILE_COUNT 0xe0
-#define ECHO_FILP_CLOSE_FIQ_AFTER_FILE_COUNT 0xe1
-#define ECHO_FILP_CLOSE_FIQ_BEFORE_FLUSH 0xe2
-#define ECHO_FILP_CLOSE_FIQ_AFTER_FLUSH 0xe3
-#define ECHO_FILP_CLOSE_FIQ_BEFORE_FLUSH_SKIP 0xe4
-#define ECHO_FILP_CLOSE_FIQ_AFTER_FLUSH_SKIP 0xe5
-#define ECHO_FILP_CLOSE_FIQ_BEFORE_DNOTIFY_FLUSH 0xe6
-#define ECHO_FILP_CLOSE_FIQ_AFTER_DNOTIFY_FLUSH 0xe7
-#define ECHO_FILP_CLOSE_FIQ_BEFORE_LOCKS_REMOVE_POSIX 0xe8
-#define ECHO_FILP_CLOSE_FIQ_AFTER_LOCKS_REMOVE_POSIX 0xe9
-#define ECHO_FILP_CLOSE_FIQ_BEFORE_FPUT 0xea
-#define ECHO_FILP_CLOSE_FIQ_AFTER_FPUT 0xeb
 
 struct file *echo_fw_close_target;
 EXPORT_SYMBOL(echo_fw_close_target);
@@ -1085,46 +1073,32 @@ int filp_close(struct file *filp, fl_owner_t id)
 		(filp == READ_ONCE(echo_fw_close_target));
 
 	if (target_close)
-		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_BEFORE_FILE_COUNT);
+		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FW_CLEANUP_F6);
 	if (!file_count(filp)) {
-		if (target_close)
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_AFTER_FILE_COUNT);
 		printk(KERN_ERR "VFS: Close: file count is 0\n");
 		return 0;
 	}
-	if (target_close)
-		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_AFTER_FILE_COUNT);
 
-	if (filp->f_op->flush) {
-		if (target_close)
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_BEFORE_FLUSH);
+	if (filp->f_op->flush)
 		retval = filp->f_op->flush(filp, id);
-		if (target_close)
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_AFTER_FLUSH);
-	} else {
-		if (target_close) {
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_BEFORE_FLUSH_SKIP);
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_AFTER_FLUSH_SKIP);
-		}
-	}
+	if (target_close)
+		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FW_CLEANUP_F7);
 
 	if (likely(!(filp->f_mode & FMODE_PATH))) {
-		if (target_close)
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_BEFORE_DNOTIFY_FLUSH);
 		dnotify_flush(filp, id);
 		if (target_close)
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_AFTER_DNOTIFY_FLUSH);
-		if (target_close)
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_BEFORE_LOCKS_REMOVE_POSIX);
+			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FW_CLEANUP_F8);
 		locks_remove_posix(filp, id);
 		if (target_close)
-			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_AFTER_LOCKS_REMOVE_POSIX);
+			ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FW_CLEANUP_F9);
 	}
 	if (target_close)
-		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_BEFORE_FPUT);
+		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FW_CLEANUP_FA);
 	fput(filp);
-	if (target_close)
-		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FILP_CLOSE_FIQ_AFTER_FPUT);
+	if (target_close) {
+		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FW_CLEANUP_FB);
+		ECHO_FILP_CLOSE_FIQ_STEP(ECHO_FW_CLEANUP_FC);
+	}
 	return retval;
 }
 

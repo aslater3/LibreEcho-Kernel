@@ -3,6 +3,8 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <mt-plat/mtk_ram_console.h>
+#include <linux/sched.h>
+#include <mt-plat/echo_assert_unwind.h>
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/platform_device.h>
@@ -122,7 +124,7 @@ static int _btif_send_data(p_mtk_btif p_btif,
 
 /*-----------end of static function declearation----------------*/
 
-static const char *g_state[B_S_MAX] = {
+static const char *g_state[B_S_MAX] __maybe_unused = {
 	"OFF",
 	"SUSPEND",
 	"DPIDLE",
@@ -1029,7 +1031,6 @@ irqreturn_t btif_rx_dma_irq_handler(int irq, void *data)
 	p_mtk_btif_dma p_rx_dma = p_btif->p_rx_dma;
 	P_MTK_DMA_INFO_STR p_rx_dma_info = p_rx_dma->p_dma_info;
 
-	aee_rr_rec_fiq_step(0xD0); /* RX DMA IRQ entry */
 
 	BTIF_DBG_FUNC("++, p_btif(0x%p)\n", data);
 
@@ -1040,9 +1041,7 @@ irqreturn_t btif_rx_dma_irq_handler(int irq, void *data)
 	hal_btif_dma_clk_ctrl(p_rx_dma_info, CLK_OUT_ENABLE);
 #endif
 
-	aee_rr_rec_fiq_step(0xD1); /* before HAL RX handler */
 	hal_rx_dma_irq_handler(p_rx_dma_info, NULL, 0);
-	aee_rr_rec_fiq_step(0xD5); /* after HAL RX handler */
 
 #if MTK_BTIF_ENABLE_CLK_REF_COUNTER
 	hal_btif_dma_clk_ctrl(p_rx_dma_info, CLK_OUT_DISABLE);
@@ -1051,9 +1050,7 @@ irqreturn_t btif_rx_dma_irq_handler(int irq, void *data)
 
 	_btif_irq_ctrl(p_rx_dma_info->p_irq, true);
 
-	aee_rr_rec_fiq_step(0xD6); /* before RX thread scheduling */
 	_btif_rx_btm_sched(p_btif);
-	aee_rr_rec_fiq_step(0xD7); /* after RX thread scheduling */
 
 	BTIF_DBG_FUNC("--\n");
 
@@ -2069,78 +2066,58 @@ static int _btif_state_deinit(p_mtk_btif p_btif)
 
 static int btif_rx_data_consummer(p_mtk_btif p_btif)
 {
-	unsigned int length = 0;
-	unsigned char *p_buf = NULL;
-/*get BTIF rx buffer's information*/
+	unsigned int callbacks = 0;
+	unsigned int processed_bytes = 0;
+	unsigned int length;
 	p_btif_buf_str p_bbs = &(p_btif->btif_buf);
-/*wr_idx of btif_buf may be modified in IRQ handler,
-in order not to be effected by case in which irq interrupt this operation,
-we record wr_idx here*/
-	unsigned int wr_idx = p_bbs->wr_idx;
 
-	length = BBS_COUNT_CUR(p_bbs, wr_idx);
+	while (callbacks < ECHO_RX_CALLBACK_BUDGET &&
+	       processed_bytes < ECHO_RX_BYTE_BUDGET) {
+		unsigned int wr_idx = p_bbs->wr_idx;
+		unsigned int contiguous;
+		unsigned int chunk;
+		unsigned int budget = ECHO_RX_BYTE_BUDGET - processed_bytes;
+		unsigned int rd_idx = p_bbs->rd_idx;
+		unsigned char *p_buf;
 
-/*make sure length of rx buffer data > 0*/
-	do {
-		if (0 < length) {
-			/*check if rx_cb empty or not, if registered ,
-			call user's rx callback to handle these data*/
-			if (p_btif->rx_cb) {
-				if (p_bbs->rd_idx <= wr_idx) {
-					p_buf = BBS_PTR(p_bbs, p_bbs->rd_idx);
-					/* p_buf = &(p_bbs->buf[p_bbs->rd_idx]); */
-					/* length = BBS_COUNT(p_bbs); */
-					length = (wr_idx >= (p_bbs)->rd_idx) ?
-					    (wr_idx - (p_bbs)->rd_idx) :
-					    BBS_SIZE(p_bbs) -
-					    ((p_bbs)->rd_idx - wr_idx);
-					if (p_btif->rx_cb) {
-						aee_rr_rec_fiq_step(0xD9); /* before STP callback */
-						(*(p_btif->rx_cb)) (p_buf, length);
-						aee_rr_rec_fiq_step(0xDA); /* after STP callback */
-					} else
-						BTIF_ERR_FUNC("p_btif->rx_cb is NULL\n");
-					/*update rx data read index*/
-					p_bbs->rd_idx = wr_idx;
-				} else {
-					unsigned int len_tail =
-					    BBS_SIZE(p_bbs) - (p_bbs)->rd_idx;
-					/*p_buf = &(p_bbs->buf[p_bbs->->rd_idx]);*/
-					p_buf = BBS_PTR(p_bbs, p_bbs->rd_idx);
-					if (p_btif->rx_cb) {
-						aee_rr_rec_fiq_step(0xD9); /* before STP callback */
-						(*(p_btif->rx_cb)) (p_buf, len_tail);
-						aee_rr_rec_fiq_step(0xDA); /* after STP callback */
-					} else
-						BTIF_ERR_FUNC("p_btif->rx_cb is NULL\n");
-					length = BBS_COUNT_CUR(p_bbs, wr_idx);
-					length -= len_tail;
-					/*p_buf = &(p_bbs->buf[0]);*/
-					p_buf = BBS_PTR(p_bbs, 0);
-					if (p_btif->rx_cb) {
-						aee_rr_rec_fiq_step(0xD9); /* before STP callback */
-						(*(p_btif->rx_cb)) (p_buf, length);
-						aee_rr_rec_fiq_step(0xDA); /* after STP callback */
-					} else
-						BTIF_ERR_FUNC("p_btif->rx_cb is NULL\n");
-					/*update rx data read index*/
-					p_bbs->rd_idx = wr_idx;
-				}
-			} else if (NULL != p_btif->rx_notify) {
-				(*p_btif->rx_notify) ();
-			} else {
-				BTIF_WARN_FUNC
-				    ("p_btif:0x%p, both rx_notify and rx_cb are NULL\n",
-				     p_btif);
-				break;
-			}
+		length = BBS_COUNT_CUR(p_bbs, wr_idx);
+		if (length == 0 || echo_fw_asserted())
+			break;
+
+		if (rd_idx <= wr_idx)
+			contiguous = wr_idx - rd_idx;
+		else
+			contiguous = BBS_SIZE(p_bbs) - rd_idx;
+		if (contiguous == 0)
+			break;
+
+		chunk = contiguous < budget ? contiguous : budget;
+		p_buf = BBS_PTR(p_bbs, rd_idx);
+		if (p_btif->rx_cb) {
+			(*(p_btif->rx_cb))(p_buf, chunk);
+			aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E4);
+			p_bbs->rd_idx = (rd_idx + chunk) % BBS_SIZE(p_bbs);
+			callbacks++;
+			processed_bytes += chunk;
+		} else if (p_btif->rx_notify) {
+			(*p_btif->rx_notify)();
+			break;
 		} else {
-			BTIF_DBG_FUNC("length:%d\n", length);
 			break;
 		}
-		wr_idx = p_bbs->wr_idx;
-		length = BBS_COUNT_CUR(p_bbs, wr_idx);
-	} while (1);
+
+		if (echo_fw_asserted())
+			break;
+	}
+
+	length = BBS_COUNT_CUR(p_bbs, p_bbs->wr_idx);
+	if (length != 0 && !echo_fw_asserted() &&
+	    (callbacks >= ECHO_RX_CALLBACK_BUDGET ||
+	     processed_bytes >= ECHO_RX_BYTE_BUDGET))
+		complete(&p_btif->rx_comp);
+
+	cond_resched();
+	aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E5);
 	return length;
 }
 

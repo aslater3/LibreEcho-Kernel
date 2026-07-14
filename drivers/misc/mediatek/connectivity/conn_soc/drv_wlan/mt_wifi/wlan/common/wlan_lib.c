@@ -967,6 +967,7 @@
 #include "precomp.h"
 #include "mgmt/ais_fsm.h"
 #include <mt-plat/mtk_ram_console.h>
+#include <mt-plat/echo_assert_unwind.h>
 
 extern UINT32 wmt_plat_read_cpupcr(VOID);
 extern VOID wmt_plat_dump_ap_state(const char *pszStage);
@@ -1595,7 +1596,8 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		/* 4 <5> check Wi-Fi FW asserts ready bit */
 		i = 0;
 		while (1) {
-			if (mtk_wcn_stp_coredump_start_get()) {
+			if (echo_fw_asserted()) {
+				aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E7);
 				pr_err("ECHO_WLAN_FW_ASSERT: before ready read iter=%u; aborting startup\n", i);
 				wmt_plat_dump_ap_state("firmware-assert-before-ready-read");
 				echoWlanHifSnapshot(prAdapter, "firmware-assert-before-ready-read");
@@ -1612,7 +1614,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			aee_rr_rec_fiq_step(0xFC);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
 			aee_rr_rec_fiq_step(0xFD);
-			if (mtk_wcn_stp_coredump_start_get()) {
+			if (echo_fw_asserted()) {
 				pr_err("ECHO_WLAN_FW_ASSERT: after ready read iter=%u WCIR=0x%08x; aborting startup\n",
 				       i, u4Value);
 				wmt_plat_dump_ap_state("firmware-assert-after-ready-read");
@@ -1722,8 +1724,11 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 
 		RECLAIM_POWER_CONTROL_TO_PM(prAdapter, FALSE);
 
-		if (u4Status != WLAN_STATUS_SUCCESS)
+		if (u4Status != WLAN_STATUS_SUCCESS) {
+			if (echo_fw_asserted())
+				aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E9);
 			break;
+		}
 
 		/* OID timeout timer initialize */
 		cnmTimerInitTimer(prAdapter,
