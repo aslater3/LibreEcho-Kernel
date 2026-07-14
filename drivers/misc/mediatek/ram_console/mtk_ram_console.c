@@ -747,6 +747,8 @@ EXPORT_SYMBOL(echo_stage_current);
 
 u32 echo_stage_previous(void)
 {
+	if (!ram_console_old_valid || !ram_console_old)
+		return 0;
 	return LAST_RRR_VAL(echo_stage);
 }
 EXPORT_SYMBOL(echo_stage_previous);
