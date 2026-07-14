@@ -127,6 +127,7 @@ static struct ram_console_buffer *ram_console_old;
 static struct ram_console_buffer *ram_console_buffer_pa;
 static int ram_console_old_valid = 1;
 static const struct file_operations echo_stage_proc_fops;
+static void echo_stage_selftest(void);
 
 static DEFINE_SPINLOCK(ram_console_lock);
 

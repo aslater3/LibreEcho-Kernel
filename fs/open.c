@@ -31,8 +31,8 @@
 #include <linux/ima.h>
 #include <linux/dnotify.h>
 #include <linux/compat.h>
-#include <mt-plat/echo_assert_unwind.h>
-#include <mt-plat/mtk_ram_console.h>
+#include "../drivers/misc/mediatek/include/mt-plat/echo_assert_unwind.h"
+#include "../drivers/misc/mediatek/include/mt-plat/mtk_ram_console.h"
 
 #include "internal.h"
 
