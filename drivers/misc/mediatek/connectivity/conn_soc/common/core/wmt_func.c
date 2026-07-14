@@ -43,7 +43,8 @@
 #include "wmt_core.h"
 #include "wmt_exp.h"
 #include "stp_core.h"
-
+#include <mt-plat/echo_assert_unwind.h>
+#include <mt-plat/mtk_ram_console.h>
 /*******************************************************************************
 *                              C O N S T A N T S
 ********************************************************************************
@@ -274,6 +275,7 @@ INT32 wmt_func_bt_on(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf)
 	unsigned long ctrlPa1;
 	unsigned long ctrlPa2;
 
+	aee_rr_rec_fiq_step(ECHO_BT_INNER_B4);
 	ctrlPa1 = BT_PALDO;
 	ctrlPa2 = PALDO_ON;
 	iRet = wmt_core_ctrl(WMT_CTRL_SOC_PALDO_CTRL, &ctrlPa1, &ctrlPa2);
@@ -281,7 +283,9 @@ INT32 wmt_func_bt_on(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf)
 		WMT_ERR_FUNC("wmt-func: wmt_ctrl_soc_paldo_ctrl failed(%d)(%d)(%d)\n", iRet, ctrlPa1, ctrlPa2);
 		return -1;
 	}
+	aee_rr_rec_fiq_step(ECHO_BT_INNER_B5);
 	iRet = wmt_core_func_ctrl_cmd(WMTDRV_TYPE_BT, MTK_WCN_BOOL_TRUE);
+	aee_rr_rec_fiq_step(ECHO_BT_INNER_BB);
 	if (iRet) {
 		WMT_ERR_FUNC("wmt-func: wmt_core_func_ctrl_cmd(bt_on) failed(%d)\n", iRet);
 		ctrlPa1 = BT_PALDO;

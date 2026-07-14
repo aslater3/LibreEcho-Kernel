@@ -42,7 +42,8 @@
 #include "wmt_conf.h"
 #include "wmt_core.h"
 #include "wmt_plat.h"
-
+#include <mt-plat/echo_assert_unwind.h>
+#include <mt-plat/mtk_ram_console.h>
 #include "stp_core.h"
 #include "btm_core.h"
 #include "psm_core.h"
@@ -1044,6 +1045,9 @@ MTK_WCN_BOOL wmt_lib_put_act_op(P_OSAL_OP pOp)
 		}
 
 		/* put to active Q */
+		if ((WMT_OPID_FUNC_ON == pOp->op.opId) &&
+		    (WMTDRV_TYPE_BT == pOp->op.au4OpData[0]))
+			aee_rr_rec_fiq_step(ECHO_BT_INNER_B6);
 		bRet = wmt_lib_put_op(&pWmtDev->rActiveOpQ, pOp);
 		if (MTK_WCN_BOOL_FALSE == bRet) {
 			WMT_WARN_FUNC("put to active queue fail\n");
@@ -1054,6 +1058,10 @@ MTK_WCN_BOOL wmt_lib_put_act_op(P_OSAL_OP pOp)
 		/* wake up wmtd */
 		/* wake_up_interruptible(&pWmtDev->rWmtdWq); */
 		osal_trigger_event(&pWmtDev->rWmtdWq);
+
+		if ((WMT_OPID_FUNC_ON == pOp->op.opId) &&
+		    (WMTDRV_TYPE_BT == pOp->op.au4OpData[0]))
+			aee_rr_rec_fiq_step(ECHO_BT_INNER_B7);
 
 		if (0 == pSignal->timeoutValue) {
 			bRet = MTK_WCN_BOOL_TRUE;
@@ -1066,10 +1074,14 @@ MTK_WCN_BOOL wmt_lib_put_act_op(P_OSAL_OP pOp)
 		/* check result */
 		/* wait_ret = wait_for_completion_interruptible_timeout(&pOp->comp, msecs_to_jiffies(u4WaitMs)); */
 		/* wait_ret = wait_for_completion_timeout(&pOp->comp, msecs_to_jiffies(u4WaitMs)); */
+		if ((WMT_OPID_FUNC_ON == pOp->op.opId) &&
+		    (WMTDRV_TYPE_BT == pOp->op.au4OpData[0]))
+			aee_rr_rec_fiq_step(ECHO_BT_INNER_B8);
 		waitRet = osal_wait_for_signal_timeout(pSignal);
+		if ((WMT_OPID_FUNC_ON == pOp->op.opId) &&
+		    (WMTDRV_TYPE_BT == pOp->op.au4OpData[0]))
+			aee_rr_rec_fiq_step(ECHO_BT_INNER_B9);
 		WMT_DBG_FUNC("osal_wait_for_signal_timeout:%ld\n", waitRet);
-
-		/* if (unlikely(!wait_ret)) { */
 		if (0 == waitRet) {
 			WMT_ERR_FUNC("wait completion timeout\n");
 			/* TODO: how to handle it? retry? */
@@ -1080,6 +1092,9 @@ MTK_WCN_BOOL wmt_lib_put_act_op(P_OSAL_OP pOp)
 		}
 		/* op completes, check result */
 		bRet = (pOp->result) ? MTK_WCN_BOOL_FALSE : MTK_WCN_BOOL_TRUE;
+		if ((WMT_OPID_FUNC_ON == pOp->op.opId) &&
+		    (WMTDRV_TYPE_BT == pOp->op.au4OpData[0]))
+			aee_rr_rec_fiq_step(ECHO_BT_INNER_BA);
 	} while (0);
 
 	if (bCleanup) {

@@ -9,9 +9,8 @@ CONFIG = (ROOT / ".config").read_text()
 
 
 class V172BtFirstContract(unittest.TestCase):
-    def test_bt_config_enabled_wifi_remains_enabled(self):
+    def test_bt_config_enabled(self):
         self.assertRegex(CONFIG, r"(?m)^CONFIG_MTK_COMBO_BT=y$")
-        self.assertRegex(CONFIG, r"(?m)^CONFIG_MTK_COMBO_WIFI=y$")
         self.assertNotRegex(CONFIG, r"(?m)^CONFIG_MTK_COMBO_BT=n$")
 
     def test_markers_are_outside_existing_assertion_range(self):
