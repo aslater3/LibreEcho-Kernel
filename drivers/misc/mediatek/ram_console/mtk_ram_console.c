@@ -60,6 +60,9 @@ struct last_reboot_reason {
 	uint32_t clk_data[8];
 	uint32_t suspend_debug_flag;
 
+	uint32_t echo_stage;
+	uint32_t echo_stage_selftest;
+
 	uint8_t cpu_dvfs_vproc_big;
 	uint8_t cpu_dvfs_vproc_little;
 	uint8_t cpu_dvfs_oppidx;
@@ -123,6 +126,7 @@ static struct ram_console_buffer *ram_console_buffer;
 static struct ram_console_buffer *ram_console_old;
 static struct ram_console_buffer *ram_console_buffer_pa;
 static int ram_console_old_valid = 1;
+static const struct file_operations echo_stage_proc_fops;
 
 static DEFINE_SPINLOCK(ram_console_lock);
 
@@ -515,6 +519,8 @@ static int __init ram_console_init(struct ram_console_buffer *buffer, size_t buf
 	register_console(&ram_console);
 #endif
 	ram_console_init_done = 1;
+	echo_stage_selftest();
+	proc_create("echo_stage", 0444, NULL, &echo_stage_proc_fops);
 	return 0;
 }
 
@@ -722,12 +728,69 @@ RESERVEDMEM_OF_DECLARE(reserve_memory_ram_console, "mediatek,ram_console",
 #define LAST_RR_MEMCPY_WITH_ID(rr_item, id, str, len)			\
 	(strlcpy(RR_LINUX->rr_item[id], str, len))
 
+#define ECHO_STAGE_SELFTEST_A 0x13579BDF
+#define ECHO_STAGE_SELFTEST_B 0x2468ACE0
+
+void echo_stage_set(u32 stage)
+{
+	if (!ram_console_init_done || !ram_console_buffer)
+		return;
+	LAST_RR_SET(echo_stage, stage);
+}
+EXPORT_SYMBOL(echo_stage_set);
+
+u32 echo_stage_current(void)
+{
+	return LAST_RR_VAL(echo_stage);
+}
+EXPORT_SYMBOL(echo_stage_current);
+
+u32 echo_stage_previous(void)
+{
+	return LAST_RRR_VAL(echo_stage);
+}
+EXPORT_SYMBOL(echo_stage_previous);
+
+static void echo_stage_selftest(void)
+{
+	LAST_RR_SET(echo_stage_selftest, ECHO_STAGE_SELFTEST_A);
+	if (LAST_RR_VAL(echo_stage_selftest) != ECHO_STAGE_SELFTEST_A) {
+		LAST_RR_SET(echo_stage_selftest, 0xBAD00001);
+		return;
+	}
+	LAST_RR_SET(echo_stage_selftest, ECHO_STAGE_SELFTEST_B);
+	if (LAST_RR_VAL(echo_stage_selftest) != ECHO_STAGE_SELFTEST_B)
+		LAST_RR_SET(echo_stage_selftest, 0xBAD00002);
+}
+
+static int echo_stage_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "current=0x%08x previous=0x%08x selftest=0x%08x\n",
+		   echo_stage_current(), echo_stage_previous(),
+		   LAST_RR_VAL(echo_stage_selftest));
+	return 0;
+}
+
+static int echo_stage_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, echo_stage_proc_show, NULL);
+}
+
+static const struct file_operations echo_stage_proc_fops = {
+	.owner = THIS_MODULE,
+	.open = echo_stage_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 void aee_rr_rec_reboot_mode(u8 mode)
 {
 	if (!ram_console_init_done || !ram_console_buffer)
 		return;
 	LAST_RR_SET(reboot_mode, mode);
 }
+
 
 void aee_rr_rec_kdump_params(void *params)
 {

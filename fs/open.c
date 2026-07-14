@@ -32,12 +32,16 @@
 #include <linux/dnotify.h>
 #include <linux/compat.h>
 #include <mt-plat/echo_assert_unwind.h>
+#include <mt-plat/mtk_ram_console.h>
 
 #include "internal.h"
 
 #ifdef CONFIG_MTK_RAM_CONSOLE
 extern void aee_rr_rec_fiq_step(u8 step);
-#define ECHO_FILP_CLOSE_FIQ_STEP(step) aee_rr_rec_fiq_step(step)
+#define ECHO_FILP_CLOSE_FIQ_STEP(step) do { \
+	echo_stage_set(step); \
+	aee_rr_rec_fiq_step(step); \
+} while (0)
 #else
 #define ECHO_FILP_CLOSE_FIQ_STEP(step) do { } while (0)
 #endif
