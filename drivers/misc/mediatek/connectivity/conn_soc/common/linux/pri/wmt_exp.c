@@ -41,6 +41,9 @@
 #include <wmt_exp.h>
 #include <wmt_lib.h>
 #include "stp_core.h"
+#include <linux/delay.h>
+#include <mt-plat/echo_assert_unwind.h>
+#include <mt-plat/mtk_ram_console.h>
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -160,10 +163,27 @@ MTK_WCN_BOOL mtk_wcn_wmt_func_on(ENUM_WMTDRV_TYPE_T type)
 	if (type == WMTDRV_TYPE_BT)
 		osal_printtimeofday("############ BT ON ====>");
 
+	if (type == WMTDRV_TYPE_WIFI) {
+		MTK_WCN_BOOL bt_ret;
+
+		aee_rr_rec_fiq_step(ECHO_BT_FIRST_B0);
+		bt_ret = mtk_wcn_wmt_func_ctrl(WMTDRV_TYPE_BT, WMT_OPID_FUNC_ON);
+		if (MTK_WCN_BOOL_FALSE == bt_ret) {
+			WMT_WARN_FUNC("BT-first FUNC_ON failed; refusing WIFI FUNC_ON\n");
+			return MTK_WCN_BOOL_FALSE;
+		}
+		aee_rr_rec_fiq_step(ECHO_BT_FIRST_B1);
+		msleep(300);
+		aee_rr_rec_fiq_step(ECHO_BT_FIRST_B2);
+	}
+
 	ret = mtk_wcn_wmt_func_ctrl(type, WMT_OPID_FUNC_ON);
 
-	if (type == WMTDRV_TYPE_BT)
+	if (type == WMTDRV_TYPE_WIFI) {
+		aee_rr_rec_fiq_step(ECHO_BT_FIRST_B3);
+	} else if (type == WMTDRV_TYPE_BT) {
 		osal_printtimeofday(" ############BT ON <====");
+	}
 
 	return ret;
 }

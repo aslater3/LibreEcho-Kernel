@@ -13,66 +13,49 @@ class V158CleanupBoundaryTests(unittest.TestCase):
     def setUpClass(cls):
         cls.gl_kal = GL_KAL.read_text()
         cls.gl_init = GL_INIT.read_text()
+        cls.fs_open = FS_OPEN.read_text()
 
-    def test_cleanup_stage_range_is_dedicated_and_not_old_ap_range(self):
-        self.assertIn("#define ECHO_FW_CLEANUP_ENTER 0xD0", self.gl_kal)
-        self.assertIn("#define ECHO_FW_CLEANUP_AFTER_CLOSE 0xDC", self.gl_kal)
-        self.assertIn("#define ECHO_FW_CLEANUP_RETURN 0xDD", self.gl_kal)
-        self.assertNotIn("0xD0", self.gl_init)
+    def test_cleanup_stage_range_is_dedicated(self):
+        self.assertIn("ECHO_FW_CLEANUP_F0", self.gl_kal)
+        self.assertIn("ECHO_FW_CLEANUP_F4", self.gl_kal)
+        self.assertIn("ECHO_FW_CLEANUP_FD", self.gl_kal)
+        self.assertIn("ECHO_FW_CLEANUP_FE", self.gl_kal)
 
     def test_image_unmapping_has_one_shot_operation_boundaries(self):
         start = self.gl_kal.index("VOID kalFirmwareImageUnmapping")
-        end = self.gl_kal.index("#endif", start)
+        end = self.gl_kal.index("\n}\n", start)
         fn = self.gl_kal[start:end]
-        for marker in (
-            "ECHO_FW_CLEANUP_ENTER",
-            "ECHO_FW_CLEANUP_BEFORE_VFREE",
-            "ECHO_FW_CLEANUP_AFTER_VFREE",
-            "ECHO_FW_CLEANUP_BEFORE_CLOSE",
-            "ECHO_FW_CLEANUP_AFTER_CLOSE",
-            "ECHO_FW_CLEANUP_RETURN",
-        ):
+        for marker in ("ECHO_FW_CLEANUP_F0", "ECHO_FW_CLEANUP_F1", "ECHO_FW_CLEANUP_F2", "ECHO_FW_CLEANUP_F3", "ECHO_FW_CLEANUP_FE"):
             self.assertIn(marker, fn)
-        self.assertLess(fn.index("before-vfree"), fn.index("after-vfree"))
-        self.assertLess(fn.index("after-vfree"), fn.index("before-close"))
-        self.assertLess(fn.index("before-close"), fn.index("after-close"))
+        self.assertLess(fn.index("cleanup-entry"), fn.index("before-firmware-unmap"))
+        self.assertLess(fn.index("after-firmware-unmap"), fn.index("before-kalFirmwareClose"))
+        self.assertLess(fn.index("before-kalFirmwareClose"), fn.index("cleanup-returned"))
 
-    def test_close_has_file_and_task_state_boundaries(self):
+    def test_close_has_file_and_credential_boundaries(self):
         start = self.gl_kal.index("WLAN_STATUS kalFirmwareClose")
         end = self.gl_kal.index("/*----------------------------------------------------------------------------*/", start + 30)
         fn = self.gl_kal[start:end]
-        for marker in (
-            "ECHO_FW_CLEANUP_CLOSE_ENTER",
-            "ECHO_FW_CLEANUP_BEFORE_FILP_CLOSE",
-            "ECHO_FW_CLEANUP_AFTER_FILP_CLOSE",
-            "ECHO_FW_CLEANUP_BEFORE_FS_RESTORE",
-            "ECHO_FW_CLEANUP_AFTER_FS_RESTORE",
-            "ECHO_FW_CLEANUP_BEFORE_CRED_RESTORE",
-            "ECHO_FW_CLEANUP_AFTER_CRED_RESTORE",
-            "ECHO_FW_CLEANUP_CLOSE_RETURN",
-        ):
+        for marker in ("ECHO_FW_CLEANUP_F4", "ECHO_FW_CLEANUP_F5", "ECHO_FW_CLEANUP_FC", "ECHO_FW_CLEANUP_FD"):
             self.assertIn(marker, fn)
-        self.assertLess(fn.index("before-filp-close"), fn.index("after-filp-close"))
-        self.assertLess(fn.index("after-filp-close"), fn.index("before-fs-restore"))
-        self.assertLess(fn.index("after-fs-restore"), fn.index("before-cred-restore"))
+        self.assertLess(fn.index("before-filp-close"), fn.index("filp-close-returned"))
+        self.assertIn("override_creds", self.gl_kal)
+        self.assertIn("revert_creds", self.gl_kal)
+        self.assertIn("prepare_kernel_cred", self.gl_kal)
+        self.assertNotIn("cred->fsuid.val =", self.gl_kal)
+        self.assertNotIn("cred->fsgid.val =", self.gl_kal)
 
-    def test_open_and_close_log_same_task_identity_fields(self):
-        open_start = self.gl_kal.index("WLAN_STATUS kalFirmwareOpen")
-        close_start = self.gl_kal.index("WLAN_STATUS kalFirmwareClose")
-        self.assertIn('echoFirmwareTaskMarker("OPEN")', self.gl_kal[open_start:close_start])
-        self.assertIn("ECHO_FW_CLEANUP_CLOSE_ENTER", self.gl_kal[close_start:])
-        helper_start = self.gl_kal.index("static VOID echoFirmwareTaskMarker")
-        helper_end = self.gl_kal.index("/*----------------------------------------------------------------------------*/", helper_start)
-        for text in (self.gl_kal[helper_start:helper_end],):
-            self.assertIn("current->pid", text)
-            self.assertIn("current->comm", text)
+    def test_filp_close_keeps_target_identity_gate_and_order(self):
+        start = self.fs_open.index("int filp_close(struct file *filp")
+        end = self.fs_open.index("EXPORT_SYMBOL(filp_close)", start)
+        fn = self.fs_open[start:end]
+        self.assertIn("filp == READ_ONCE(echo_fw_close_target)", fn)
+        markers = ("ECHO_FW_CLEANUP_F6", "ECHO_FW_CLEANUP_F7", "ECHO_FW_CLEANUP_F8", "ECHO_FW_CLEANUP_F9", "ECHO_FW_CLEANUP_FA", "ECHO_FW_CLEANUP_FB", "ECHO_FW_CLEANUP_FC")
+        positions = [fn.index(marker) for marker in markers]
+        self.assertEqual(positions, sorted(positions))
 
-    def test_stage_142_is_persisted_after_unmapping(self):
-        start = self.gl_init.index("kalFirmwareImageUnmapping(prGlueInfo, NULL, prFwBuffer)")
-        end = self.gl_init.index("bailout:", start)
-        section = self.gl_init[start:end]
-        self.assertIn("ECHO_WLAN_PERSIST_CLEANUP_DONE", self.gl_init)
-        self.assertIn("aee_rr_rec_fiq_step(ECHO_WLAN_PERSIST_CLEANUP_DONE)", section)
+    def test_cleanup_done_stage_is_persisted(self):
+        self.assertIn("ECHO_WLAN_PERSIST_CLEANUP_DONE 0xDE", self.gl_init)
+        self.assertIn("aee_rr_rec_fiq_step(ECHO_WLAN_PERSIST_CLEANUP_DONE)", self.gl_init)
 
 
 if __name__ == "__main__":

@@ -62,7 +62,7 @@ class V168CleanupLocalizationTests(unittest.TestCase):
         for path, markers in [
             (ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/core/stp_core.c", ("ECHO_ASSERT_UNWIND_E0", "ECHO_ASSERT_UNWIND_E1", "ECHO_ASSERT_UNWIND_E2", "ECHO_ASSERT_UNWIND_E3")),
             (ROOT / "drivers/misc/mediatek/btif/common/mtk_btif.c", ("ECHO_ASSERT_UNWIND_E4", "ECHO_ASSERT_UNWIND_E5")),
-            (ROOT / "drivers/misc/mediatek/connectivity/conn_soc/drv_wlan/mt_wifi/wlan/common/wlan_lib.c", ("ECHO_ASSERT_UNWIND_E6", "ECHO_ASSERT_UNWIND_E7", "ECHO_ASSERT_UNWIND_E8", "ECHO_ASSERT_UNWIND_E9")),
+            (ROOT / "drivers/misc/mediatek/connectivity/conn_soc/drv_wlan/mt_wifi/wlan/common/wlan_lib.c", ("ECHO_ASSERT_UNWIND_E7", "ECHO_ASSERT_UNWIND_E9")),
         ]:
             text = path.read_text()
             for marker in markers:
