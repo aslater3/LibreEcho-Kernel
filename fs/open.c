@@ -38,10 +38,7 @@
 
 #ifdef CONFIG_MTK_RAM_CONSOLE
 extern void aee_rr_rec_fiq_step(u8 step);
-#define ECHO_FILP_CLOSE_FIQ_STEP(step) do { \
-	echo_stage_set(step); \
-	aee_rr_rec_fiq_step(step); \
-} while (0)
+#define ECHO_FILP_CLOSE_FIQ_STEP(step) aee_rr_rec_fiq_step(step)
 #else
 #define ECHO_FILP_CLOSE_FIQ_STEP(step) do { } while (0)
 #endif

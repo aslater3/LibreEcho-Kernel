@@ -794,7 +794,6 @@ static VOID echoFirmwareCleanupMarker(UINT_8 ucStage, const char *pszLabel,
 {
 	(void)pszLabel;
 	(void)pvBuffer;
-	echo_stage_set(ucStage);
 	aee_rr_rec_fiq_step(ucStage);
 }
 

@@ -44,9 +44,6 @@ extern struct pstore_info *psinfo;
 extern int aee_rr_curr_fiq_step(void);
 extern void aee_rr_rec_fiq_step(u8 i);
 extern void aee_rr_rec_reboot_mode(u8 mode);
-extern void echo_stage_set(u32 stage);
-extern u32 echo_stage_current(void);
-extern u32 echo_stage_previous(void);
 
 extern void aee_rr_rec_kdump_params(void *params);
 extern void aee_rr_rec_last_irq_enter(int cpu, int irq, u64 j);
@@ -69,20 +66,6 @@ static inline int aee_rr_curr_fiq_step(void)
 
 static inline void aee_rr_rec_fiq_step(u8 i)
 {
-}
-
-static inline void echo_stage_set(u32 stage)
-{
-}
-
-static inline u32 echo_stage_current(void)
-{
-	return 0;
-}
-
-static inline u32 echo_stage_previous(void)
-{
-	return 0;
 }
 
 static inline unsigned int aee_rr_curr_exp_type(void)
