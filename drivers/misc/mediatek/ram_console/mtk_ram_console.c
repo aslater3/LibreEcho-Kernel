@@ -28,6 +28,7 @@
 static int mtk_cpu_num;
 
 static int ram_console_init_done;
+static atomic_t echo_bt_stage_mask = ATOMIC_INIT(0);
 
 /*
    This group of API call by sub-driver module to report reboot reasons
@@ -751,10 +752,11 @@ static int echo_stage_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "raw_fiq_step=0x%08x previous=0x%08x\n"
 		   "raw_wdt_status=0x%08x previous_wdt=0x%08x\n"
-		   "stage_current=0x%08x\n",
+		   "stage_current=0x%08x\n"
+		   "bt_stage_mask=0x%08x\n",
 		   echo_stage_current_fiq(), echo_stage_previous_fiq(),
 		   echo_stage_current_wdt(), echo_stage_previous_wdt(),
-		   echo_stage_current_fiq());
+		   echo_stage_current_fiq(), atomic_read(&echo_bt_stage_mask));
 	return 0;
 }
 
@@ -813,6 +815,13 @@ void aee_rr_rec_fiq_step(u8 step)
 	if (!ram_console_init_done || !ram_console_buffer)
 		return;
 	LAST_RR_SET(fiq_step, step);
+}
+
+void aee_rr_rec_bt_stage(u8 stage)
+{
+	if (stage < 0x64 || stage > 0x6b)
+		return;
+	atomic_or(1U << (stage - 0x64), &echo_bt_stage_mask);
 }
 
 int aee_rr_curr_fiq_step(void)

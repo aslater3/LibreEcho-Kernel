@@ -43,6 +43,7 @@ extern struct pstore_info *psinfo;
 #ifdef CONFIG_MTK_RAM_CONSOLE
 extern int aee_rr_curr_fiq_step(void);
 extern void aee_rr_rec_fiq_step(u8 i);
+extern void aee_rr_rec_bt_stage(u8 stage);
 extern void aee_rr_rec_reboot_mode(u8 mode);
 
 extern void aee_rr_rec_kdump_params(void *params);
@@ -65,6 +66,10 @@ static inline int aee_rr_curr_fiq_step(void)
 }
 
 static inline void aee_rr_rec_fiq_step(u8 i)
+{
+}
+
+static inline void aee_rr_rec_bt_stage(u8 stage)
 {
 }
 
