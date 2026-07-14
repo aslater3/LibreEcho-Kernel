@@ -12,7 +12,8 @@ CONFIG = (ROOT / ".config").read_text()
 class V173BtInnerContract(unittest.TestCase):
     def test_bt_enabled_wifi_disabled(self):
         self.assertRegex(CONFIG, r"(?m)^CONFIG_MTK_COMBO_BT=y$")
-        self.assertRegex(CONFIG, r"(?m)^CONFIG_MTK_COMBO_WIFI=n$")
+        self.assertNotRegex(CONFIG, r"(?m)^CONFIG_MTK_COMBO_WIFI=y$")
+        self.assertRegex(CONFIG, r"(?m)^(CONFIG_MTK_COMBO_WIFI=n|# CONFIG_MTK_COMBO_WIFI is not set)$")
 
     def test_inner_marker_values(self):
         values = re.findall(r"#define ECHO_BT_INNER_B[4-9A-B] 0x([0-9A-F]+)", HEADER)
