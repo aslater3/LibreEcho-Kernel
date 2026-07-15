@@ -20,6 +20,10 @@
 #include "stp_btif.h"
 #include "wmt_dev.h"
 #include <linux/atomic.h>
+#include <linux/crc32.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#include <linux/spinlock.h>
 #include <mt-plat/mtk_ram_console.h>
 #include <mt-plat/echo_assert_unwind.h>
 
@@ -121,6 +125,27 @@ static mtkstp_parser_state prev_state = -1;
 #define ECHO_STP_FW_FRAME_LIMIT 4
 #define ECHO_STP_FW_PAYLOAD_LIMIT 128
 
+#define ECHO_WLAN_ASSERT_MAGIC 0x45574131
+#define ECHO_WLAN_ASSERT_PAYLOAD_MAX 1024
+
+struct echo_wlan_assert_snapshot {
+	u32 magic;
+	u32 payload_len;
+	u32 copied_len;
+	u32 payload_crc32;
+	u32 cpupcr;
+	u32 wcir;
+	u32 wasr;
+	u32 d2hrm0;
+	u32 d2hrm1;
+	u8 payload[1024];
+};
+
+typedef VOID (*ECHO_WLAN_ASSERT_REG_READER)(VOID *context,
+					    u32 *cpupcr, u32 *wcir,
+					    u32 *wasr, u32 *d2hrm0,
+					    u32 *d2hrm1);
+
 #define ECHO_STP_ASSERT_FIQ_FW_MSG_COMPLETE 0xC0
 #define ECHO_STP_ASSERT_FIQ_LATCH_BEFORE    0xC1
 #define ECHO_STP_ASSERT_FIQ_LATCH_AFTER     0xC2
@@ -170,7 +195,13 @@ struct echo_stp_crc_snapshot {
 
 static atomic_t echo_crc_snapshot_taken = ATOMIC_INIT(0);
 static atomic_t echo_fw_assert_latched = ATOMIC_INIT(0);
+static atomic_t echo_wlan_assert_snapshot_state = ATOMIC_INIT(0);
 static struct echo_stp_crc_snapshot g_echo_stp_crc_snapshot __aligned(8);
+static struct echo_wlan_assert_snapshot g_echo_wlan_assert_snapshot __aligned(8);
+static ECHO_WLAN_ASSERT_REG_READER g_echo_wlan_assert_reg_reader;
+static VOID *g_echo_wlan_assert_reg_context;
+static DEFINE_SPINLOCK(g_echo_wlan_assert_reg_lock);
+static struct proc_dir_entry *g_echo_wlan_assert_proc;
 static UINT8 g_echo_btif_tail[ECHO_STP_BTIF_TAIL_BYTES];
 static UINT8 g_echo_btif_previous[ECHO_STP_BTIF_PREV_BYTES];
 static UINT16 g_echo_btif_tail_len;
@@ -186,6 +217,110 @@ bool echo_fw_asserted(void)
 	return atomic_read(&echo_fw_assert_latched) != 0;
 }
 EXPORT_SYMBOL(echo_fw_asserted);
+
+VOID echo_wlan_assert_register_reader(ECHO_WLAN_ASSERT_REG_READER reader,
+					      VOID *context)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&g_echo_wlan_assert_reg_lock, flags);
+	WRITE_ONCE(g_echo_wlan_assert_reg_reader, reader);
+	WRITE_ONCE(g_echo_wlan_assert_reg_context, context);
+	spin_unlock_irqrestore(&g_echo_wlan_assert_reg_lock, flags);
+}
+EXPORT_SYMBOL(echo_wlan_assert_register_reader);
+
+static VOID echo_capture_wlan_assert(const u8 *payload, u32 payload_len)
+{
+	ECHO_WLAN_ASSERT_REG_READER reader;
+	VOID *context;
+	unsigned long flags;
+	u32 copy_len;
+
+	if (atomic_cmpxchg(&echo_wlan_assert_snapshot_state, 0, -1) != 0)
+		return;
+
+	osal_memset(&g_echo_wlan_assert_snapshot, 0,
+		   sizeof(g_echo_wlan_assert_snapshot));
+	copy_len = min_t(u32, payload_len, ECHO_WLAN_ASSERT_PAYLOAD_MAX);
+	g_echo_wlan_assert_snapshot.magic = ECHO_WLAN_ASSERT_MAGIC;
+	g_echo_wlan_assert_snapshot.payload_len = payload_len;
+	g_echo_wlan_assert_snapshot.copied_len = copy_len;
+	g_echo_wlan_assert_snapshot.payload_crc32 =
+		crc32_le(~0U, payload, payload_len) ^ ~0U;
+	if (copy_len)
+		osal_memcpy(g_echo_wlan_assert_snapshot.payload, payload, copy_len);
+
+	spin_lock_irqsave(&g_echo_wlan_assert_reg_lock, flags);
+	reader = READ_ONCE(g_echo_wlan_assert_reg_reader);
+	context = READ_ONCE(g_echo_wlan_assert_reg_context);
+	if (reader)
+		reader(context, &g_echo_wlan_assert_snapshot.cpupcr,
+		       &g_echo_wlan_assert_snapshot.wcir,
+		       &g_echo_wlan_assert_snapshot.wasr,
+		       &g_echo_wlan_assert_snapshot.d2hrm0,
+		       &g_echo_wlan_assert_snapshot.d2hrm1);
+	spin_unlock_irqrestore(&g_echo_wlan_assert_reg_lock, flags);
+
+	/* Publish the immutable snapshot before publishing the existing latch. */
+	smp_wmb();
+	atomic_set(&echo_wlan_assert_snapshot_state, 1);
+	STP_SET_FW_COREDUMP_FLAG(stp_core_ctx, 1);
+	atomic_set(&echo_fw_assert_latched, 1);
+}
+
+static int echo_wlan_assert_proc_show(struct seq_file *m, void *v)
+{
+	const struct echo_wlan_assert_snapshot *snapshot =
+		&g_echo_wlan_assert_snapshot;
+	int state = atomic_read(&echo_wlan_assert_snapshot_state);
+	u32 i;
+
+	if (state != 1) {
+		seq_printf(m, "state=%s\n", state == -1 ? "capturing" : "empty");
+		return 0;
+	}
+
+	smp_rmb();
+	seq_puts(m, "state=complete\n");
+	seq_printf(m, "magic=0x%08x\n", snapshot->magic);
+	seq_printf(m, "payload_len=%u\n", snapshot->payload_len);
+	seq_printf(m, "copied_len=%u\n", snapshot->copied_len);
+	seq_printf(m, "payload_crc32=0x%08x\n", snapshot->payload_crc32);
+	seq_printf(m, "cpupcr=0x%08x\n", snapshot->cpupcr);
+	seq_printf(m, "wcir=0x%08x\n", snapshot->wcir);
+	seq_printf(m, "wasr=0x%08x\n", snapshot->wasr);
+	seq_printf(m, "d2hrm0=0x%08x\n", snapshot->d2hrm0);
+	seq_printf(m, "d2hrm1=0x%08x\n", snapshot->d2hrm1);
+
+	seq_puts(m, "payload_hex=");
+	for (i = 0; i < snapshot->copied_len; i++)
+		seq_printf(m, "%02x", snapshot->payload[i]);
+	seq_putc(m, '\n');
+
+	seq_puts(m, "payload_ascii=");
+	for (i = 0; i < snapshot->copied_len; i++) {
+		u8 byte = snapshot->payload[i];
+
+		seq_putc(m, byte >= 0x20 && byte <= 0x7e ? byte : '.');
+	}
+	seq_putc(m, '\n');
+
+	return 0;
+}
+
+static int echo_wlan_assert_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, echo_wlan_assert_proc_show, NULL);
+}
+
+static const struct file_operations echo_wlan_assert_proc_fops = {
+	.owner = THIS_MODULE,
+	.open = echo_wlan_assert_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
 static UINT32 g_echo_stp_crc_failures;
 static UINT8 g_echo_last_accepted_seq;
 static UINT8 g_echo_last_accepted_type;
@@ -1506,8 +1641,22 @@ INT32 mtk_wcn_stp_init(const mtkstp_callback * const cb_func)
 	INT32 i = 0;
 
 	atomic_set(&echo_crc_snapshot_taken, 0);
+	atomic_set(&echo_wlan_assert_snapshot_state, 0);
+	atomic_set(&echo_fw_assert_latched, 0);
+	echo_wlan_assert_register_reader(NULL, NULL);
 	osal_memset(&g_echo_stp_crc_snapshot, 0,
 		   sizeof(g_echo_stp_crc_snapshot));
+	osal_memset(&g_echo_wlan_assert_snapshot, 0,
+		   sizeof(g_echo_wlan_assert_snapshot));
+	if (!g_echo_wlan_assert_proc) {
+		g_echo_wlan_assert_proc = proc_create("echo_wlan_assert", 0444, NULL,
+						     &echo_wlan_assert_proc_fops);
+		if (!g_echo_wlan_assert_proc) {
+			STP_ERR_FUNC("failed to create /proc/echo_wlan_assert\n");
+			ret = -ENOMEM;
+			goto RETURN;
+		}
+	}
 	osal_memset(g_echo_btif_tail, 0, sizeof(g_echo_btif_tail));
 	osal_memset(g_echo_btif_previous, 0, sizeof(g_echo_btif_previous));
 	g_echo_btif_tail_len = 0;
@@ -1615,6 +1764,12 @@ RETURN:
 INT32 mtk_wcn_stp_deinit(void)
 {
 	UINT32 i = 0;
+
+	echo_wlan_assert_register_reader(NULL, NULL);
+	if (g_echo_wlan_assert_proc) {
+		remove_proc_entry("echo_wlan_assert", NULL);
+		g_echo_wlan_assert_proc = NULL;
+	}
 
 	sys_if_tx = NULL;
 	sys_event_set = NULL;
@@ -2057,14 +2212,11 @@ static INT32 stp_parser_data_in_mand_mode(UINT32 length, UINT8 *p_data)
 				i -= remain_length;
 				p_data += remain_length;
 				stp_core_ctx.rx_counter = stp_core_ctx.parser.length;
-				if (stp_core_ctx.parser.type == STP_TASK_INDX &&
-				    stp_core_ctx.rx_counter != 0) {
+				if (stp_core_ctx.parser.type == STP_TASK_INDX) {
 					aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E1);
-					if (!echo_fw_asserted()) {
-						STP_SET_FW_COREDUMP_FLAG(stp_core_ctx, 1);
-						atomic_set(&echo_fw_assert_latched, 1);
-						aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E2);
-					}
+					if (stp_core_ctx.rx_counter != 0)
+						echo_capture_wlan_assert(stp_core_ctx.rx_buf, stp_core_ctx.rx_counter);
+					aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E2);
 					stp_change_rx_state(MTKSTP_SYNC);
 					stp_core_ctx.rx_counter = 0;
 					return 0;
@@ -2448,14 +2600,11 @@ static INT32 stp_parser_data_in_full_mode(UINT32 length, UINT8 *p_data)
 						       i >= 2 ? MTK_WCN_BOOL_TRUE : MTK_WCN_BOOL_FALSE,
 						       i >= 2 ? i - 2 : 0,
 						       MTK_WCN_BOOL_FALSE);
-				if (stp_core_ctx.parser.type == STP_TASK_INDX &&
-				    stp_core_ctx.rx_counter != 0) {
+				if (stp_core_ctx.parser.type == STP_TASK_INDX) {
 					aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E1);
-					if (!echo_fw_asserted()) {
-						STP_SET_FW_COREDUMP_FLAG(stp_core_ctx, 1);
-						atomic_set(&echo_fw_assert_latched, 1);
-						aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E2);
-					}
+					if (stp_core_ctx.rx_counter != 0)
+						echo_capture_wlan_assert(stp_core_ctx.rx_buf, stp_core_ctx.rx_counter);
+					aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E2);
 					stp_change_rx_state(MTKSTP_SYNC);
 					stp_core_ctx.rx_counter = 0;
 					/* Drop the remainder of this callback, including dump traffic. */

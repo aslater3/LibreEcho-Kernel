@@ -973,6 +973,13 @@ extern UINT32 wmt_plat_read_cpupcr(VOID);
 extern VOID wmt_plat_dump_ap_state(const char *pszStage);
 extern INT32 mtk_wcn_stp_coredump_start_ctrl(UINT32 value);
 extern INT32 mtk_wcn_stp_coredump_start_get(VOID);
+extern VOID echo_wlan_assert_register_reader(VOID (*reader)(VOID *context,
+							     UINT32 *cpupcr,
+							     UINT32 *wcir,
+							     UINT32 *wasr,
+							     UINT32 *d2hrm0,
+							     UINT32 *d2hrm1),
+						     VOID *context);
 
 #define ECHO_WLAN_PERSIST_DOWNLOAD 0xE2
 #define ECHO_WLAN_PERSIST_START 0xE3
@@ -981,6 +988,28 @@ extern INT32 mtk_wcn_stp_coredump_start_get(VOID);
 #define ECHO_WLAN_PERSIST_READY_POLL 0xE6
 #define ECHO_WLAN_PERSIST_TIMEOUT 0xE7
 #define ECHO_WLAN_PERSIST_FW_ASSERT 0xEB
+
+static VOID echoWlanAssertReadRegisters(VOID *context, UINT32 *cpupcr,
+					UINT32 *wcir,
+					UINT32 *wasr, UINT32 *d2hrm0,
+					UINT32 *d2hrm1)
+{
+	P_ADAPTER_T prAdapter = (P_ADAPTER_T)context;
+
+	*cpupcr = 0;
+	*wcir = 0;
+	*wasr = 0;
+	*d2hrm0 = 0;
+	*d2hrm1 = 0;
+	if (!prAdapter)
+		return;
+
+	*cpupcr = wmt_plat_read_cpupcr();
+	HAL_MCR_RD(prAdapter, MCR_WCIR, wcir);
+	HAL_MCR_RD(prAdapter, MCR_WASR, wasr);
+	HAL_MCR_RD(prAdapter, MCR_D2HRM0R, d2hrm0);
+	HAL_MCR_RD(prAdapter, MCR_D2HRM1R, d2hrm1);
+}
 
 static VOID echoWlanPersistStage(IN UINT_8 ucStage)
 {
@@ -1343,6 +1372,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 #endif
 #endif
 	ASSERT(prAdapter);
+	echo_wlan_assert_register_reader(echoWlanAssertReadRegisters, prAdapter);
 
 	DEBUGFUNC("wlanAdapterStart");
 
@@ -1883,6 +1913,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		nicReleaseAdapterMemory(prAdapter);
 	}
 
+	echo_wlan_assert_register_reader(NULL, NULL);
 	return u4Status;
 }				/* wlanAdapterStart */
 
