@@ -56,6 +56,8 @@
 ********************************************************************************
 */
 #include "precomp.h"
+#include <mt-plat/mtk_ram_console.h>
+#include <mt-plat/echo_assert_unwind.h>
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -178,21 +180,31 @@ P_CMD_INFO_T cmdBufAllocateCmdInfo(IN P_ADAPTER_T prAdapter, IN UINT_32 u4Length
 VOID cmdBufFreeCmdInfo(IN P_ADAPTER_T prAdapter, IN P_CMD_INFO_T prCmdInfo)
 {
 	KAL_SPIN_LOCK_DECLARATION();
+	bool fgEchoStartFreeTrace;
 
 	DEBUGFUNC("cmdBufFreeCmdInfo");
 
 	ASSERT(prAdapter);
 	ASSERT(prCmdInfo);
+	fgEchoStartFreeTrace = echo_start_free_trace_active(prCmdInfo ? prCmdInfo->pucInfoBuffer : NULL);
 
 	if (prCmdInfo) {
 		if (prCmdInfo->pucInfoBuffer) {
 			cnmMemFree(prAdapter, prCmdInfo->pucInfoBuffer);
+			if (fgEchoStartFreeTrace)
+				aee_rr_rec_fiq_step(ECHO_START_FREE_AFTER_CNM);
 			prCmdInfo->pucInfoBuffer = NULL;
 		}
 
+		if (fgEchoStartFreeTrace)
+			aee_rr_rec_fiq_step(ECHO_START_FREE_CMD_LOCK_WAIT);
 		KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_CMD_RESOURCE);
+		if (fgEchoStartFreeTrace)
+			aee_rr_rec_fiq_step(ECHO_START_FREE_CMD_LOCK_HELD);
 		QUEUE_INSERT_TAIL(&prAdapter->rFreeCmdList, &prCmdInfo->rQueEntry);
 		KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_CMD_RESOURCE);
+		if (fgEchoStartFreeTrace)
+			aee_rr_rec_fiq_step(ECHO_START_FREE_CMD_LOCK_RELEASED);
 	}
 
 	return;

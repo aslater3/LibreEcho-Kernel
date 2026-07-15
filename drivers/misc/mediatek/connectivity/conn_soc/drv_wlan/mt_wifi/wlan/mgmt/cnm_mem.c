@@ -364,6 +364,8 @@
 ********************************************************************************
 */
 #include "precomp.h"
+#include <mt-plat/mtk_ram_console.h>
+#include <mt-plat/echo_assert_unwind.h>
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -682,6 +684,7 @@ VOID cnmMemFree(IN P_ADAPTER_T prAdapter, IN PVOID pvMemory)
 	UINT_32 u4BlockIndex;
 	BUF_BITMAP rAllocatedBlocksBitmap;
 	ENUM_RAM_TYPE_T eRamType;
+	bool fgEchoStartFreeTrace;
 
 	KAL_SPIN_LOCK_DECLARATION();
 
@@ -689,6 +692,9 @@ VOID cnmMemFree(IN P_ADAPTER_T prAdapter, IN PVOID pvMemory)
 	ASSERT(pvMemory);
 	if (!pvMemory)
 		return;
+	fgEchoStartFreeTrace = echo_start_free_trace_active(pvMemory);
+	if (fgEchoStartFreeTrace)
+		aee_rr_rec_fiq_step(ECHO_START_FREE_CNM_ENTER);
 
 	u4MemFreeCnt++;
 
@@ -711,7 +717,11 @@ VOID cnmMemFree(IN P_ADAPTER_T prAdapter, IN PVOID pvMemory)
 	} else {
 #ifdef LINUX
 		/* For Linux, it is supported because size is not needed */
+		if (fgEchoStartFreeTrace)
+			aee_rr_rec_fiq_step(ECHO_START_FREE_DYNAMIC_BEFORE);
 		kalMemFree(pvMemory, VIR_MEM_TYPE, 0);
+		if (fgEchoStartFreeTrace)
+			aee_rr_rec_fiq_step(ECHO_START_FREE_DYNAMIC_AFTER);
 #else
 		/* For Windows, it is not supported because of no size argument */
 		ASSERT(0);
@@ -723,7 +733,11 @@ VOID cnmMemFree(IN P_ADAPTER_T prAdapter, IN PVOID pvMemory)
 		return;
 	}
 
+	if (fgEchoStartFreeTrace)
+		aee_rr_rec_fiq_step(ECHO_START_FREE_POOL_LOCK_WAIT);
 	KAL_ACQUIRE_SPIN_LOCK(prAdapter, eRamType == RAM_TYPE_MSG ? SPIN_LOCK_MSG_BUF : SPIN_LOCK_MGT_BUF);
+	if (fgEchoStartFreeTrace)
+		aee_rr_rec_fiq_step(ECHO_START_FREE_POOL_LOCK_HELD);
 
 #if CFG_DBG_MGT_BUF
 	prBufInfo->u4FreeCount++;

@@ -14,6 +14,17 @@
 #define ECHO_ASSERT_UNWIND_E8 0xE8
 #define ECHO_ASSERT_UNWIND_E9 0xE9
 
+#define ECHO_START_FREE_CALLER_BEFORE 0x90
+#define ECHO_START_FREE_CNM_ENTER 0x91
+#define ECHO_START_FREE_DYNAMIC_BEFORE 0x92
+#define ECHO_START_FREE_DYNAMIC_AFTER 0x93
+#define ECHO_START_FREE_POOL_LOCK_WAIT 0x94
+#define ECHO_START_FREE_POOL_LOCK_HELD 0x95
+#define ECHO_START_FREE_AFTER_CNM 0x96
+#define ECHO_START_FREE_CMD_LOCK_WAIT 0x97
+#define ECHO_START_FREE_CMD_LOCK_HELD 0x98
+#define ECHO_START_FREE_CMD_LOCK_RELEASED 0x99
+
 #define ECHO_BT_FIRST_B0 0x60
 #define ECHO_BT_FIRST_B1 0x61
 #define ECHO_BT_FIRST_B2 0x62
@@ -49,5 +60,6 @@
 
 extern bool echo_fw_asserted(void);
 extern bool echo_wlan_assert_snapshot_complete(void);
+extern bool echo_start_free_trace_active(void *pvMemory);
 
 #endif

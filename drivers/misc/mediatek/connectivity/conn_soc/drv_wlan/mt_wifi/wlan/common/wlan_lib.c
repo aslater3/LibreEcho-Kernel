@@ -966,6 +966,7 @@
 */
 #include "precomp.h"
 #include "mgmt/ais_fsm.h"
+#include <linux/sched.h>
 #include <mt-plat/mtk_ram_console.h>
 #include <mt-plat/echo_assert_unwind.h>
 
@@ -1009,6 +1010,15 @@ static VOID echoWlanAssertReadRegisters(VOID *context, UINT32 *cpupcr,
 	HAL_MCR_RD(prAdapter, MCR_WASR, wasr);
 	HAL_MCR_RD(prAdapter, MCR_D2HRM0R, d2hrm0);
 	HAL_MCR_RD(prAdapter, MCR_D2HRM1R, d2hrm1);
+}
+
+static PVOID g_echo_start_free_target;
+static void *g_echo_start_free_arm_task;
+
+bool echo_start_free_trace_active(void *pvMemory)
+{
+	return pvMemory && READ_ONCE(g_echo_start_free_target) == pvMemory &&
+	       READ_ONCE(g_echo_start_free_arm_task) == (void *)current;
 }
 
 static VOID echoWlanPersistStage(IN UINT_8 ucStage)
@@ -1599,11 +1609,13 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		pr_err("ECHO_WLAN_STAGE: 115 before Wi-Fi start command addr=0x%08x enable=%u cpu=%u jiffies=%lu\n",
 		       prRegInfo->u4StartAddress, CFG_OVERRIDE_FW_START_ADDRESS,
 		       raw_smp_processor_id(), jiffies);
+		WRITE_ONCE(g_echo_start_free_arm_task, (void *)current);
 #if CFG_OVERRIDE_FW_START_ADDRESS
 		u4Status = wlanConfigWifiFunc(prAdapter, TRUE, prRegInfo->u4StartAddress);
 #else
 		u4Status = wlanConfigWifiFunc(prAdapter, FALSE, 0);
 #endif
+		WRITE_ONCE(g_echo_start_free_arm_task, NULL);
 		if (u4Status != WLAN_STATUS_SUCCESS) {
 			pr_err("ECHO_FW_START_SUBMIT: command submission failed status=%u\n",
 			       u4Status);
@@ -3344,6 +3356,7 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 	P_INIT_CMD_WIFI_START prInitCmdWifiStart;
 	UINT_8 ucTC, ucCmdSeqNum;
 	WLAN_STATUS u4Status = WLAN_STATUS_SUCCESS;
+	bool fgEchoStartFreeTrace;
 
 	ASSERT(prAdapter);
 
@@ -3418,7 +3431,14 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 	};
 
 	/* 6. Free CMD Info Packet. */
+	fgEchoStartFreeTrace = READ_ONCE(g_echo_start_free_arm_task) == (void *)current;
+	if (fgEchoStartFreeTrace) {
+		WRITE_ONCE(g_echo_start_free_target, prCmdInfo->pucInfoBuffer);
+		aee_rr_rec_fiq_step(ECHO_START_FREE_CALLER_BEFORE);
+	}
 	cmdBufFreeCmdInfo(prAdapter, prCmdInfo);
+	if (fgEchoStartFreeTrace)
+		WRITE_ONCE(g_echo_start_free_target, NULL);
 
 	return u4Status;
 }
