@@ -1,5 +1,4 @@
 import hashlib
-import re
 import unittest
 from pathlib import Path
 
@@ -22,54 +21,20 @@ class V176SuppressWlanProbeContract(unittest.TestCase):
             "07e59ee076cda7f5ba25ffe7d3365e145678a50f3fb34074b07938b3f6d815fd",
         )
 
-    def test_only_wlan_boot_init_is_suppressed_before_side_effects(self):
+    def test_wlan_boot_and_exit_surfaces_remain_linked_for_descendants(self):
         init_start = GL_INIT.index("static int initWlan(void)")
         init_end = GL_INIT.index("/* end of initWlan() */", init_start)
         init_body = GL_INIT[init_start:init_end]
-
-        self.assertIn(
-            "static volatile int echo_v176_suppress_wlan_boot_registration = 1;",
-            GL_INIT,
-        )
-        self.assertIn("echo-v176: WLAN boot registration/probe suppressed", init_body)
-        self.assertRegex(
-            init_body,
-            re.compile(
-                r"if \(echo_v176_suppress_wlan_boot_registration\) \{.*?return 0;.*?\}",
-                re.S,
-            ),
-        )
-        guard = init_body.index("if (echo_v176_suppress_wlan_boot_registration)")
-        for first_side_effect in (
-            "spin_lock_init(&g_p2p_lock)",
-            "kalInitIOBuffer()",
-            "procInitFs()",
-            "createWirelessDevice()",
-            "glRegisterBus(wlanProbe, wlanRemove)",
-            "glRegisterPlatformDev()",
-        ):
-            self.assertLess(guard, init_body.index(first_side_effect))
-
-    def test_boot_initcall_stays_linked_but_returns_without_registering(self):
-        self.assertIn("module_init(initWlan);", GL_INIT)
-        self.assertIn("module_exit(exitWlan);", GL_INIT)
-        self.assertIn("if (echo_v176_suppress_wlan_boot_registration)", GL_INIT)
-
-    def test_module_exit_is_safe_after_suppressed_init(self):
         exit_start = GL_INIT.index("static VOID exitWlan(void)")
         exit_end = GL_INIT.index("/* end of exitWlan() */", exit_start)
         exit_body = GL_INIT[exit_start:exit_end]
-        self.assertRegex(
-            exit_body,
-            re.compile(
-                r"if \(echo_v176_suppress_wlan_boot_registration\) \{.*?return;.*?\}",
-                re.S,
-            ),
-        )
-        self.assertLess(
-            exit_body.index("if (echo_v176_suppress_wlan_boot_registration)"),
-            exit_body.index("glUnregisterPlatformDev()"),
-        )
+
+        self.assertIn("module_init(initWlan);", GL_INIT)
+        self.assertIn("module_exit(exitWlan);", GL_INIT)
+        self.assertIn("glRegisterBus(wlanProbe, wlanRemove)", init_body)
+        self.assertIn("glRegisterPlatformDev()", init_body)
+        self.assertIn("glUnregisterPlatformDev()", exit_body)
+        self.assertIn("glUnregisterBus(wlanRemove)", exit_body)
 
     def test_wmt_wifi_bridge_remains_built_and_registered(self):
         self.assertIn("module_init(WIFI_init);", WMT_WIFI)

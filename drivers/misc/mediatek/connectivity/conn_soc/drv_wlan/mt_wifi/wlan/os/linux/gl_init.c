@@ -4345,16 +4345,9 @@ static VOID wlanRemove(VOID)
 */
 /*----------------------------------------------------------------------------*/
 /* 1 Module Entry Point */
-static volatile int echo_v176_suppress_wlan_boot_registration = 1;
-
 static int initWlan(void)
 {
 	int ret = 0, i;
-
-	if (echo_v176_suppress_wlan_boot_registration) {
-		pr_info("echo-v176: WLAN boot registration/probe suppressed\n");
-		return 0;
-	}
 
 #if DBG
 	for (i = 0; i < DBG_MODULE_NUM; i++)
@@ -4417,11 +4410,6 @@ static int initWlan(void)
 /* 1 Module Leave Point */
 static VOID exitWlan(void)
 {
-	if (echo_v176_suppress_wlan_boot_registration) {
-		pr_info("echo-v176: WLAN exit skipped because boot registration was suppressed\n");
-		return;
-	}
-
 	DBGLOG(INIT, INFO, "exitWlan\n");
 
 	glUnregisterPlatformDev();
