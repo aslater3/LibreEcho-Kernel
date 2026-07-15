@@ -218,6 +218,12 @@ bool echo_fw_asserted(void)
 }
 EXPORT_SYMBOL(echo_fw_asserted);
 
+bool echo_wlan_assert_snapshot_complete(void)
+{
+	return atomic_read(&echo_wlan_assert_snapshot_state) == 1;
+}
+EXPORT_SYMBOL(echo_wlan_assert_snapshot_complete);
+
 VOID echo_wlan_assert_register_reader(ECHO_WLAN_ASSERT_REG_READER reader,
 					      VOID *context)
 {

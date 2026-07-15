@@ -48,5 +48,6 @@
 #define ECHO_RX_BYTE_BUDGET 4096
 
 extern bool echo_fw_asserted(void);
+extern bool echo_wlan_assert_snapshot_complete(void);
 
 #endif

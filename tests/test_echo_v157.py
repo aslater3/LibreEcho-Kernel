@@ -55,11 +55,12 @@ class V157DiagnosticShapeTests(unittest.TestCase):
         end = self.nic_tx.index("WLAN_STATUS nicTxInitResetResource", start)
         self.assertIn("ECHO_FW_START_CMD", self.nic_tx[start:end])
 
-    def test_ready_loop_aborts_on_stp_firmware_assert(self):
+    def test_ready_loop_aborts_on_complete_stp_firmware_assert_snapshot(self):
         start = self.wlan.index("/* 4 <5> check Wi-Fi FW asserts ready bit */")
         end = self.wlan.index("echoWlanCpuHistDump();", start)
         ready_loop = self.wlan[start:end]
-        self.assertIn("echo_fw_asserted()", ready_loop)
+        self.assertIn("echo_wlan_assert_snapshot_complete()", ready_loop)
+        self.assertNotIn("echo_fw_asserted()", ready_loop)
         self.assertIn("ECHO_WLAN_FW_ASSERT", ready_loop)
         self.assertIn("u4Status = WLAN_STATUS_FAILURE", ready_loop)
 

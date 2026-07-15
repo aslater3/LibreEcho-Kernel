@@ -1626,7 +1626,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		/* 4 <5> check Wi-Fi FW asserts ready bit */
 		i = 0;
 		while (1) {
-			if (echo_fw_asserted()) {
+			if (echo_wlan_assert_snapshot_complete()) {
 				aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E7);
 				pr_err("ECHO_WLAN_FW_ASSERT: before ready read iter=%u; aborting startup\n", i);
 				wmt_plat_dump_ap_state("firmware-assert-before-ready-read");
@@ -1644,7 +1644,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 			aee_rr_rec_fiq_step(0xFC);
 			HAL_MCR_RD(prAdapter, MCR_WCIR, &u4Value);
 			aee_rr_rec_fiq_step(0xFD);
-			if (echo_fw_asserted()) {
+			if (echo_wlan_assert_snapshot_complete()) {
 				pr_err("ECHO_WLAN_FW_ASSERT: after ready read iter=%u WCIR=0x%08x; aborting startup\n",
 				       i, u4Value);
 				wmt_plat_dump_ap_state("firmware-assert-after-ready-read");
@@ -1755,7 +1755,7 @@ wlanAdapterStart(IN P_ADAPTER_T prAdapter,
 		RECLAIM_POWER_CONTROL_TO_PM(prAdapter, FALSE);
 
 		if (u4Status != WLAN_STATUS_SUCCESS) {
-			if (echo_fw_asserted())
+			if (echo_wlan_assert_snapshot_complete())
 				aee_rr_rec_fiq_step(ECHO_ASSERT_UNWIND_E9);
 			break;
 		}
