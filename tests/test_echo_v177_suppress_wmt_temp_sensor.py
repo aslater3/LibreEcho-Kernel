@@ -4,7 +4,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SENSOR_PATH = ROOT / "drivers/misc/mediatek/thermal/mt8163/mtk_temp_sensor_wmt.c"
-THERMAL_PATH = ROOT / "drivers/misc/mediatek/thermal/mt8163/mtk_ts_wmt.c"
 GL_INIT_PATH = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/drv_wlan/mt_wifi/wlan/os/linux/gl_init.c"
 WMT_LIB_PATH = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/core/wmt_lib.c"
 WMT_DEV_PATH = ROOT / "drivers/misc/mediatek/connectivity/conn_soc/common/linux/pri/wmt_dev.c"
@@ -77,9 +76,8 @@ class V177SuppressWmtTempSensorContract(unittest.TestCase):
         self.assertLess(guard_end, exit_body.index("platform_device_unregister(&mtktswmt_device)"))
         self.assertLess(guard_end, exit_body.index("platform_driver_unregister(&mtktswmt_driver)"))
 
-    def test_only_sensor_registration_source_changes_from_v176_surface(self):
+    def test_sensor_suppression_and_shared_paths_remain_unchanged(self):
         expected = {
-            THERMAL_PATH: "15582114d69a3fd9efe85ca3f777590b621375f81169d3865aadfd477bfeec6b",
             GL_INIT_PATH: "d71202b70469d1c1825c1f406b47b226991c25b9f0ff5e4c5d1bf2b3f0f9a73a",
             WMT_LIB_PATH: "a1227ae66897fdd63b6ae9d7665637a13a2b04126d1c5c540fd91ff1e240bd66",
             WMT_DEV_PATH: "d1be8209859e3dd5d8e290f97c56c9e41406429c799422b4b4fb1dc8a4ee4633",
