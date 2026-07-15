@@ -1,5 +1,4 @@
 import hashlib
-import re
 import unittest
 from pathlib import Path
 
@@ -30,39 +29,53 @@ class V177SuppressWmtTempSensorContract(unittest.TestCase):
         init_start = SENSOR.index("static int __init mtktswmt_sensor_init(void)")
         init_end = SENSOR.index("static void __exit mtktswmt_sensor_exit(void)", init_start)
         init_body = SENSOR[init_start:init_end]
-        self.assertIn("echo-v177: WMT temperature sensor registration suppressed", init_body)
-        self.assertRegex(
-            init_body,
-            re.compile(
-                r"if \(echo_v177_suppress_wmt_temp_sensor_registration\) \{.*?return 0;.*?\}",
-                re.S,
-            ),
+        guard_body = (
+            "if (echo_v177_suppress_wmt_temp_sensor_registration) {\n"
+            '\t\tpr_info("echo-v177: WMT temperature sensor registration suppressed\\n");\n'
+            "\t\treturn 0;\n"
+            "\t}"
         )
-        guard = init_body.index("if (echo_v177_suppress_wmt_temp_sensor_registration)")
-        self.assertLess(guard, init_body.index("platform_device_register(&mtktswmt_device)"))
-        self.assertLess(guard, init_body.index("platform_driver_register(&mtktswmt_driver)"))
+        self.assertIn(guard_body, init_body)
+        guard_end = init_body.index(guard_body) + len(guard_body)
+        self.assertLess(guard_end, init_body.index("platform_device_register(&mtktswmt_device)"))
+        self.assertLess(guard_end, init_body.index("platform_driver_register(&mtktswmt_driver)"))
 
     def test_initcall_and_original_sensor_registration_remain_linked(self):
         self.assertIn("module_init(mtktswmt_sensor_init);", SENSOR)
         self.assertIn("module_exit(mtktswmt_sensor_exit);", SENSOR)
         self.assertIn("platform_device_register(&mtktswmt_device)", SENSOR)
         self.assertIn("platform_driver_register(&mtktswmt_driver)", SENSOR)
-        self.assertIn("wmt_thz_hw_get_temp()", SENSOR)
+        self.assertIn("static int mtktswmt_probe(struct platform_device *pdev)", SENSOR)
+        self.assertIn("static int mtktswmt_remove(struct platform_device *pdev)", SENSOR)
+        self.assertIn("static int mtktswmt_read_temp(struct thermal_dev *tdev)", SENSOR)
+
+        driver_start = SENSOR.index("static struct platform_driver mtktswmt_driver")
+        driver_end = SENSOR.index("static struct platform_device mtktswmt_device", driver_start)
+        driver_body = SENSOR[driver_start:driver_end]
+        self.assertIn(".probe = mtktswmt_probe", driver_body)
+        self.assertIn(".remove = mtktswmt_remove", driver_body)
+
+        ops_start = SENSOR.index("static struct thermal_dev_ops mtktswmt_sensor_fops")
+        ops_end = SENSOR.index("struct thermal_dev_params mtktswmt_sensor_tdp", ops_start)
+        self.assertIn(".get_temp = mtktswmt_read_temp", SENSOR[ops_start:ops_end])
+
+        read_start = SENSOR.index("static int mtktswmt_read_temp(struct thermal_dev *tdev)")
+        read_end = SENSOR.index("static struct thermal_dev_ops", read_start)
+        self.assertIn("return wmt_thz_hw_get_temp();", SENSOR[read_start:read_end])
 
     def test_exit_is_safe_after_suppressed_init(self):
         exit_start = SENSOR.index("static void __exit mtktswmt_sensor_exit(void)")
         exit_end = SENSOR.index("module_init(mtktswmt_sensor_init);", exit_start)
         exit_body = SENSOR[exit_start:exit_end]
-        self.assertRegex(
-            exit_body,
-            re.compile(
-                r"if \(echo_v177_suppress_wmt_temp_sensor_registration\) \{.*?return;.*?\}",
-                re.S,
-            ),
+        guard_body = (
+            "if (echo_v177_suppress_wmt_temp_sensor_registration) {\n"
+            "\t\treturn;\n"
+            "\t}"
         )
-        guard = exit_body.index("if (echo_v177_suppress_wmt_temp_sensor_registration)")
-        self.assertLess(guard, exit_body.index("platform_device_unregister(&mtktswmt_device)"))
-        self.assertLess(guard, exit_body.index("platform_driver_unregister(&mtktswmt_driver)"))
+        self.assertIn(guard_body, exit_body)
+        guard_end = exit_body.index(guard_body) + len(guard_body)
+        self.assertLess(guard_end, exit_body.index("platform_device_unregister(&mtktswmt_device)"))
+        self.assertLess(guard_end, exit_body.index("platform_driver_unregister(&mtktswmt_driver)"))
 
     def test_only_sensor_registration_source_changes_from_v176_surface(self):
         expected = {
