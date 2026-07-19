@@ -8,6 +8,18 @@ menuconfig ARCH_MEDIATEK
 
 if ARCH_MEDIATEK
 
+config ARCH_MT8163
+	bool "MediaTek MT8163 SoCs support"
+	default n
+	select ARM_AMBA
+	select ARM_PSCI
+	select HAVE_ARM_ARCH_TIMER
+	select MTK_INFRACFG
+	help
+	  Enable the ARM32 platform providers required by MT8163 device
+	  trees, including the architected timer, PSCI, pin control, clocks,
+	  and power domains.
+
 config MACH_MT2701
 	bool "MediaTek MT2701 SoCs support"
 	default n
