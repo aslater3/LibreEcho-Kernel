@@ -16,7 +16,7 @@
 #include "kree/tz_trusty.h"
 #endif
 
-#ifdef CONFIG_ARM64
+#if defined(CONFIG_ARM64) || defined(CONFIG_ARCH_MT8163)
 #define ARM_SMC_CALLING_CONVENTION
 #endif
 
@@ -156,12 +156,12 @@ static u32 tz_service_call(u32 handle, u32 op, u32 arg1, unsigned long arg2)
 #else
 	u32 param[REE_SERVICE_BUFFER_SIZE / sizeof(u32)];
 
-	register u32 r0 asm("x0") = SMC_MTEE_SERVICE_CALL;
-	register u32 r1 asm("x1") = handle;
-	register u32 r2 asm("x2") = op;
-	register u32 r3 asm("x3") = arg1;
-	register u32 r4 asm("x4") = arg2;
-	register u32 r5 asm("x5") = (unsigned long)param;
+	register u32 r0 asm("r0") = SMC_MTEE_SERVICE_CALL;
+	register u32 r1 asm("r1") = handle;
+	register u32 r2 asm("r2") = op;
+	register u32 r3 asm("r3") = arg1;
+	register u32 r4 asm("r4") = arg2;
+	register u32 r5 asm("r5") = (unsigned long)param;
 
 	asm volatile (".arch_extension sec\n"
 		      __asmeq("%0", "r0")
@@ -178,7 +178,7 @@ static u32 tz_service_call(u32 handle, u32 op, u32 arg1, unsigned long arg2)
 		      "r"(r0), "r"(r1), "r"(r2), "r"(r3), "r"(r4), "r"(r5) :
 		      "memory");
 
-	while (r1 != 0) {
+	while (r1 != 0 && r0 != SMC_UNK) {
 		/* Need REE service */
 		/* r0 is the command, parameter in param buffer */
 		r1 = tz_ree_service(r0, (u8 *) param);
@@ -198,7 +198,7 @@ static u32 tz_service_call(u32 handle, u32 op, u32 arg1, unsigned long arg2)
 			      "memory");
 	}
 
-	return r2;
+	return (r0 == SMC_UNK) ? r0 : r2;
 #endif
 
 }
