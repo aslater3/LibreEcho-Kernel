@@ -1276,7 +1276,7 @@ int m4u_mva_map_kernel(unsigned int mva, unsigned int size, unsigned long *map_v
 	pages = vmalloc(sizeof(struct page *) * page_num);
 	if (pages == NULL) {
 		M4UMSG("mva_map_kernel:error to vmalloc for %lx\n",
-		       sizeof(struct page *) * page_num);
+		       (unsigned long)(sizeof(struct page *) * page_num));
 		return -1;
 	}
 

@@ -43,6 +43,13 @@ struct spm_irq_desc {
 
 static twam_handler_t spm_twam_handler;
 
+/* ARM32 does not export MediaTek's legacy IRQ-affinity helper. */
+void __attribute__((weak)) mt_gic_cfg_irq2cpu(unsigned int irq,
+					      unsigned int cpu,
+					      unsigned int set)
+{
+}
+
 
 /**************************************
  * Init and IRQ Function

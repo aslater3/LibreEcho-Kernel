@@ -847,8 +847,10 @@ static INT32 wmt_core_hw_check(VOID)
 static INT32 opfunc_hif_conf(P_WMT_OP pWmtOp)
 {
 	pr_err("ECHO_HIFCONF: raw type=%lu data1=%lu data2=%lu data3=%lu\n",
-	       pWmtOp->au4OpData[0], pWmtOp->au4OpData[1],
-	       pWmtOp->au4OpData[2], pWmtOp->au4OpData[3]);
+	       (unsigned long)pWmtOp->au4OpData[0],
+	       (unsigned long)pWmtOp->au4OpData[1],
+	       (unsigned long)pWmtOp->au4OpData[2],
+	       (unsigned long)pWmtOp->au4OpData[3]);
 
 	if (!(pWmtOp->u4InfoBit & WMT_OP_HIF_BIT)) {
 		WMT_ERR_FUNC("WMT-CORE: no HIF_BIT in WMT_OP!\n");

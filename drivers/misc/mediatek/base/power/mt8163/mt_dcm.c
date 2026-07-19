@@ -1,4 +1,5 @@
 #include <linux/init.h>
+#include <linux/io.h>
 #include <linux/export.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
