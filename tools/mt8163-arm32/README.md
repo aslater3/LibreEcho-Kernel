@@ -130,14 +130,18 @@ parity gate.  That DTB has the old three-resource CONSYS layout and no named
 
 The current source-built `giza_evt.dtb` is 66,135 bytes, which exceeds LK's
 proven 64 KiB appended-FDT envelope by 599 bytes.  It must not be forced into
-this image.  There is also an unresolved mapping discrepancy that must be
-settled before deployment: the active genpd path programs the CONSYS EMI
-remap at resource 2 plus `0x320`; the stock tuple starts at `0x10001000`
-(giving `0x10001320`), while the current DTS starts at `0x10000000` (giving
-`0x10000320`).
+this image.
 
-A Wi-Fi DTB supplied with `--dtb` must therefore be independently pinned with
-`--expected-dtb-sha256`, fit within 64 KiB, provide the named
-`CLK_INFRA_PMIC_CONN` `bus` clock, and use a resource layout verified against
-the driver path and the working 64-bit implementation.  The firmware READY
-gate should be attempted only after those checks and the BT-only gate pass.
+`build_wifi_dtb.py` instead extracts the pinned 51,317-byte stock EVT DTB,
+retains its verified resource-2 base at `0x10001000` (so the driver's `+0x320`
+EMI-remap access reaches `0x10001320`), and adds only the named
+`CLK_INFRA_PMIC_CONN` `bus` clock.  The resulting raw DTB is 51,353 bytes and
+has pinned SHA-256
+`d5e8b62e14956fb6402c510bfbc784e2e82479daa3183c32cac1e7bc139e9f04`.
+See [WIFI_DTB.md](WIFI_DTB.md) for the reproducible command and the complete
+fail-closed contract.
+
+Supply that output to the recovery builder with both `--dtb` and
+`--expected-dtb-sha256`.  Firmware activation remains a later, explicit gate:
+first prove recovery/ADB stability, then CONSYS and BT-only stability, and only
+then attempt one bounded Wi-Fi function-on operation.
