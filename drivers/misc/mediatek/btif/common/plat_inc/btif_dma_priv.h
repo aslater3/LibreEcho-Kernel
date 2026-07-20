@@ -82,6 +82,8 @@ extern struct clk *clk_btif_apdma; /*btif apdma clock*/
 #define RX_DMA_VFF_LEFT_SIZE(base)  (unsigned long)(base + 0x40) /*BTIF Rx Virtual FIFO Left Size  Register */
 #define RX_DMA_DEBUG_STATUS(base)   (unsigned long)(base + 0x50) /*BTIF Rx Virtual FIFO Debug Status Register */
 
+#define BTIF_RX_IRQ_MAX_PASSES 4
+
 #define DMA_EN_BIT (0x1)
 #define DMA_STOP_BIT (0x1)
 #define DMA_RST_BIT (0x1)
