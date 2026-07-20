@@ -62,12 +62,14 @@ optional secure service from preventing recovery and further driver bring-up.
 
 ## Branch baseline
 
-The ARM32 work is based on `main`, not on a separate snapshot of
-`golden-v97`.  Commit `9f5caf3d` (`golden-v97`) is an ancestor of current
-`main` (`0ec07a22` at the time of this note), so this retains the v97 history
-while also retaining the later CONSYS, BTIF, WLAN HIF, firmware-download, and
-STP/WMT diagnostic work.  Those later changes are useful evidence and a better
-starting point, but they do **not** demonstrate a working `wlan0`.
+The current work is preserved on `agent/arm32-v97-wlan`.  The reviewed kernel
+input is commit `88b8cf66f34d7cc52317e4bed6ac71caf43b0204`; it descends from
+`golden-v97` and retains the later CONSYS, BTIF, WLAN HIF,
+firmware-download, and STP/WMT diagnostic work.  The successful
+`HIPVTQUMBWSLDopfmeysbgrucixzAERT` trace above demonstrates the ARM32 entry
+fix.  The newer connectivity candidate built from `88b8cf66` is separately
+marked `PREPARED_NOT_FLASHED`, so its presence is not evidence that BT or
+`wlan0` works.
 
 ## Recovery userspace contract
 
@@ -110,27 +112,39 @@ ramdisk address `0x43478000` leaves the audited ARM32 recovery archives below
 `0x44000000` and above the ATF reservation ending at `0x4302ffff`.  Recheck
 this bound from the final compressed size for every packaged image.
 
-## Device-tree requirement for CONSYS/WLAN
+## Device-tree contract for CONSYS/WLAN
 
-Do not pair the later `main` CONSYS code with the old EVT DTB unchanged.  The
-old DTB exposes only three CONSYS register regions and has no `bus` clock.  The
-later driver maps a fourth SPM register region and requests a clock named
-`bus`.  With the old DTB, `of_iomap(..., 3)` and/or `devm_clk_get(..., "bus")`
-will fail before meaningful WLAN firmware testing.
+The active ARM32 configuration uses `CONSYS_PWR_ON_OFF_API_AVAILABLE=1`, so
+the driver takes the generic-power-domain path and maps CONSYS resources 0
+through 2.  It does not map resource 3/SPM.  The pinned candidate therefore
+retains the stock three-resource tuple intentionally; the fourth SPM resource
+in the source DTS belongs to the alternative non-genpd path.
 
-The WLAN image therefore needs a separately verified EVT DTB with all four
-register regions and the INFRA PMIC-CONN bus clock, or an explicitly tested
-driver fallback.  Its boot-image addresses and reserved regions must be
-rechecked after any DTB change.
+Resource 2 remains exactly `0x10001000/0x1000`.  Commit `b45d49d8` corrects
+the active driver's AXI offsets to `0x220/0x228`, while EMI remapping uses
+resource 2 plus `0x320` (`0x10001320`).  The only DTB additions are
+`clocks = <5 3>` and `clock-names = "bus"` for `CLK_INFRA_PMIC_CONN`.
+
+The reproducible raw DTB is 51,353 bytes, below LK's 64 KiB appended-FDT
+limit, with SHA-256
+`d5e8b62e14956fb6402c510bfbc784e2e82479daa3183c32cac1e7bc139e9f04`.
+Its exact resource tuple, clock mutation, and boot envelope are checked by
+the [Wi-Fi DTB contract](../tools/mt8163-arm32/WIFI_DTB.md).
 
 ## Milestone order
 
 1. Reproduce v97 recovery behavior with ARM-EABI BusyBox and ADB.
-2. Optionally add ADB plus RNDIS/USB networking without weakening recovery.
-3. Re-establish stable CONSYS and BTIF initialization with the corrected DTB.
-4. Load the matching WLAN firmware, complete WMT/STP/HIF bring-up, and create a
+2. Follow the manual connectivity Gates 0 through 5, advancing from a passive
+   fresh boot through configure-only, BT-only, stock-runtime A/B, and one
+   bounded Wi-Fi activation.
+3. Load the matching WLAN firmware, complete WMT/STP/HIF bring-up, and create a
    usable `wlan0` interface.
+4. Optionally add ADB plus RNDIS/USB networking without weakening recovery.
 5. Integrate `LibreEcho-UI` only after the network interface is stable.
 
 Each phase should keep the early `FASTBOOT_PLEASE` path and be preserved as a
 known-good artifact before proceeding to the next one.
+
+The authoritative build and gate details are in
+[`tools/mt8163-arm32/README.md`](../tools/mt8163-arm32/README.md) and
+[`tools/mt8163-arm32/connectivity/README.md`](../tools/mt8163-arm32/connectivity/README.md).

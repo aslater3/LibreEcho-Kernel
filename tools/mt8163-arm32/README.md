@@ -80,16 +80,17 @@ python3 tools/mt8163-arm32/verify_recovery_image.py \
   --ramdisk /tmp/libreecho-arm32-recovery-v7.ramdisk.cpio.gz \
   --manifest /tmp/libreecho-arm32-recovery-v7.manifest.json \
   --boot-image /tmp/libreecho-arm32-recovery-v7.img \
-  --expected-boot-sha256 1cf0ce6a7a80ad798e9d1675d57eb48a41cf80d705cd37f32d6a0bc3aedd30d4
+  --expected-boot-sha256 1cf0ce6a7a80ad798e9d1675d57eb48a41cf80d705cd37f32d6a0bc3aedd30d4 \
+  --expected-connectivity-bundle none
 ```
 
 Expected final line:
 
 ```text
-arm32_recovery_image_contract=PASS android_v0=yes mtk_wrapper=yes zimage=yes evt_dtb=yes initramfs_arm32=yes fastboot_marker=yes root_adb_staged=yes runme=yes memory_disjoint=yes status=PREPARED_NOT_FLASHED
+arm32_recovery_image_contract=PASS android_v0=yes mtk_wrapper=yes zimage=yes evt_dtb=yes initramfs_arm32=yes fastboot_marker=yes root_adb_staged=yes runme=yes memory_disjoint=yes connectivity_bundle=no activation=manual-only status=PREPARED_NOT_FLASHED
 ```
 
-## Boot envelope
+## Historical v7 boot envelope
 
 The verifier checks these disjoint physical ranges:
 
@@ -106,7 +107,7 @@ Loading this larger ramdisk at the stock ARM32 address `0x44000000` would put
 it too close to, or into, the reserved RAM-console range.  The v97 address
 `0x43478000` is therefore an explicit part of the image contract.
 
-## Device gates
+## ADB-parity device gates
 
 The image is marked `PREPARED_NOT_FLASHED`.  Before advancing to connectivity,
 capture all of the following from one boot:
@@ -145,3 +146,90 @@ Supply that output to the recovery builder with both `--dtb` and
 `--expected-dtb-sha256`.  Firmware activation remains a later, explicit gate:
 first prove recovery/ADB stability, then CONSYS and BT-only stability, and only
 then attempt one bounded Wi-Fi function-on operation.
+
+## Staged connectivity bundle
+
+Bundle `mt8163-v181-stock-v1` adds the exact v181 Bionic runtime, WMT tools,
+firmware, and three narrow gate helpers to the recovery image.  It does not
+install the stock `init.connectivity.rc`, start WMT, or activate BT or Wi-Fi.
+The builder and independent verifier require all 13 stock files and all three
+helpers by size, SHA-256, ELF ABI, interpreter, and ordered dependencies.
+
+The reviewed inputs are:
+
+| Input | Size | Identity (SHA-256 unless noted) |
+| --- | ---: | --- |
+| kernel input commit | - | Git `88b8cf66f34d7cc52317e4bed6ac71caf43b0204` |
+| ARM32 zImage | 7,011,040 | `fa6717058fa25337dfbd63be52bafda18552ecd7361fe3df9a78c3715e3e6718` |
+| System.map | 2,820,781 | `1700f451d7931269974153749a9ab860906ffd3a86fc28a2f67e0b257b16c9d2` |
+| kernel `.config` | - | `9cf3ca49533904b41423308bf3309cbe1ff4244df895bd03563813d6d48cd8c8` |
+| pinned Wi-Fi DTB | 51,353 | `d5e8b62e14956fb6402c510bfbc784e2e82479daa3183c32cac1e7bc139e9f04` |
+| stock v181 `system_a` provenance | - | `56540b3a9ac4437901a5510d9fb5e09b1a8d0cc229548f0b08bb5c22d78684fe` |
+| extracted evidence manifest | - | `d1eedd04efe0dbc78853f2b0f9357c092b4ca66242648908c0369956538441eb` |
+
+Build and check the static helpers first:
+
+```sh
+make -C tools/mt8163-arm32/connectivity \
+  OUT_DIR=/tmp/libreecho-mt8163-connectivity all check
+```
+
+Then build the opt-in image:
+
+```sh
+python3 -B tools/mt8163-arm32/build_recovery_image.py \
+  --source-boot /home/andy/workspace/echo-evidence/v184-stock32-parity/boot-v184-stock32-parity-stock.img \
+  --stock-root /home/andy/workspace/echo-evidence/v184-stock32-parity/rootadb-ramdisk-verify \
+  --busybox /home/andy/.local/var/pmbootstrap/chroot_rootfs_amazon-radar/usr/bin/busybox \
+  --musl-loader /home/andy/.local/var/pmbootstrap/chroot_rootfs_amazon-radar/usr/lib/ld-musl-armhf.so.1 \
+  --connectivity-stock-root /home/andy/workspace/echo-evidence/v181-stock-userspace-layer/stock-root \
+  --wmt-config-helper /tmp/libreecho-mt8163-connectivity/wmt_configure \
+  --wmt-responder /tmp/libreecho-mt8163-connectivity/wmt_responder \
+  --wmt-bt-on /tmp/libreecho-mt8163-connectivity/wmt_bt_on \
+  --zimage /tmp/libreecho-arm32-wifi.final88b8/arch/arm/boot/zImage \
+  --expected-zimage-sha256 fa6717058fa25337dfbd63be52bafda18552ecd7361fe3df9a78c3715e3e6718 \
+  --system-map /tmp/libreecho-arm32-wifi.final88b8/System.map \
+  --expected-system-map-sha256 1700f451d7931269974153749a9ab860906ffd3a86fc28a2f67e0b257b16c9d2 \
+  --dtb /tmp/giza-evt-stock-bus-clock-canonical.dtb \
+  --expected-dtb-sha256 d5e8b62e14956fb6402c510bfbc784e2e82479daa3183c32cac1e7bc139e9f04 \
+  --output /tmp/libreecho-arm32-connectivity-mt8163-v181-stock-v1.img
+```
+
+The staged payload is 4,188,667 uncompressed bytes.  Two independent builds
+produced byte-identical outputs:
+
+| Output | Size | SHA-256 |
+| --- | ---: | --- |
+| boot image | 16,777,216 | `f7c37f74aefe1772897992f20c45732aee629c7c07cfd0e9297dacc166e94ded` |
+| recovery ramdisk | 4,117,953 | `a4d9a98e6b23399f9efa651fc2da97f5318cc9ef123ae692f4f65046083dd751` |
+
+Verify it with an explicit bundle expectation:
+
+```sh
+python3 -B tools/mt8163-arm32/verify_recovery_image.py \
+  --source-boot /home/andy/workspace/echo-evidence/v184-stock32-parity/boot-v184-stock32-parity-stock.img \
+  --zimage /tmp/libreecho-arm32-wifi.final88b8/arch/arm/boot/zImage \
+  --expected-zimage-sha256 fa6717058fa25337dfbd63be52bafda18552ecd7361fe3df9a78c3715e3e6718 \
+  --system-map /tmp/libreecho-arm32-wifi.final88b8/System.map \
+  --expected-system-map-sha256 1700f451d7931269974153749a9ab860906ffd3a86fc28a2f67e0b257b16c9d2 \
+  --ramdisk /tmp/libreecho-arm32-connectivity-mt8163-v181-stock-v1.ramdisk.cpio.gz \
+  --manifest /tmp/libreecho-arm32-connectivity-mt8163-v181-stock-v1.manifest.json \
+  --boot-image /tmp/libreecho-arm32-connectivity-mt8163-v181-stock-v1.img \
+  --expected-boot-sha256 f7c37f74aefe1772897992f20c45732aee629c7c07cfd0e9297dacc166e94ded \
+  --expected-dtb-sha256 d5e8b62e14956fb6402c510bfbc784e2e82479daa3183c32cac1e7bc139e9f04 \
+  --expected-connectivity-bundle mt8163-v181-stock-v1
+```
+
+The staged envelope remains disjoint: the compressed ramdisk occupies
+`0x43478000-0x438655c1`, below the `0x44000000` limit and RAM console at
+`0x44400000`.  Its manifest and verifier report:
+
+```text
+status=PREPARED_NOT_FLASHED
+autostart=no
+activation=manual-gates-only
+```
+
+No target action is automatic.  Follow the fresh-boot Gates 0 through 5 in
+[connectivity/README.md](connectivity/README.md); never retry a failed
+activation in the same boot.
