@@ -10,7 +10,7 @@ import json
 import stat
 import struct
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ANDROID_MAGIC = b"ANDROID!"
@@ -30,6 +30,9 @@ ZIMAGE_MAGIC = 0x016F2818
 SOURCE_SHA256 = "c0f52a3b079d214495cd3dd22f92fd85695d1b868c58b491a2edb933bc4f6d1a"
 ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
+CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
+CONNECTIVITY_STOCK_SYSTEM_SHA256 = "56540b3a9ac4437901a5510d9fb5e09b1a8d0cc229548f0b08bb5c22d78684fe"
+CONNECTIVITY_EVIDENCE_MANIFEST_SHA256 = "d1eedd04efe0dbc78853f2b0f9357c092b4ca66242648908c0369956538441eb"
 STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57dee1"
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
@@ -41,6 +44,86 @@ OVERLAY_FILES = {
     "init.rc": 0o644,
     "init.recovery.mt8163.rc": 0o644,
     "libreecho-init": 0o755,
+}
+
+CONNECTIVITY_FILES = {
+    "system/bin/linker": (
+        0o755, 630460, "73dc93e06a9ce0a76b5353f2c282f1ac3dd0dccd0e8e7f06fc20e5433ef4a3dc", (),
+    ),
+    "system/vendor/bin/wmt_loader": (
+        0o755, 17992, "de9ee285a09a7db5b079233f7c9129c5484ecb6701b54da45e2a29f310e74ff9",
+        ("libcutils.so", "libc++.so", "libdl.so", "libc.so", "libm.so"),
+    ),
+    "system/vendor/bin/wmt_launcher": (
+        0o755, 31448, "1f34425d727ea64524c9edaeac5e6b295df7a6054703dcc79b164021560252e5",
+        ("libcutils.so", "libc++.so", "libdl.so", "libc.so", "libm.so"),
+    ),
+    "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": (
+        0o644, 128720, "b4460117f51a43f3284594ec08d8c8861ecc0e42b17820987da03ecabdebac1e", None,
+    ),
+    "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": (
+        0o644, 50148, "10c4ed22a10b8a136bffd7ffce4d552300d76f8e593627d2a9841c3b11a5697e", None,
+    ),
+    "lib/firmware/WIFI_RAM_CODE_8163": (
+        0o644, 373840, "9669cc9b03cfdc5e8fd4fd6e14c4c4050e8c196738ca4707eea12f14a6a8e64c", None,
+    ),
+    "lib/firmware/WMT_SOC.cfg": (
+        0o644, 119, "302bd4462de99c028c04092e561c1500d65582ce42a93c4c72ccae6e2c99013d", None,
+    ),
+    "system/lib/libcutils.so": (
+        0o644, 104436, "dcf249ceed2c84ab45454ff8fd3fa0624248b410962c4ea9e9e799610192542b",
+        ("liblog.so", "libc++.so", "libdl.so", "libc.so", "libm.so"),
+    ),
+    "system/lib/libc++.so": (
+        0o644, 575068, "38f15c7897307e65c9b9a13174782e7b79146e453b8b80e09128aae8b6ab1df5",
+        ("libdl.so", "libc.so", "libm.so"),
+    ),
+    "system/lib/libdl.so": (
+        0o644, 13640, "efb8d634212b215b53f8c95f2b8372e9139ee13dc74717b7d25999de97d5b1cc", (),
+    ),
+    "system/lib/libc.so": (
+        0o644, 780476, "1254edac10625b1e7e123c20ea8d8f3175ad07014c9ddcca7bb3ea74db555357",
+        ("libdl.so",),
+    ),
+    "system/lib/libm.so": (
+        0o644, 132820, "3703abfae55405f1ca876cfaf5c8e41b0dafdd30d4ecec88cbd1100c5b0341ed",
+        ("libc.so",),
+    ),
+    "system/lib/liblog.so": (
+        0o644, 67460, "84e34e101618dae346cefca70c8cd866b92e6bcdec64246a130dcd12560410c0",
+        ("libc.so", "libm.so"),
+    ),
+}
+
+CONNECTIVITY_REFERENCE_FILES = {
+    "init.connectivity.rc": {
+        "sha256": "142c3f2239255dff573196daaf7da00687be9c5c54174dcbecfa309074d9d379",
+        "size": 3167,
+    },
+    "ueventd.mt8163.rc": {
+        "sha256": "b1d212a42d213b4b1412648e7501baf55aa3ee653236cdf10f650050e0ea325c",
+        "size": 4255,
+    },
+}
+
+CONNECTIVITY_SYMLINKS = {
+    "vendor": "system/vendor",
+    "system/vendor/firmware": "../../lib/firmware",
+    "system/etc/firmware": "../../lib/firmware",
+    "etc/firmware": "../lib/firmware",
+    "lib/firmware/WIFI_RAM_CODE": "WIFI_RAM_CODE_8163",
+}
+
+CONNECTIVITY_HELPERS = {
+    "sbin/wmt_configure": (
+        428704, "cb14e315e7dbacac50ed1d6bab699d97d82cc2df54c3f2a920ffdd15c6eaf58b",
+    ),
+    "sbin/wmt_responder": (
+        428796, "e20bdaf559165077ff8211c64ed38a10ecee1006641e94302cf14d3be397c350",
+    ),
+    "sbin/wmt_bt_on": (
+        424540, "4365c1b1046bf2ce1045a3fbd4578ee21d8f1a9900a01cb0cde9cea478821d82",
+    ),
 }
 
 
@@ -57,6 +140,13 @@ def read(path: Path) -> bytes:
         return path.read_bytes()
     except OSError as exc:
         fail(f"cannot read {path}: {exc}")
+
+
+def manifest_schema(manifest: dict[str, object]) -> int:
+    schema_version = manifest.get("schema_version", 1)
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        fail(f"unsupported manifest schema version: {schema_version!r}")
+    return schema_version
 
 
 def align(value: int) -> int:
@@ -104,50 +194,117 @@ def parse_newc(data: bytes) -> dict[str, Entry]:
         name_blob = data[offset:offset + namesize]
         if len(name_blob) != namesize or not name_blob.endswith(b"\0"):
             fail("truncated newc filename")
-        name = name_blob[:-1].decode("utf-8")
+        try:
+            name = name_blob[:-1].decode("utf-8")
+        except UnicodeDecodeError:
+            fail("non-UTF-8 newc filename")
         offset = (offset + namesize + 3) & ~3
         payload = data[offset:offset + size]
         if len(payload) != size:
             fail(f"truncated newc payload for {name}")
         offset = (offset + size + 3) & ~3
         if name == "TRAILER!!!":
+            if trailer:
+                fail("duplicate newc trailer")
             trailer = True
             continue
         if trailer:
             fail("newc entry follows trailer")
         normalized = name[2:] if name.startswith("./") else name
-        if not normalized or normalized.startswith("/") or ".." in Path(normalized).parts:
+        components = normalized.split("/")
+        if (
+            not normalized
+            or normalized.startswith("/")
+            or "\0" in normalized
+            or any(component in ("", ".", "..") for component in components)
+        ):
             fail(f"unsafe initramfs path {name!r}")
         if normalized in entries:
             fail(f"duplicate initramfs path {normalized}")
         entries[normalized] = Entry(normalized, mode, uid, gid, mtime, payload)
     if not trailer:
         fail("newc trailer missing")
+    if any(data[offset:]):
+        fail("nonzero data follows newc trailer")
     return entries
 
 
-def elf_info(data: bytes) -> tuple[int, int, bytes | None] | None:
+def elf_info(
+    data: bytes,
+) -> tuple[int, int, int | None, str | None, tuple[str, ...], bool] | None:
     if data[:4] != b"\x7fELF":
         return None
-    if len(data) < 52:
+    if len(data) < 20:
         fail("truncated ELF member")
-    byte_order = "<" if data[5] == 1 else ">"
     elf_class = data[4]
-    machine = struct.unpack_from(byte_order + "H", data, 18)[0]
+    if data[5] != 1:
+        fail("non-little-endian ELF member")
+    machine = struct.unpack_from("<H", data, 18)[0]
     if elf_class != 1:
-        return elf_class, machine, None
-    phoff = struct.unpack_from(byte_order + "I", data, 28)[0]
-    phentsize, phnum = struct.unpack_from(byte_order + "HH", data, 42)
+        return elf_class, machine, None, None, (), False
+    if len(data) < 52:
+        fail("truncated ELF32 member")
+    phoff, shoff = struct.unpack_from("<II", data, 28)
+    flags = struct.unpack_from("<I", data, 36)[0]
+    phentsize, phnum, shentsize, shnum = struct.unpack_from("<HHHH", data, 42)
     interpreter = None
+    has_dynamic = False
     for index in range(phnum):
         start = phoff + index * phentsize
         if start + 32 > len(data):
             fail("truncated ELF program headers")
-        kind, file_offset = struct.unpack_from(byte_order + "II", data, start)
-        file_size = struct.unpack_from(byte_order + "I", data, start + 16)[0]
+        kind, file_offset = struct.unpack_from("<II", data, start)
+        file_size = struct.unpack_from("<I", data, start + 16)[0]
+        if kind == 2:
+            has_dynamic = True
         if kind == 3:
-            interpreter = data[file_offset:file_offset + file_size].rstrip(b"\0")
-    return elf_class, machine, interpreter
+            raw_interpreter = data[file_offset:file_offset + file_size]
+            if len(raw_interpreter) != file_size:
+                fail("truncated ELF interpreter")
+            try:
+                interpreter = raw_interpreter.rstrip(b"\0").decode("ascii")
+            except UnicodeDecodeError:
+                fail("non-ASCII ELF interpreter")
+
+    sections: list[tuple[int, int, int, int, int]] = []
+    for index in range(shnum):
+        start = shoff + index * shentsize
+        if start + 40 > len(data):
+            fail("truncated ELF section headers")
+        section_type = struct.unpack_from("<I", data, start + 4)[0]
+        file_offset, size, link = struct.unpack_from("<III", data, start + 16)
+        entry_size = struct.unpack_from("<I", data, start + 36)[0]
+        sections.append((section_type, file_offset, size, link, entry_size))
+
+    needed: list[str] = []
+    for section_type, file_offset, size, link, entry_size in sections:
+        if section_type != 6:
+            continue
+        if link >= len(sections):
+            fail("ELF dynamic section has invalid string-table link")
+        _str_type, str_offset, str_size, _str_link, _str_entry = sections[link]
+        strings = data[str_offset:str_offset + str_size]
+        dynamic_data = data[file_offset:file_offset + size]
+        if len(strings) != str_size or len(dynamic_data) != size:
+            fail("truncated ELF dynamic or string-table section")
+        if entry_size not in (0, 8):
+            fail("unexpected ELF32 dynamic entry size")
+        for offset in range(0, len(dynamic_data) - 7, 8):
+            tag, value = struct.unpack_from("<II", dynamic_data, offset)
+            if tag == 0:
+                break
+            if tag != 1:
+                continue
+            if value >= len(strings):
+                fail("ELF DT_NEEDED string lies outside its table")
+            end = strings.find(b"\0", value)
+            if end < 0:
+                fail("unterminated ELF DT_NEEDED string")
+            try:
+                needed.append(strings[value:end].decode("ascii"))
+            except UnicodeDecodeError:
+                fail("non-ASCII ELF DT_NEEDED string")
+    return elf_class, machine, flags, interpreter, tuple(needed), has_dynamic
 
 
 def require_member(entries: dict[str, Entry], name: str, expected_hash: str,
@@ -162,7 +319,229 @@ def require_member(entries: dict[str, Entry], name: str, expected_hash: str,
     return entry
 
 
-def validate_initramfs(ramdisk: bytes, manifest: dict[str, object]) -> None:
+def resolve_relative_symlink(name: str, target: str) -> str:
+    components = target.split("/")
+    if (
+        not target
+        or target.startswith("/")
+        or "\0" in target
+        or any(component in ("", ".") for component in components)
+    ):
+        fail(f"unsafe initramfs symlink: {name} -> {target!r}")
+    parts = list(PurePosixPath(name).parent.parts)
+    if parts == ["."]:
+        parts = []
+    for component in components:
+        if component == "..":
+            if not parts:
+                fail(f"initramfs symlink escapes archive root: {name} -> {target}")
+            parts.pop()
+        else:
+            parts.append(component)
+    resolved = "/".join(parts)
+    if not resolved:
+        fail(f"initramfs symlink resolves to archive root: {name} -> {target}")
+    return resolved
+
+
+def validate_archive_tree(entries: dict[str, Entry]) -> None:
+    for name in entries:
+        parts = PurePosixPath(name).parts
+        for count in range(1, len(parts)):
+            parent = "/".join(parts[:count])
+            entry = entries.get(parent)
+            if entry is None or not stat.S_ISDIR(entry.mode):
+                fail(f"initramfs member {name} has a missing or non-directory parent {parent}")
+
+
+def validate_symlinks(entries: dict[str, Entry]) -> None:
+    for name, entry in entries.items():
+        if not stat.S_ISLNK(entry.mode):
+            continue
+        current = name
+        seen: set[str] = set()
+        while stat.S_ISLNK(entries[current].mode):
+            if current in seen:
+                fail(f"initramfs symlink loop includes {current}")
+            seen.add(current)
+            try:
+                target = entries[current].data.decode("utf-8")
+            except UnicodeDecodeError:
+                fail(f"non-UTF-8 initramfs symlink target for {current}")
+            current = resolve_relative_symlink(current, target)
+            if current not in entries:
+                fail(f"dangling initramfs symlink: {name} -> {current}")
+        target_entry = entries[current]
+        if not (stat.S_ISREG(target_entry.mode) or stat.S_ISDIR(target_entry.mode)):
+            fail(f"initramfs symlink has unsupported target type: {name} -> {current}")
+
+
+def validate_no_connectivity_autostart(entries: dict[str, Entry]) -> None:
+    if "init.connectivity.rc" in entries:
+        fail("auto-starting init.connectivity.rc entered the initramfs")
+    forbidden_launches = (
+        b"wmt_loader", b"wmt_launcher", b"wmt_configure", b"wmt_responder", b"wmt_bt_on",
+    )
+    forbidden_wifi_writes = (
+        b"> /dev/wmtWifi", b">/dev/wmtWifi", b"tee /dev/wmtWifi", b"of=/dev/wmtWifi",
+    )
+    active_controls = sorted(
+        name for name in entries if name.endswith(".rc") or name == "libreecho-init"
+    )
+    for name in active_controls:
+        control = entries[name].data
+        for forbidden in forbidden_launches + forbidden_wifi_writes:
+            if forbidden in control:
+                fail(f"active recovery control {name} contains {forbidden!r}")
+        for line in control.splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[:2] == [b"write", b"/dev/wmtWifi"]:
+                fail(f"active recovery control {name} activates Wi-Fi through Android init")
+
+
+def validate_connectivity(entries: dict[str, Entry], manifest: dict[str, object],
+                          schema_version: int) -> bool:
+    record = manifest.get("connectivity", {"enabled": False})
+    if not isinstance(record, dict) or not isinstance(record.get("enabled"), bool):
+        fail("connectivity manifest record is malformed")
+    bundle_names = set(CONNECTIVITY_FILES) | set(CONNECTIVITY_HELPERS) | set(CONNECTIVITY_SYMLINKS)
+    if not record["enabled"]:
+        unexpected = sorted(name for name in bundle_names if name in entries)
+        if unexpected:
+            fail(f"connectivity bundle is disabled but members are present: {unexpected}")
+        if schema_version == 2:
+            expected_disabled = {
+                "id": CONNECTIVITY_BUNDLE_ID,
+                "enabled": False,
+                "activation": "manual-gates-only",
+                "autostart": False,
+                "files": {},
+                "helpers": {},
+                "symlinks": {},
+            }
+            if record != expected_disabled:
+                fail("disabled connectivity manifest record changed")
+        return False
+
+    if schema_version != 2:
+        fail("enabled connectivity bundle requires manifest schema 2")
+    if record.get("id") != CONNECTIVITY_BUNDLE_ID:
+        fail("connectivity bundle identity changed")
+    if record.get("activation") != "manual-gates-only":
+        fail("connectivity activation policy changed")
+    if record.get("autostart") is not False:
+        fail("connectivity autostart must remain disabled")
+    expected_payload_bytes = sum(
+        expected_size for _mode, expected_size, _expected_hash, _needed
+        in CONNECTIVITY_FILES.values()
+    ) + sum(expected_size for expected_size, _expected_hash in CONNECTIVITY_HELPERS.values())
+    if record.get("stock_file_count") != len(CONNECTIVITY_FILES):
+        fail("connectivity stock-file count changed")
+    if record.get("helper_count") != len(CONNECTIVITY_HELPERS):
+        fail("connectivity helper count changed")
+    if record.get("payload_bytes") != expected_payload_bytes:
+        fail("connectivity payload byte count changed")
+    if record.get("provenance") != {
+        "stock_system_a_sha256": CONNECTIVITY_STOCK_SYSTEM_SHA256,
+        "evidence_manifest_sha256": CONNECTIVITY_EVIDENCE_MANIFEST_SHA256,
+    }:
+        fail("connectivity provenance changed")
+    stock_root = record.get("stock_root")
+    if not isinstance(stock_root, str) or not Path(stock_root).is_absolute():
+        fail("connectivity stock-root provenance is not absolute")
+    if record.get("reference_files_not_copied") != CONNECTIVITY_REFERENCE_FILES:
+        fail("connectivity reference-file manifest mismatch")
+    file_records = record.get("files")
+    if not isinstance(file_records, dict) or set(file_records) != set(CONNECTIVITY_FILES):
+        fail("connectivity stock-file manifest is incomplete")
+    library_providers = {
+        PurePosixPath(name).name: name
+        for name in CONNECTIVITY_FILES if name.startswith("system/lib/")
+    }
+    for name, (mode, expected_size, expected_hash, needed) in CONNECTIVITY_FILES.items():
+        entry = require_member(entries, name, expected_hash, mode)
+        if len(entry.data) != expected_size:
+            fail(f"connectivity member size mismatch for {name}")
+        source = (
+            "system/vendor/firmware/" + PurePosixPath(name).name
+            if name.startswith("lib/firmware/") else name
+        )
+        expected_record: dict[str, object] = {
+            "source": source,
+            "sha256": expected_hash,
+            "size": expected_size,
+            "mode": f"{mode:04o}",
+        }
+        info = elf_info(entry.data)
+        if needed is None:
+            if info is not None:
+                fail(f"connectivity firmware unexpectedly contains ELF: {name}")
+        else:
+            expected_info = (1, 40, 0x05000200, "/system/bin/linker", needed, True)
+            if info != expected_info:
+                fail(f"stock connectivity ELF contract mismatch for {name}: {info}")
+            expected_record["elf"] = {
+                "class": 1,
+                "machine": 40,
+                "flags": "0x05000200",
+                "interpreter": "/system/bin/linker",
+                "needed": list(needed),
+                "dynamic": True,
+            }
+            for dependency in needed:
+                if dependency not in library_providers:
+                    fail(f"no staged provider for {name} dependency {dependency}")
+        if file_records.get(name) != expected_record:
+            fail(f"connectivity manifest record mismatch for {name}")
+
+    helper_records = record.get("helpers")
+    if not isinstance(helper_records, dict) or set(helper_records) != set(CONNECTIVITY_HELPERS):
+        fail("connectivity helper manifest is incomplete")
+    for name, (expected_size, expected_hash) in CONNECTIVITY_HELPERS.items():
+        entry = require_member(entries, name, expected_hash, 0o755)
+        if len(entry.data) != expected_size:
+            fail(f"connectivity helper size mismatch for {name}")
+        info = elf_info(entry.data)
+        if info != (1, 40, 0x05000400, None, (), False):
+            fail(f"connectivity helper is not static ARM32 hard-float: {name}: {info}")
+        if helper_records.get(name) != {
+            "sha256": expected_hash,
+            "size": expected_size,
+            "mode": "0755",
+            "elf": {
+                "class": 1,
+                "machine": 40,
+                "flags": "0x05000400",
+                "interpreter": None,
+                "needed": [],
+                "dynamic": False,
+            },
+        }:
+            fail(f"connectivity helper manifest record mismatch for {name}")
+
+    if record.get("symlinks") != CONNECTIVITY_SYMLINKS:
+        fail("connectivity symlink manifest mismatch")
+    for name, target in CONNECTIVITY_SYMLINKS.items():
+        entry = entries.get(name)
+        if entry is None or not stat.S_ISLNK(entry.mode) or entry.data != target.encode():
+            fail(f"connectivity symlink contract mismatch for {name}")
+        resolved = resolve_relative_symlink(name, target)
+        if resolved not in entries:
+            fail(f"connectivity symlink dangles: {name} -> {target}")
+
+    patch_addresses = {
+        "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": bytes((0x00, 0x22, 0x00, 0x06)),
+        "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": bytes((0x00, 0x21, 0x00, 0x0E)),
+    }
+    for name, expected_address in patch_addresses.items():
+        if entries[name].data[23:27] != expected_address:
+            fail(f"stock patch metadata changed for {name}")
+
+    return True
+
+
+def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
+                       schema_version: int) -> bool:
     if ramdisk[:4] != b"\x1f\x8b\x08\x00":
         fail("ramdisk gzip header is not deterministic")
     try:
@@ -170,6 +549,9 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object]) -> None:
     except gzip.BadGzipFile as exc:
         fail(f"ramdisk gzip is invalid: {exc}")
     entries = parse_newc(cpio)
+    validate_archive_tree(entries)
+    validate_symlinks(entries)
+    validate_no_connectivity_autostart(entries)
     if sha256(cpio) != manifest["initramfs"]["cpio_sha256"]:
         fail("manifest cpio hash mismatch")
     if any(entry.uid or entry.gid or entry.mtime for entry in entries.values()):
@@ -182,11 +564,11 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object]) -> None:
     for name, member, expected_interpreter in (
         ("init", init, None),
         ("sbin/adbd", adbd, None),
-        ("bin/busybox", busybox, b"/lib/ld-musl-armhf.so.1"),
+        ("bin/busybox", busybox, "/lib/ld-musl-armhf.so.1"),
         ("lib/ld-musl-armhf.so.1", loader, None),
     ):
         info = elf_info(member.data)
-        if info != (1, 40, expected_interpreter):
+        if info is None or info[:2] != (1, 40) or info[3] != expected_interpreter:
             fail(f"ELF contract mismatch for {name}: {info}")
     if b"libc.musl-armv7.so.1\0" not in busybox.data:
         fail("BusyBox musl dependency is missing")
@@ -247,6 +629,7 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object]) -> None:
         info = elf_info(entry.data)
         if info is not None and info[:2] != (1, 40):
             fail(f"non-ARM32 ELF member {name}: {info[:2]}")
+    return validate_connectivity(entries, manifest, schema_version)
 
 
 def system_map_physical_end(path: Path) -> int:
@@ -275,12 +658,19 @@ def main() -> None:
     parser.add_argument("--expected-boot-sha256", required=True)
     parser.add_argument("--expected-zimage-sha256", default=ZIMAGE_SHA256)
     parser.add_argument("--expected-dtb-sha256")
+    parser.add_argument(
+        "--expected-connectivity-bundle",
+        choices=("none", CONNECTIVITY_BUNDLE_ID),
+        default="none",
+        help="require the initramfs to contain exactly this opt-in connectivity bundle",
+    )
     args = parser.parse_args()
 
     source, zimage, system_map, ramdisk, boot = map(
         read, (args.source_boot, args.zimage, args.system_map, args.ramdisk, args.boot_image)
     )
     manifest = json.loads(args.manifest.read_text())
+    schema_version = manifest_schema(manifest)
     if sha256(source) != SOURCE_SHA256:
         fail("source boot envelope hash mismatch")
     if sha256(zimage) != args.expected_zimage_sha256:
@@ -375,11 +765,20 @@ def main() -> None:
     ):
         fail("physical boot envelope overlaps or is out of order")
 
-    validate_initramfs(ramdisk, manifest)
+    connectivity_enabled = validate_initramfs(ramdisk, manifest, schema_version)
+    expected_connectivity = args.expected_connectivity_bundle != "none"
+    if connectivity_enabled != expected_connectivity:
+        actual = CONNECTIVITY_BUNDLE_ID if connectivity_enabled else "none"
+        fail(
+            "connectivity bundle expectation mismatch: "
+            f"expected={args.expected_connectivity_bundle} actual={actual}"
+        )
     print(
         "arm32_recovery_image_contract=PASS android_v0=yes mtk_wrapper=yes "
         "zimage=yes evt_dtb=yes initramfs_arm32=yes fastboot_marker=yes "
-        "root_adb_staged=yes runme=yes memory_disjoint=yes status=PREPARED_NOT_FLASHED"
+        "root_adb_staged=yes runme=yes memory_disjoint=yes "
+        f"connectivity_bundle={'yes' if connectivity_enabled else 'no'} "
+        "activation=manual-only status=PREPARED_NOT_FLASHED"
     )
 
 

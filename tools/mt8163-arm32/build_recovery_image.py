@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -38,6 +39,9 @@ BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4
 MUSL_LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
+CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
+CONNECTIVITY_STOCK_SYSTEM_SHA256 = "56540b3a9ac4437901a5510d9fb5e09b1a8d0cc229548f0b08bb5c22d78684fe"
+CONNECTIVITY_EVIDENCE_MANIFEST_SHA256 = "d1eedd04efe0dbc78853f2b0f9357c092b4ca66242648908c0369956538441eb"
 
 STOCK_FILES = {
     "init": (0o750, "0564299ebbdd4b76fc00b7f48b434355b484874c2ad013f7c6a3dc5cbd103df7"),
@@ -50,6 +54,101 @@ STOCK_FILES = {
     "selinux_version": (0o644, "fab0d130803f8aca27b4a6ac8aea7ae55f4c8d0f36ec90a2ee32cb13aa581cbe"),
     "ueventd.rc": (0o644, "f702275ec262b58184e53d2dd3f213e1538fa75985b88f7cb6c5bbde74f88062"),
     "ueventd.mt8163.rc": (0o644, "b1d212a42d213b4b1412648e7501baf55aa3ee653236cdf10f650050e0ea325c"),
+}
+
+CONNECTIVITY_STOCK_FILES = {
+    "system/bin/linker": {
+        "source": "system/bin/linker", "mode": 0o755, "size": 630460,
+        "sha256": "73dc93e06a9ce0a76b5353f2c282f1ac3dd0dccd0e8e7f06fc20e5433ef4a3dc",
+        "needed": (),
+    },
+    "system/vendor/bin/wmt_loader": {
+        "source": "system/vendor/bin/wmt_loader", "mode": 0o755, "size": 17992,
+        "sha256": "de9ee285a09a7db5b079233f7c9129c5484ecb6701b54da45e2a29f310e74ff9",
+        "needed": ("libcutils.so", "libc++.so", "libdl.so", "libc.so", "libm.so"),
+    },
+    "system/vendor/bin/wmt_launcher": {
+        "source": "system/vendor/bin/wmt_launcher", "mode": 0o755, "size": 31448,
+        "sha256": "1f34425d727ea64524c9edaeac5e6b295df7a6054703dcc79b164021560252e5",
+        "needed": ("libcutils.so", "libc++.so", "libdl.so", "libc.so", "libm.so"),
+    },
+    "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": {
+        "source": "system/vendor/firmware/ROMv2_lm_patch_1_0_hdr.bin", "mode": 0o644,
+        "size": 128720,
+        "sha256": "b4460117f51a43f3284594ec08d8c8861ecc0e42b17820987da03ecabdebac1e",
+    },
+    "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": {
+        "source": "system/vendor/firmware/ROMv2_lm_patch_1_1_hdr.bin", "mode": 0o644,
+        "size": 50148,
+        "sha256": "10c4ed22a10b8a136bffd7ffce4d552300d76f8e593627d2a9841c3b11a5697e",
+    },
+    "lib/firmware/WIFI_RAM_CODE_8163": {
+        "source": "system/vendor/firmware/WIFI_RAM_CODE_8163", "mode": 0o644,
+        "size": 373840,
+        "sha256": "9669cc9b03cfdc5e8fd4fd6e14c4c4050e8c196738ca4707eea12f14a6a8e64c",
+    },
+    "lib/firmware/WMT_SOC.cfg": {
+        "source": "system/vendor/firmware/WMT_SOC.cfg", "mode": 0o644, "size": 119,
+        "sha256": "302bd4462de99c028c04092e561c1500d65582ce42a93c4c72ccae6e2c99013d",
+    },
+    "system/lib/libcutils.so": {
+        "source": "system/lib/libcutils.so", "mode": 0o644, "size": 104436,
+        "sha256": "dcf249ceed2c84ab45454ff8fd3fa0624248b410962c4ea9e9e799610192542b",
+        "needed": ("liblog.so", "libc++.so", "libdl.so", "libc.so", "libm.so"),
+    },
+    "system/lib/libc++.so": {
+        "source": "system/lib/libc++.so", "mode": 0o644, "size": 575068,
+        "sha256": "38f15c7897307e65c9b9a13174782e7b79146e453b8b80e09128aae8b6ab1df5",
+        "needed": ("libdl.so", "libc.so", "libm.so"),
+    },
+    "system/lib/libdl.so": {
+        "source": "system/lib/libdl.so", "mode": 0o644, "size": 13640,
+        "sha256": "efb8d634212b215b53f8c95f2b8372e9139ee13dc74717b7d25999de97d5b1cc",
+        "needed": (),
+    },
+    "system/lib/libc.so": {
+        "source": "system/lib/libc.so", "mode": 0o644, "size": 780476,
+        "sha256": "1254edac10625b1e7e123c20ea8d8f3175ad07014c9ddcca7bb3ea74db555357",
+        "needed": ("libdl.so",),
+    },
+    "system/lib/libm.so": {
+        "source": "system/lib/libm.so", "mode": 0o644, "size": 132820,
+        "sha256": "3703abfae55405f1ca876cfaf5c8e41b0dafdd30d4ecec88cbd1100c5b0341ed",
+        "needed": ("libc.so",),
+    },
+    "system/lib/liblog.so": {
+        "source": "system/lib/liblog.so", "mode": 0o644, "size": 67460,
+        "sha256": "84e34e101618dae346cefca70c8cd866b92e6bcdec64246a130dcd12560410c0",
+        "needed": ("libc.so", "libm.so"),
+    },
+}
+
+CONNECTIVITY_REFERENCE_FILES = {
+    "init.connectivity.rc": (3167, "142c3f2239255dff573196daaf7da00687be9c5c54174dcbecfa309074d9d379"),
+    "ueventd.mt8163.rc": (4255, "b1d212a42d213b4b1412648e7501baf55aa3ee653236cdf10f650050e0ea325c"),
+}
+
+CONNECTIVITY_SYMLINKS = {
+    "vendor": "system/vendor",
+    "system/vendor/firmware": "../../lib/firmware",
+    "system/etc/firmware": "../../lib/firmware",
+    "etc/firmware": "../lib/firmware",
+    "lib/firmware/WIFI_RAM_CODE": "WIFI_RAM_CODE_8163",
+}
+
+CONNECTIVITY_HELPERS = {
+    "sbin/wmt_configure": (
+        "wmt_config_helper", 428704,
+        "cb14e315e7dbacac50ed1d6bab699d97d82cc2df54c3f2a920ffdd15c6eaf58b",
+    ),
+    "sbin/wmt_responder": (
+        "wmt_responder", 428796,
+        "e20bdaf559165077ff8211c64ed38a10ecee1006641e94302cf14d3be397c350",
+    ),
+    "sbin/wmt_bt_on": (
+        "wmt_bt_on", 424540,
+        "4365c1b1046bf2ce1045a3fbd4578ee21d8f1a9900a01cb0cde9cea478821d82",
+    ),
 }
 
 
@@ -99,10 +198,74 @@ def elf_identity(path: Path) -> tuple[int, int] | None:
     return data[4], struct.unpack_from(byte_order + "H", data, 18)[0]
 
 
+def readelf_contract(path: Path) -> tuple[int, str | None, tuple[str, ...], bool]:
+    try:
+        output = subprocess.run(
+            ["readelf", "-h", "-l", "-d", str(path)], check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={**os.environ, "LC_ALL": "C"},
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(f"ERROR: cannot inspect ELF contract for {path}: {exc}") from exc
+    if "Class:                             ELF32" not in output:
+        raise SystemExit(f"ERROR: {path} is not ELF32")
+    if "Data:                              2's complement, little endian" not in output:
+        raise SystemExit(f"ERROR: {path} is not little-endian ELF")
+    if "Machine:                           ARM" not in output:
+        raise SystemExit(f"ERROR: {path} is not an ARM ELF")
+    flags_match = re.search(r"^\s*Flags:\s+(0x[0-9a-fA-F]+)", output, re.MULTILINE)
+    if flags_match is None:
+        raise SystemExit(f"ERROR: readelf did not report ARM ABI flags for {path}")
+    interpreter_match = re.search(r"\[Requesting program interpreter: ([^]]+)\]", output)
+    interpreter = interpreter_match.group(1) if interpreter_match else None
+    needed = tuple(re.findall(r"\(NEEDED\).*Shared library: \[([^]]+)\]", output))
+    dynamic = re.search(r"^\s*DYNAMIC\s", output, re.MULTILINE) is not None
+    return int(flags_match.group(1), 16), interpreter, needed, dynamic
+
+
+def require_elf_contract(path: Path, flags: int, interpreter: str | None,
+                         needed: tuple[str, ...], dynamic: bool) -> dict[str, object]:
+    ident = elf_identity(path)
+    if ident != (1, 40):
+        raise SystemExit(f"ERROR: ELF identity mismatch for {path}: {ident}")
+    actual = readelf_contract(path)
+    expected = (flags, interpreter, needed, dynamic)
+    if actual != expected:
+        raise SystemExit(f"ERROR: ELF ABI/dependency mismatch for {path}: expected={expected!r} actual={actual!r}")
+    return {
+        "class": 1,
+        "machine": 40,
+        "flags": f"0x{flags:08x}",
+        "interpreter": interpreter,
+        "needed": list(needed),
+        "dynamic": dynamic,
+    }
+
+
+def pinned_source(root: Path, relative: str, label: str) -> Path:
+    relative_path = Path(relative)
+    components = relative.split("/")
+    if (
+        not relative
+        or relative_path.is_absolute()
+        or any(part in ("", ".", "..") for part in components)
+        or relative_path.as_posix() != relative
+    ):
+        raise SystemExit(f"ERROR: unsafe pinned source path for {label}: {relative!r}")
+    source = root
+    for part in relative_path.parts:
+        source /= part
+        if source.is_symlink():
+            raise SystemExit(f"ERROR: symlink in pinned source path for {label}: {source}")
+    if not source.is_file():
+        raise SystemExit(f"ERROR: pinned source is not a regular file for {label}: {source}")
+    return source
+
+
 def copy_pinned(source_root: Path, stage: Path, manifest: dict[str, object]) -> None:
     copied: dict[str, object] = {}
     for relative, (mode, expected) in STOCK_FILES.items():
-        source = source_root / relative
+        source = pinned_source(source_root, relative, f"stock userspace {relative}")
         data = read(source)
         require_hash(f"stock userspace {relative}", data, expected)
         target = stage / relative
@@ -111,6 +274,125 @@ def copy_pinned(source_root: Path, stage: Path, manifest: dict[str, object]) -> 
         target.chmod(mode)
         copied[relative] = {"sha256": expected, "size": len(data), "mode": f"{mode:04o}"}
     manifest["stock_userspace"] = copied
+
+
+def add_connectivity_bundle(source_root: Path, stage: Path,
+                            helpers: dict[str, Path], manifest: dict[str, object]) -> None:
+    references: dict[str, object] = {}
+    for relative, (expected_size, expected_hash) in CONNECTIVITY_REFERENCE_FILES.items():
+        reference = pinned_source(source_root, relative, f"connectivity reference {relative}")
+        data = read(reference)
+        if len(data) != expected_size:
+            raise SystemExit(
+                f"ERROR: connectivity reference {relative} size mismatch: "
+                f"expected={expected_size} actual={len(data)}"
+            )
+        require_hash(f"connectivity reference {relative}", data, expected_hash)
+        references[relative] = {"sha256": expected_hash, "size": expected_size}
+
+    copied: dict[str, object] = {}
+    for target_name, specification in CONNECTIVITY_STOCK_FILES.items():
+        source_name = str(specification["source"])
+        expected_size = int(specification["size"])
+        expected_hash = str(specification["sha256"])
+        mode = int(specification["mode"])
+        source = pinned_source(source_root, source_name, f"connectivity asset {source_name}")
+        data = read(source)
+        if len(data) != expected_size:
+            raise SystemExit(
+                f"ERROR: connectivity asset {source_name} size mismatch: "
+                f"expected={expected_size} actual={len(data)}"
+            )
+        require_hash(f"connectivity asset {source_name}", data, expected_hash)
+        target = stage / target_name
+        if target.exists() or target.is_symlink():
+            raise SystemExit(f"ERROR: connectivity asset collides with {target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        target.chmod(mode)
+        record: dict[str, object] = {
+            "source": source_name,
+            "sha256": expected_hash,
+            "size": expected_size,
+            "mode": f"{mode:04o}",
+        }
+        if "needed" in specification:
+            record["elf"] = require_elf_contract(
+                target, 0x05000200, "/system/bin/linker",
+                tuple(specification["needed"]), True,
+            )
+        copied[target_name] = record
+
+    helper_records: dict[str, object] = {}
+    for target_name, (argument_name, expected_size, expected_hash) in CONNECTIVITY_HELPERS.items():
+        source = helpers[argument_name]
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit(f"ERROR: connectivity helper is not a regular file: {source}")
+        data = read(source)
+        if len(data) != expected_size:
+            raise SystemExit(
+                f"ERROR: connectivity helper {argument_name} size mismatch: "
+                f"expected={expected_size} actual={len(data)}"
+            )
+        require_hash(f"connectivity helper {argument_name}", data, expected_hash)
+        target = stage / target_name
+        if target.exists() or target.is_symlink():
+            raise SystemExit(f"ERROR: connectivity helper collides with {target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        target.chmod(0o755)
+        helper_records[target_name] = {
+            "sha256": expected_hash,
+            "size": expected_size,
+            "mode": "0755",
+            "elf": require_elf_contract(target, 0x05000400, None, (), False),
+        }
+
+    symlink_records: dict[str, str] = {}
+    for relative, link_target in CONNECTIVITY_SYMLINKS.items():
+        target = stage / relative
+        if target.exists() or target.is_symlink():
+            raise SystemExit(f"ERROR: connectivity symlink collides with {target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(link_target, target)
+        try:
+            target.resolve(strict=True).relative_to(stage.resolve())
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"ERROR: connectivity symlink escapes or dangles: {relative} -> {link_target}") from exc
+        symlink_records[relative] = link_target
+
+    patch_addresses = {
+        "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": bytes((0x00, 0x22, 0x00, 0x06)),
+        "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": bytes((0x00, 0x21, 0x00, 0x0E)),
+    }
+    for relative, expected_address in patch_addresses.items():
+        data = read(stage / relative)
+        if data[23:27] != expected_address:
+            raise SystemExit(f"ERROR: stock patch metadata changed for {relative}")
+
+    if read(stage / "ueventd.mt8163.rc") != read(source_root / "ueventd.mt8163.rc"):
+        raise SystemExit("ERROR: connectivity root and recovery use different ueventd.mt8163.rc files")
+    if (stage / "init.connectivity.rc").exists():
+        raise SystemExit("ERROR: auto-starting init.connectivity.rc entered the recovery stage")
+    manifest["connectivity"] = {
+        "id": CONNECTIVITY_BUNDLE_ID,
+        "enabled": True,
+        "activation": "manual-gates-only",
+        "autostart": False,
+        "stock_file_count": len(copied),
+        "helper_count": len(helper_records),
+        "payload_bytes": sum(record["size"] for record in copied.values())
+                         + sum(record["size"] for record in helper_records.values()),
+        "provenance": {
+            "stock_system_a_sha256": CONNECTIVITY_STOCK_SYSTEM_SHA256,
+            "evidence_manifest_sha256": CONNECTIVITY_EVIDENCE_MANIFEST_SHA256,
+        },
+        "stock_root": str(source_root),
+        "reference_files_not_copied": references,
+        "files": copied,
+        "helpers": helper_records,
+        "symlinks": symlink_records,
+    }
 
 
 def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
@@ -190,8 +472,24 @@ def validate_stage(stage: Path) -> None:
         if not (stage / relative).exists():
             raise SystemExit(f"ERROR: initramfs is missing {relative}")
 
+    stage_root = stage.resolve()
     for path in sorted(stage.rglob("*")):
-        if path.is_symlink() or not path.is_file():
+        if path.is_symlink():
+            target = os.readlink(path)
+            components = target.split("/")
+            if (
+                not target
+                or target.startswith("/")
+                or "\0" in target
+                or any(component in ("", ".") for component in components)
+            ):
+                raise SystemExit(f"ERROR: unsafe initramfs symlink: {path} -> {target!r}")
+            try:
+                path.resolve(strict=True).relative_to(stage_root)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise SystemExit(f"ERROR: initramfs symlink escapes, dangles, or loops: {path}") from exc
+            continue
+        if not path.is_file():
             continue
         ident = elf_identity(path)
         if ident is not None and ident != (1, 40):
@@ -233,6 +531,32 @@ def validate_stage(stage: Path) -> None:
     for setting in (b"ro.boot.selinux=permissive", b"ro.secure=0", b"ro.debuggable=1", b"ro.adb.secure=0"):
         if setting not in properties.splitlines():
             raise SystemExit(f"ERROR: recovery property contract lacks {setting!r}")
+
+    active_controls = sorted(
+        path.relative_to(stage).as_posix()
+        for path in stage.rglob("*.rc")
+        if path.is_file()
+    )
+    active_controls.append("libreecho-init")
+    forbidden_launches = (
+        b"wmt_loader", b"wmt_launcher", b"wmt_configure", b"wmt_responder", b"wmt_bt_on",
+    )
+    forbidden_wifi_writes = (
+        b"> /dev/wmtWifi", b">/dev/wmtWifi", b"tee /dev/wmtWifi", b"of=/dev/wmtWifi",
+    )
+    for relative in active_controls:
+        control = read(stage / relative)
+        for forbidden in forbidden_launches + forbidden_wifi_writes:
+            if forbidden in control:
+                raise SystemExit(f"ERROR: active recovery control {relative} contains {forbidden!r}")
+        for line in control.splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[:2] == [b"write", b"/dev/wmtWifi"]:
+                raise SystemExit(
+                    f"ERROR: active recovery control {relative} activates Wi-Fi through Android init"
+                )
+    if (stage / "init.connectivity.rc").exists():
+        raise SystemExit("ERROR: auto-starting init.connectivity.rc is forbidden")
 
 
 def build_cpio(stage: Path, epoch: int) -> bytes:
@@ -414,6 +738,14 @@ def main() -> None:
                         help="extracted v184 ARM32 root-adb ramdisk")
     parser.add_argument("--busybox", type=Path, required=True)
     parser.add_argument("--musl-loader", type=Path, required=True)
+    parser.add_argument("--connectivity-stock-root", type=Path,
+                        help="pinned v181 ARM32 WMT runtime and firmware root")
+    parser.add_argument("--wmt-config-helper", type=Path,
+                        help="reviewed static ARM32 configure-only WMT helper")
+    parser.add_argument("--wmt-responder", type=Path,
+                        help="reviewed static ARM32 Gate2 WMT responder")
+    parser.add_argument("--wmt-bt-on", type=Path,
+                        help="reviewed static ARM32 one-shot BT-only helper")
     parser.add_argument("--qemu-arm", default="qemu-arm-static",
                         help="user-mode ARM emulator used to inventory pinned BusyBox applets")
     parser.add_argument("--zimage", type=Path, required=True)
@@ -421,13 +753,29 @@ def main() -> None:
     parser.add_argument("--system-map", type=Path, required=True)
     parser.add_argument("--expected-system-map-sha256", default=PROVEN_SYSTEM_MAP_SHA256)
     parser.add_argument("--dtb", type=Path,
-                        help="source-built EVT DTB; omit only for the stock-DTB ADB parity stage")
+                        help="supplied pinned EVT DTB; omit only for the stock-DTB ADB parity stage")
     parser.add_argument("--expected-dtb-sha256")
     parser.add_argument("--ramdisk-address", type=parse_int, default=RAMDISK_ADDR)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--ramdisk-output", type=Path)
     parser.add_argument("--manifest", type=Path)
     args = parser.parse_args()
+
+    connectivity_options = {
+        "connectivity_stock_root": args.connectivity_stock_root,
+        "wmt_config_helper": args.wmt_config_helper,
+        "wmt_responder": args.wmt_responder,
+        "wmt_bt_on": args.wmt_bt_on,
+    }
+    connectivity_enabled = all(value is not None for value in connectivity_options.values())
+    if any(value is not None for value in connectivity_options.values()) and not connectivity_enabled:
+        missing = ", ".join(
+            "--" + name.replace("_", "-")
+            for name, value in connectivity_options.items() if value is None
+        )
+        raise SystemExit(f"ERROR: connectivity bundle is all-or-nothing; missing {missing}")
+    if connectivity_enabled and not CONNECTIVITY_HELPERS:
+        raise SystemExit("ERROR: connectivity helper identities have not been pinned")
 
     source = read(args.source_boot)
     require_hash("source boot envelope", source, SOURCE_BOOT_SHA256)
@@ -449,7 +797,7 @@ def main() -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
 
     manifest: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "name": "libreecho-mt8163-arm32-v97-recovery",
         "status": "PREPARED_NOT_FLASHED",
         "inputs": {
@@ -463,6 +811,15 @@ def main() -> None:
             "dtb_raw_sha256": sha256(raw_dtb),
             "dtb_raw_size": len(raw_dtb),
         },
+        "connectivity": {
+            "id": CONNECTIVITY_BUNDLE_ID,
+            "enabled": False,
+            "activation": "manual-gates-only",
+            "autostart": False,
+            "files": {},
+            "helpers": {},
+            "symlinks": {},
+        },
     }
     overlay = Path(__file__).resolve().parent / "initramfs"
     with tempfile.TemporaryDirectory(prefix="libreecho-arm32-initramfs-") as temporary:
@@ -472,6 +829,16 @@ def main() -> None:
             stage, overlay, args.busybox.resolve(), args.musl_loader.resolve(),
             qemu_arm, manifest,
         )
+        if connectivity_enabled:
+            add_connectivity_bundle(
+                args.connectivity_stock_root.resolve(), stage,
+                {
+                    "wmt_config_helper": args.wmt_config_helper.absolute(),
+                    "wmt_responder": args.wmt_responder.absolute(),
+                    "wmt_bt_on": args.wmt_bt_on.absolute(),
+                },
+                manifest,
+            )
         validate_stage(stage)
         cpio = build_cpio(stage, 0)
     ramdisk = gzip.compress(cpio, compresslevel=9, mtime=0)
