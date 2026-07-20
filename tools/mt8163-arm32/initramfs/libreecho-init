@@ -112,7 +112,7 @@ if [ -d "$USB" ]; then
     echo 18D1 > "$USB/idVendor" 2>/dev/null
     echo D001 > "$USB/idProduct" 2>/dev/null
     echo adb > "$USB/f_ffs/aliases" 2>/dev/null
-    echo adb > "$USB/functions" 2>/dev/null
+    echo rndis,adb > "$USB/functions" 2>/dev/null
     echo LibreEcho > "$USB/iManufacturer" 2>/dev/null
     echo MT8163-ARM32-recovery > "$USB/iProduct" 2>/dev/null
     serial=$($BB sed -n 's/.*androidboot.serialno=\([^ ]*\).*/\1/p' /proc/cmdline)
