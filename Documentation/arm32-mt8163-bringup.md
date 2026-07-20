@@ -131,6 +131,30 @@ limit, with SHA-256
 Its exact resource tuple, clock mutation, and boot envelope are checked by
 the [Wi-Fi DTB contract](../tools/mt8163-arm32/WIFI_DTB.md).
 
+## Stock radio parity corrections
+
+The exact stock ARM32 kernel configuration contains
+`CONFIG_ARCH_MTK_PROJECT="radar"`, both MediaTek Wi-Fi antenna options, and
+does not contain WFD or Douglas thermal support.  The ARM32 candidate now
+matches those choices.  This is relevant before `wlan0`: the antenna switch
+option enables the WMT initialization that writes `0x81060010` and emits the
+manual-antenna/coexistence feature encoded by the pinned `WMT_SOC.cfg`.
+The source was the wrapped stock kernel with SHA-256
+`1d32f61407cbec12f2dc491f0d5fd1e28ccb37a4551111b30a494018862f8195`;
+its extracted configuration hashes to
+`245f08be567589cc1df0159d05cb3874e05f2d924a04af24fed2bb70147cd9dd`.
+
+Decompiling the exact stock ARM32 `wmt_launcher` also corrected the ROM-patch
+registration contract.  Bytes 24 through 27 are the route word; the high and
+low nibbles of byte 24 encode patch count and sequence, and stock clears that
+byte before submitting the address.  The resulting records are sequence 2 at
+`00:00:06:00` for `_1_0`, and sequence 1 at `00:00:0e:f0` for `_1_1`.
+Earlier compatibility tooling read at byte 23 and assigned filename-order
+sequences, so its post-START/pre-READY result did not test stock-equivalent
+patch routing and cannot rule that routing out as the blocker.  The launcher
+used for this machine-code check is the staged stock binary with SHA-256
+`1f34425d727ea64524c9edaeac5e6b295df7a6054703dcc79b164021560252e5`.
+
 ## Milestone order
 
 1. Reproduce v97 recovery behavior with ARM-EABI BusyBox and ADB.

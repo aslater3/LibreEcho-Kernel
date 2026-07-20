@@ -35,7 +35,9 @@
 
 #define STP_BTIF_FULL 0x03UL
 #define PATCH_NAME_SIZE 256U
-#define PATCH_VERSION_OFFSET 22
+#define PATCH_HEADER_OFFSET 22
+#define PATCH_HEADER_SIZE 2U
+#define PATCH_ROUTE_SIZE 4U
 #define PATCH_ADDRESS_SIZE 4U
 
 _Static_assert(sizeof(void *) == 4, "wmt_configure must be built for ARM32");
@@ -61,7 +63,9 @@ struct options {
 struct patch_descriptor {
 	const char *name;
 	off_t expected_size;
-	uint8_t expected_version;
+	uint8_t expected_header[PATCH_HEADER_SIZE];
+	uint8_t expected_route[PATCH_ROUTE_SIZE];
+	uint8_t expected_download_seq;
 	uint8_t expected_address[PATCH_ADDRESS_SIZE];
 };
 
@@ -69,14 +73,18 @@ static const struct patch_descriptor patch_descriptors[] = {
 	{
 		"ROMv2_lm_patch_1_0_hdr.bin",
 		128720,
-		0x8a,
-		{ 0x00, 0x22, 0x00, 0x06 },
+		{ 0x8a, 0x00 },
+		{ 0x22, 0x00, 0x06, 0x00 },
+		2,
+		{ 0x00, 0x00, 0x06, 0x00 },
 	},
 	{
 		"ROMv2_lm_patch_1_1_hdr.bin",
 		50148,
-		0x8a,
-		{ 0x00, 0x21, 0x00, 0x0e },
+		{ 0x8a, 0x00 },
+		{ 0x21, 0x00, 0x0e, 0xf0 },
+		1,
+		{ 0x00, 0x00, 0x0e, 0xf0 },
 	},
 };
 
@@ -188,7 +196,10 @@ static int load_patch_info(const struct options *options, size_t index,
 	const struct patch_descriptor *descriptor = &patch_descriptors[index];
 	char path[PATCH_NAME_SIZE];
 	struct stat status;
-	uint8_t header_version;
+	uint8_t header[PATCH_HEADER_SIZE];
+	uint8_t route[PATCH_ROUTE_SIZE];
+	uint8_t download_seq;
+	uint8_t patch_count;
 	size_t path_length;
 	int fd;
 
@@ -218,21 +229,47 @@ static int load_patch_info(const struct options *options, size_t index,
 		close(fd);
 		return -1;
 	}
-	if (lseek(fd, PATCH_VERSION_OFFSET, SEEK_SET) < 0 ||
-	    read_exact(fd, &header_version, sizeof(header_version)) < 0 ||
-	    read_exact(fd, info->address, sizeof(info->address)) < 0) {
+	if (lseek(fd, PATCH_HEADER_OFFSET, SEEK_SET) < 0 ||
+	    read_exact(fd, header, sizeof(header)) < 0 ||
+	    read_exact(fd, route, sizeof(route)) < 0) {
 		fprintf(stderr, "read patch metadata from %s failed\n", path);
 		close(fd);
 		return -1;
 	}
 	close(fd);
 
-	if (header_version != descriptor->expected_version) {
+	if (memcmp(header, descriptor->expected_header, sizeof(header)) != 0) {
 		fprintf(stderr,
-			"unexpected patch version in %s: 0x%02x expected=0x%02x\n",
-			path, header_version, descriptor->expected_version);
+			"unexpected patch header in %s: %02x:%02x expected=%02x:%02x\n",
+			path, header[0], header[1],
+			descriptor->expected_header[0],
+			descriptor->expected_header[1]);
 		return -1;
 	}
+	if (memcmp(route, descriptor->expected_route, sizeof(route)) != 0) {
+		fprintf(stderr,
+			"unexpected patch route in %s: %02x:%02x:%02x:%02x\n",
+			path, route[0], route[1], route[2], route[3]);
+		return -1;
+	}
+
+	/*
+	 * Stock wmt_launcher treats route[0] as packed metadata: the high
+	 * nibble is the total patch count and the low nibble is downloadSeq.
+	 * It clears that byte before passing addRess[4] to ioctl 15.
+	 */
+	patch_count = route[0] >> 4;
+	download_seq = route[0] & 0x0f;
+	if (patch_count != PATCH_COUNT ||
+	    download_seq != descriptor->expected_download_seq ||
+	    download_seq == 0 || download_seq > PATCH_COUNT) {
+		fprintf(stderr,
+			"unexpected patch routing in %s: count=%u seq=%u\n",
+			path, patch_count, download_seq);
+		return -1;
+	}
+	info->address[0] = 0;
+	memcpy(&info->address[1], &route[1], PATCH_ADDRESS_SIZE - 1U);
 	if (memcmp(info->address, descriptor->expected_address,
 		   sizeof(info->address)) != 0) {
 		fprintf(stderr,
@@ -243,10 +280,11 @@ static int load_patch_info(const struct options *options, size_t index,
 	}
 
 	path_length = strlen(path);
-	info->download_seq = (uint32_t)(index + 1U);
+	info->download_seq = download_seq;
 	memcpy(info->patch_name, path, path_length + 1U);
-	printf("patch_info seq=%u size=%lld version=0x%02x address=%02x:%02x:%02x:%02x path=%s\n",
-	       info->download_seq, (long long)status.st_size, header_version,
+	printf("patch_info seq=%u size=%lld header=%02x:%02x route=%02x:%02x:%02x:%02x address=%02x:%02x:%02x:%02x path=%s\n",
+	       info->download_seq, (long long)status.st_size,
+	       header[0], header[1], route[0], route[1], route[2], route[3],
 	       info->address[0], info->address[1], info->address[2],
 	       info->address[3], path);
 

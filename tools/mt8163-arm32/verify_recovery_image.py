@@ -116,13 +116,24 @@ CONNECTIVITY_SYMLINKS = {
 
 CONNECTIVITY_HELPERS = {
     "sbin/wmt_configure": (
-        428704, "cb14e315e7dbacac50ed1d6bab699d97d82cc2df54c3f2a920ffdd15c6eaf58b",
+        428704, "2fa1c78546b3a0d35442ffa196f3eaa13b1ce4609b537332b016bc88ea663be2",
     ),
     "sbin/wmt_responder": (
         428796, "e20bdaf559165077ff8211c64ed38a10ecee1006641e94302cf14d3be397c350",
     ),
     "sbin/wmt_bt_on": (
         424540, "4365c1b1046bf2ce1045a3fbd4578ee21d8f1a9900a01cb0cde9cea478821d82",
+    ),
+}
+
+CONNECTIVITY_PATCH_ROUTES = {
+    "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": (
+        bytes((0x8A, 0x00)), bytes((0x22, 0x00, 0x06, 0x00)), 2,
+        bytes((0x00, 0x00, 0x06, 0x00)),
+    ),
+    "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": (
+        bytes((0x8A, 0x00)), bytes((0x21, 0x00, 0x0E, 0xF0)), 1,
+        bytes((0x00, 0x00, 0x0E, 0xF0)),
     ),
 }
 
@@ -529,13 +540,27 @@ def validate_connectivity(entries: dict[str, Entry], manifest: dict[str, object]
         if resolved not in entries:
             fail(f"connectivity symlink dangles: {name} -> {target}")
 
-    patch_addresses = {
-        "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": bytes((0x00, 0x22, 0x00, 0x06)),
-        "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": bytes((0x00, 0x21, 0x00, 0x0E)),
-    }
-    for name, expected_address in patch_addresses.items():
-        if entries[name].data[23:27] != expected_address:
+    expected_patch_routing: dict[str, object] = {}
+    for name, (expected_header, expected_route, expected_seq,
+               expected_address) in CONNECTIVITY_PATCH_ROUTES.items():
+        data = entries[name].data
+        route = data[24:28]
+        patch_count = route[0] >> 4
+        download_seq = route[0] & 0x0F
+        address = b"\0" + route[1:]
+        if (data[22:24] != expected_header or route != expected_route or
+                patch_count != len(CONNECTIVITY_PATCH_ROUTES) or
+                download_seq != expected_seq or address != expected_address):
             fail(f"stock patch metadata changed for {name}")
+        expected_patch_routing[name] = {
+            "header": expected_header.hex(),
+            "route": expected_route.hex(),
+            "patch_count": patch_count,
+            "download_seq": download_seq,
+            "address": address.hex(),
+        }
+    if record.get("patch_routing") != expected_patch_routing:
+        fail("connectivity patch-routing manifest mismatch")
 
     return True
 

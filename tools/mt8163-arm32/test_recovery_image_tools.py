@@ -139,6 +139,26 @@ class SourceTests(unittest.TestCase):
                     builder.pinned_source(root, relative, "test")
 
 
+class PatchRouteContractTests(unittest.TestCase):
+    def test_stock_route_contract_is_shared_and_decodes_exactly(self) -> None:
+        expected = {
+            "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": (
+                bytes.fromhex("8a00"), bytes.fromhex("22000600"), 2,
+                bytes.fromhex("00000600"),
+            ),
+            "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": (
+                bytes.fromhex("8a00"), bytes.fromhex("21000ef0"), 1,
+                bytes.fromhex("00000ef0"),
+            ),
+        }
+        self.assertEqual(builder.CONNECTIVITY_PATCH_ROUTES, expected)
+        self.assertEqual(verifier.CONNECTIVITY_PATCH_ROUTES, expected)
+        for _name, (_header, route, sequence, address) in expected.items():
+            self.assertEqual(route[0] >> 4, 2)
+            self.assertEqual(route[0] & 0x0F, sequence)
+            self.assertEqual(b"\0" + route[1:], address)
+
+
 class PolicyTests(unittest.TestCase):
     @staticmethod
     def control(name: str, payload: bytes):

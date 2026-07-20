@@ -19,21 +19,33 @@ stock patch files, registers their fixed 264-byte ARM32 records, and selects
 full BTIF transport.  `--inspect-patches` performs the same validation offline
 and never opens the WMT device.
 
-The pinned patch contract is:
+The pinned patch contract, recovered from the exact stock ARM32
+`wmt_launcher` machine code, is:
 
-| File | Size | Header byte 22 | Raw bytes 23-26 | SHA-256 |
-| --- | ---: | ---: | --- | --- |
-| `ROMv2_lm_patch_1_0_hdr.bin` | 128,720 | `8a` | `00:22:00:06` | `b4460117f51a43f3284594ec08d8c8861ecc0e42b17820987da03ecabdebac1e` |
-| `ROMv2_lm_patch_1_1_hdr.bin` | 50,148 | `8a` | `00:21:00:0e` | `10c4ed22a10b8a136bffd7ffce4d552300d76f8e593627d2a9841c3b11a5697e` |
+| File | Size | Bytes 22-23 | Raw route 24-27 | Seq | Registered address | SHA-256 |
+| --- | ---: | --- | --- | ---: | --- | --- |
+| `ROMv2_lm_patch_1_0_hdr.bin` | 128,720 | `8a:00` | `22:00:06:00` | 2 | `00:00:06:00` | `b4460117f51a43f3284594ec08d8c8861ecc0e42b17820987da03ecabdebac1e` |
+| `ROMv2_lm_patch_1_1_hdr.bin` | 50,148 | `8a:00` | `21:00:0e:f0` | 1 | `00:00:0e:f0` | `10c4ed22a10b8a136bffd7ffce4d552300d76f8e593627d2a9841c3b11a5697e` |
 
-The utility validates the filename, regular-file size, header version, and
-raw destination bytes.  Gate staging must independently verify the listed
-whole-file hashes before execution.
+The first route byte is not an address byte.  Stock decodes its high nibble as
+the total patch count and its low nibble as `downloadSeq`, then clears that
+byte before submitting the four-byte address in ioctl 15.  Reading from byte
+23 or assigning sequence numbers by filename order shifts both destinations
+and swaps both patches.  The utility validates the filename, regular-file
+size, exact header and route bytes, decoded count/sequence, and final address.
+Gate staging must independently verify the listed whole-file hashes before
+execution.
 
 `wmt_bt_on` contains exactly one activation call: ARM32 request `0x4004a006`,
 argument `0x80000000` (BT type 0 with the on bit set), once, without retry.  It
 has no generic function selector or Wi-Fi option and refuses to run unless
 `--execute-bt-only-once` is present.
+
+This BT-only diagnostic is intentionally distinct from stock launcher's WMT
+bootstrap.  On MT8163 the stock launcher uses ioctl 7 (`LPBK_POWER_CTRL=1`)
+after selecting BTIF, and retries that bootstrap before servicing
+`srh_patch`; it does not use ioctl 6 to turn Bluetooth on at that point.  Gate
+4 executes the exact stock tools to retain that distinction.
 
 ## Reproducible `/tmp` build and offline checks
 
@@ -54,7 +66,7 @@ The pinned outputs from GCC 13.3.0, binutils 2.42, and QEMU ARM 8.2.2 are:
 
 | Helper | Size | SHA-256 |
 | --- | ---: | --- |
-| `wmt_configure` | 428,704 | `cb14e315e7dbacac50ed1d6bab699d97d82cc2df54c3f2a920ffdd15c6eaf58b` |
+| `wmt_configure` | 428,704 | `2fa1c78546b3a0d35442ffa196f3eaa13b1ce4609b537332b016bc88ea663be2` |
 | `wmt_responder` | 428,796 | `e20bdaf559165077ff8211c64ed38a10ecee1006641e94302cf14d3be397c350` |
 | `wmt_bt_on` | 424,540 | `4365c1b1046bf2ce1045a3fbd4578ee21d8f1a9900a01cb0cde9cea478821d82` |
 
@@ -123,24 +135,37 @@ exact pinned v181 Bionic tools:
 
 ```sh
 /system/vendor/bin/wmt_loader
-/system/vendor/bin/wmt_launcher -p /vendor/firmware/
+/system/vendor/bin/wmt_launcher -p /vendor/firmware/ \
+  >/tmp/wmt-launcher.log 2>&1 &
+launcher_pid=$!
 ```
 
 The recovered `init.connectivity.rc` is hash-checked as reference evidence but
 is not installed.  Missing optional/debug dispatcher calls in the stock
 launcher are known compatibility observations, not proof of successful
-activation.
+activation.  This exact launcher performs the ioctl-7 bootstrap and the
+stock byte-24 patch-route decoding described above.  Require one live launcher
+with the recorded PID and captured patch/init success before declaring the
+gate stable.
 
 ### Gate 5: one Wi-Fi function-on
 
-Only after Gate 4 is stable, use another fresh boot and perform exactly one
-write:
+Only after Gate 4 is stable, use another fresh boot.  Repeat the exact Gate 4
+loader/launcher bootstrap once on that boot, keeping the single launcher
+running as the WMT command responder.  After the same patch/init success
+evidence and stability window, perform exactly one write:
 
 ```sh
+/system/vendor/bin/wmt_loader
+/system/vendor/bin/wmt_launcher -p /vendor/firmware/ \
+  >/tmp/wmt-launcher.log 2>&1 &
+launcher_pid=$!
+# Advance only after the one launcher reaches the verified bootstrap/patch gate.
 printf '1' > /dev/wmtWifi
 ```
 
 Poll `/sys/class/net/wlan0` for at most 30 seconds.  Do not issue a second
-write or retry in the same boot.  On failure, preserve UART and `dmesg` and
-reboot.  A persistent, usable `wlan0` is the milestone; staging firmware or
-reaching an intermediate WMT callback is not.
+write, start another launcher, or retry in the same boot.  On failure,
+preserve UART, `dmesg`, `/tmp/wmt-launcher.log`, and the recorded launcher PID,
+then reboot.  A persistent, usable `wlan0` is the milestone; staging firmware
+or reaching an intermediate WMT callback is not.

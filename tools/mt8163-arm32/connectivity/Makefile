@@ -45,11 +45,14 @@ check: all
 	@$(QEMU_ARM) $(OUT_DIR)/wmt_configure --inspect-patches \
 		--firmware-dir $(REPO_ROOT)/firmware >$(OUT_DIR)/patch-inspection.out
 	@test "$$(grep -c '^patch_info ' $(OUT_DIR)/patch-inspection.out)" -eq 2
-	@grep -q 'seq=1 size=128720 version=0x8a address=00:22:00:06' \
+	@grep -q 'seq=2 size=128720 header=8a:00 route=22:00:06:00 address=00:00:06:00' \
 		$(OUT_DIR)/patch-inspection.out
-	@grep -q 'seq=2 size=50148 version=0x8a address=00:21:00:0e' \
+	@grep -q 'seq=1 size=50148 header=8a:00 route=21:00:0e:f0 address=00:00:0e:f0' \
 		$(OUT_DIR)/patch-inspection.out
 	@grep -q 'device_opened=no' $(OUT_DIR)/patch-inspection.out
+	@python3 -B $(SOURCE_DIR)/test_wmt_configure.py \
+		--binary $(OUT_DIR)/wmt_configure \
+		--firmware $(REPO_ROOT)/firmware --qemu $(QEMU_ARM)
 	@! grep -E 'FUNC_ON|0x4004a006|WMTDRV_TYPE|--no-function-on' \
 		$(SOURCE_DIR)/wmt_configure.c
 	@test "$$(grep -c 'result = ioctl(fd, WMT_BT_ONLY_REQUEST' \

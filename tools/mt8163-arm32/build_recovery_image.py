@@ -139,7 +139,7 @@ CONNECTIVITY_SYMLINKS = {
 CONNECTIVITY_HELPERS = {
     "sbin/wmt_configure": (
         "wmt_config_helper", 428704,
-        "cb14e315e7dbacac50ed1d6bab699d97d82cc2df54c3f2a920ffdd15c6eaf58b",
+        "2fa1c78546b3a0d35442ffa196f3eaa13b1ce4609b537332b016bc88ea663be2",
     ),
     "sbin/wmt_responder": (
         "wmt_responder", 428796,
@@ -148,6 +148,17 @@ CONNECTIVITY_HELPERS = {
     "sbin/wmt_bt_on": (
         "wmt_bt_on", 424540,
         "4365c1b1046bf2ce1045a3fbd4578ee21d8f1a9900a01cb0cde9cea478821d82",
+    ),
+}
+
+CONNECTIVITY_PATCH_ROUTES = {
+    "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": (
+        bytes((0x8A, 0x00)), bytes((0x22, 0x00, 0x06, 0x00)), 2,
+        bytes((0x00, 0x00, 0x06, 0x00)),
+    ),
+    "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": (
+        bytes((0x8A, 0x00)), bytes((0x21, 0x00, 0x0E, 0xF0)), 1,
+        bytes((0x00, 0x00, 0x0E, 0xF0)),
     ),
 }
 
@@ -361,14 +372,25 @@ def add_connectivity_bundle(source_root: Path, stage: Path,
             raise SystemExit(f"ERROR: connectivity symlink escapes or dangles: {relative} -> {link_target}") from exc
         symlink_records[relative] = link_target
 
-    patch_addresses = {
-        "lib/firmware/ROMv2_lm_patch_1_0_hdr.bin": bytes((0x00, 0x22, 0x00, 0x06)),
-        "lib/firmware/ROMv2_lm_patch_1_1_hdr.bin": bytes((0x00, 0x21, 0x00, 0x0E)),
-    }
-    for relative, expected_address in patch_addresses.items():
+    patch_routing_records: dict[str, object] = {}
+    for relative, (expected_header, expected_route, expected_seq,
+                   expected_address) in CONNECTIVITY_PATCH_ROUTES.items():
         data = read(stage / relative)
-        if data[23:27] != expected_address:
+        route = data[24:28]
+        patch_count = route[0] >> 4
+        download_seq = route[0] & 0x0F
+        address = b"\0" + route[1:]
+        if (data[22:24] != expected_header or route != expected_route or
+                patch_count != len(CONNECTIVITY_PATCH_ROUTES) or
+                download_seq != expected_seq or address != expected_address):
             raise SystemExit(f"ERROR: stock patch metadata changed for {relative}")
+        patch_routing_records[relative] = {
+            "header": expected_header.hex(),
+            "route": expected_route.hex(),
+            "patch_count": patch_count,
+            "download_seq": download_seq,
+            "address": address.hex(),
+        }
 
     if read(stage / "ueventd.mt8163.rc") != read(source_root / "ueventd.mt8163.rc"):
         raise SystemExit("ERROR: connectivity root and recovery use different ueventd.mt8163.rc files")
@@ -392,6 +414,7 @@ def add_connectivity_bundle(source_root: Path, stage: Path,
         "files": copied,
         "helpers": helper_records,
         "symlinks": symlink_records,
+        "patch_routing": patch_routing_records,
     }
 
 
