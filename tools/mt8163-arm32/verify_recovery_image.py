@@ -146,6 +146,21 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def strictly_equal(actual: object, expected: object) -> bool:
+    """Compare JSON-shaped values without accepting bool as an integer."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(
+            strictly_equal(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            strictly_equal(left, right) for left, right in zip(actual, expected)
+        )
+    return actual == expected
+
+
 def read(path: Path) -> bytes:
     try:
         return path.read_bytes()
@@ -559,7 +574,7 @@ def validate_connectivity(entries: dict[str, Entry], manifest: dict[str, object]
             "download_seq": download_seq,
             "address": address.hex(),
         }
-    if record.get("patch_routing") != expected_patch_routing:
+    if not strictly_equal(record.get("patch_routing"), expected_patch_routing):
         fail("connectivity patch-routing manifest mismatch")
 
     return True

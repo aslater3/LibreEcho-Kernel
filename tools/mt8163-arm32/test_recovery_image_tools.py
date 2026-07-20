@@ -158,6 +158,20 @@ class PatchRouteContractTests(unittest.TestCase):
             self.assertEqual(route[0] & 0x0F, sequence)
             self.assertEqual(b"\0" + route[1:], address)
 
+    def test_route_manifest_rejects_boolean_sequence(self) -> None:
+        expected = {
+            "patch": {
+                "header": "8a00",
+                "route": "21000ef0",
+                "patch_count": 2,
+                "download_seq": 1,
+                "address": "00000ef0",
+            }
+        }
+        changed = {"patch": {**expected["patch"], "download_seq": True}}
+        self.assertFalse(verifier.strictly_equal(changed, expected))
+        self.assertTrue(verifier.strictly_equal(expected, expected))
+
 
 class PolicyTests(unittest.TestCase):
     @staticmethod
