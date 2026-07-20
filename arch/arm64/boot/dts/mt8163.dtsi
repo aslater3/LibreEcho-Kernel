@@ -1433,7 +1433,7 @@
 			compatible = "mediatek,mt8163-consys";
 			reg = <0 0x18070000 0 0x0200>,  /*CONN_MCU_CONFIG_BASE      */
 			      <0 0x10007000 0 0x0100>,  /*AP_RGU_BASE               */
-			      <0 0x10000000 0 0x2000>,  /*TOPCKGEN + INFRA AXI      */
+			      <0 0x10001000 0 0x1000>,  /*INFRACFG: EMI + AXI       */
 			      <0 0x10006000 0 0x1000>;  /*SPM_BASE                  */
 			power-domains = <&scpsys MT8163_POWER_DOMAIN_CONN>;
 			clocks = <&infracfg CLK_INFRA_PMIC_CONN>;
