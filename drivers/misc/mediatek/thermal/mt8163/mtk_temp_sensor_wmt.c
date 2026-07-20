@@ -39,6 +39,8 @@
 
 #define PMIC_SENSOR_NAME "mtktswmt_sensor"
 
+static volatile int echo_v177_suppress_wmt_temp_sensor_registration = 1;
+
 static int mtktswmt_read_temp(struct thermal_dev *tdev)
 {
 	return wmt_thz_hw_get_temp();
@@ -192,6 +194,11 @@ static int __init mtktswmt_sensor_init(void)
 {
 	int ret;
 
+	if (echo_v177_suppress_wmt_temp_sensor_registration) {
+		pr_info("echo-v177: WMT temperature sensor registration suppressed\n");
+		return 0;
+	}
+
 	ret = platform_device_register(&mtktswmt_device);
 	if (ret) {
 		pr_err("Unable to register mtktswmt thermal device (%d)\n", ret);
@@ -212,6 +219,10 @@ err_unreg:
 
 static void __exit mtktswmt_sensor_exit(void)
 {
+	if (echo_v177_suppress_wmt_temp_sensor_registration) {
+		return;
+	}
+
 	platform_device_unregister(&mtktswmt_device);
 	platform_driver_unregister(&mtktswmt_driver);
 }
