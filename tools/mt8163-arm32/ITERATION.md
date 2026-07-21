@@ -24,9 +24,11 @@ reviewed migration that updates every script, hash pin, manifest, and test.
 | --- | --- |
 | Source tag | `arm32-dev-base-2026-07-21` |
 | Source commit | `020be03fb4cdd42764b1a0c3211538781eecc575` |
+| Current docs commit | `409df69046003aabae357d84f40dc0718f369554` |
 | Branch | `agent/arm32-v97-wlan` |
 | Device | BISCUIT, serial `G2A0RF0485020316` |
-| Verified boot image | `afe2d0d932f29f4028523e26d319361c4e9777308f6bcfaf133c57a493865054` |
+| Last hardware-verified boot image | `afe2d0d932f29f4028523e26d319361c4e9777308f6bcfaf133c57a493865054` |
+| Fresh clean rebuild, not flashed | `669aad1edc1a77bd9d76e2b6609d659142ba7ee7aa2cfaec75b5899a12a43ae5` |
 | Runtime | ARM32 `armv7l`, root `/tmp/runme`, ADB state `device` |
 
 The kernel must retain:
@@ -56,6 +58,12 @@ ADB serial:   G2A0RF0485020316
 
 Only the pipeline may produce or flash an active image. Do not flash a raw
 `zImage`, an arbitrary `boot.img`, or an image copied from an old run.
+
+After a cleanup, `pipeline/work` and `pipeline/out` are intentionally absent.
+The first `./build.sh` recreates them from the committed source and pinned
+`pipeline/inputs`; the first clean rebuild after the 2026-07-21 cleanup passed
+with boot SHA-256 `669aad1edc1a77bd9d76e2b6609d659142ba7ee7aa2cfaec75b5899a12a43ae5`
+and was deliberately removed again to leave a clean starting point.
 
 ## Before every iteration
 
