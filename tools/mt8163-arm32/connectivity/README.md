@@ -99,20 +99,21 @@ Require two validated `patch_info` lines and `device_opened=no`.
 
 ### Gate 2: configure only
 
-Arm one explicit, one-shot success responder and run the configurator.  This
-stage contains no function-on operation:
+Run the configurator by itself. It validates and registers the patches, selects
+BTIF transport, and contains no function-on operation. **Do not start
+`wmt_responder` for this gate:** this configure-only helper does not require a
+command responder, and waiting for a `--once` responder can leave the root
+runner blocked indefinitely when no command is published.
 
 ```sh
-/sbin/wmt_responder \
-  --device /dev/stpwmt --ok --once &
-responder_pid=$!
 /sbin/wmt_configure \
   --device /dev/stpwmt --firmware-dir /lib/firmware
 ```
 
-If configuration emits no `srh_patch` command, the one-shot responder remains
-armed.  Prove that the recorded PID is still the only responder before moving
-to the BT-only gate.
+Require `wmt_configuration_complete activation=absent`, all six configure
+ioctl results, and no panic/watchdog evidence. If a later helper or stock
+launcher needs a responder, start that responder only in the same bounded gate
+that publishes the corresponding command, and kill/reap it before advancing.
 
 ### Gate 3: one BT-only activation
 
