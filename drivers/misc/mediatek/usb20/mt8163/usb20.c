@@ -1124,8 +1124,20 @@ static int mt_usb_init(struct musb *musb)
 	DBG(0, "%s, init_otg before\n", __func__);
 
 #ifdef CONFIG_USB_MTK_OTG
-	DBG(0, "%s, init_otg\n", __func__);
-	mt_usb_otg_init(musb);
+	/*
+	 * This recovery image is a USB peripheral.  Do not initialize the ID
+	 * pin/host-role machinery: the Echo board does not deliver a usable ID
+	 * interrupt and a host event would make the glue driver source VBUS.
+	 */
+	pr_info("usb20: initializing fixed peripheral mode\n");
+	musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
+	musb->is_host = false;
+	if (musb->xceiv && musb->xceiv->otg) {
+		musb->xceiv->otg->default_a = 0;
+		musb->xceiv->state = OTG_STATE_B_IDLE;
+		musb->xceiv->last_event = USB_EVENT_VBUS;
+	}
+	MUSB_DEV_MODE(musb);
 #endif
 
 	return 0;
@@ -1198,7 +1210,8 @@ static int mt_usb_probe(struct platform_device *pdev)
 	}
 
 #ifdef CONFIG_USB_MTK_OTG
-	pdata->mode = MUSB_OTG;
+	/* Recovery exposes FunctionFS/ADB and must always enumerate as a B-device. */
+	pdata->mode = MUSB_PERIPHERAL;
 #else
 	of_property_read_u32(np, "mode", (u32 *)&pdata->mode);
 #endif

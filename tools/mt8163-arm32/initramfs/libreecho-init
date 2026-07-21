@@ -58,24 +58,32 @@ esac
 # next reset and enters fastboot, preserving the rapid recovery loop.  Refuse
 # the write unless sysfs proves the target is the expected 0x5000-sector expdb
 # block partition; this prevents shell redirection from creating a regular file.
-if [ -b "$EXPDB" ] && [ -n "$expected_rdev" ] &&
-   [ "$($BB stat -c '%t:%T' "$EXPDB" 2>/dev/null)" = "$expected_rdev" ] &&
-   $BB grep -qx 'PARTNAME=expdb' "$EXPDB_SYS/uevent" 2>/dev/null &&
-   [ "$($BB cat "$EXPDB_SYS/size" 2>/dev/null)" = 20480 ]; then
-    if printf FASTBOOT_PLEASE > "$EXPDB" 2>/tmp/expdb-marker.err; then
-        $BB sync
-        marker=$($BB dd if="$EXPDB" bs=15 count=1 2>/dev/null)
-        if [ "$marker" = FASTBOOT_PLEASE ]; then
-            log fastboot-please-written
-        else
-            log fastboot-please-readback-failed
+# Do not continue into optional driver or USB work without a verified marker
+# target. Retry forever so a slow devtmpfs/eMMC never loses recovery.
+marker_written=0
+marker_attempt=0
+while [ "$marker_written" -eq 0 ]; do
+    marker_attempt=$((marker_attempt + 1))
+    if [ -b "$EXPDB" ] && [ -n "$expected_rdev" ] &&
+       [ "$($BB stat -c '%t:%T' "$EXPDB" 2>/dev/null)" = "$expected_rdev" ] &&
+       $BB grep -qx 'PARTNAME=expdb' "$EXPDB_SYS/uevent" 2>/dev/null &&
+       [ "$($BB cat "$EXPDB_SYS/size" 2>/dev/null)" = 20480 ]; then
+        if printf FASTBOOT_PLEASE > "$EXPDB" 2>/tmp/expdb-marker.err; then
+            $BB sync
+            marker=$($BB dd if="$EXPDB" bs=15 count=1 2>/dev/null)
+            [ "$marker" = FASTBOOT_PLEASE ] && marker_written=1
         fi
-    else
-        log fastboot-please-write-failed
+    elif [ $((marker_attempt % 10)) -eq 1 ]; then
+        log expdb-identity-rejected
     fi
-else
-    log expdb-identity-rejected
-fi
+    if [ "$marker_written" -eq 0 ]; then
+        if [ $((marker_attempt % 10)) -eq 0 ]; then
+            log fastboot-please-retry
+        fi
+        $BB sleep 1
+    fi
+done
+log fastboot-please-written
 
 # Stable MediaTek connectivity aliases.  btif is dynamically allocated and is
 # intentionally left to devtmpfs/ueventd.

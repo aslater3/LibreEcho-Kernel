@@ -211,5 +211,43 @@ class PolicyTests(unittest.TestCase):
             verifier.manifest_schema({"schema_version": True})
 
 
+class MkimgHeaderTests(unittest.TestCase):
+    """Regression: LK rejects a KERNEL header whose name lacks a NUL byte."""
+
+    @staticmethod
+    def header(name_suffix: bytes = b"\x00\x00") -> bytes:
+        hdr = bytearray(512)
+        hdr[0:4] = bytes.fromhex("88168858")
+        hdr[4:8] = (1024).to_bytes(4, "little")
+        hdr[8:14] = b"KERNEL"
+        hdr[14:14 + len(name_suffix)] = name_suffix
+        return bytes(hdr)
+
+    def test_null_terminated_name_is_accepted(self) -> None:
+        verifier.validate_mkimg_header(self.header(b"\x00\x00"))
+
+    def test_ff_filled_name_is_rejected(self) -> None:
+        with self.assertRaises(SystemExit):
+            verifier.validate_mkimg_header(self.header(b"\xff\xff"))
+
+    def test_missing_null_terminator_is_rejected(self) -> None:
+        hdr = bytearray(self.header(b"\x00\x00"))
+        hdr[14] = 0x41  # 'A' instead of NUL
+        with self.assertRaises(SystemExit):
+            verifier.validate_mkimg_header(bytes(hdr))
+
+    def test_bad_magic_is_rejected(self) -> None:
+        hdr = bytearray(self.header())
+        hdr[0:4] = b"\x00\x00\x00\x00"
+        with self.assertRaises(SystemExit):
+            verifier.validate_mkimg_header(bytes(hdr))
+
+    def test_wrong_name_is_rejected(self) -> None:
+        hdr = bytearray(self.header())
+        hdr[8:14] = b"ROOTFS"
+        with self.assertRaises(SystemExit):
+            verifier.validate_mkimg_header(bytes(hdr))
+
+
 if __name__ == "__main__":
     unittest.main()

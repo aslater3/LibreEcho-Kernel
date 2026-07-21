@@ -37,6 +37,7 @@ SOURCE_BOOT_SHA256 = "c0f52a3b079d214495cd3dd22f92fd85695d1b868c58b491a2edb933bc
 STOCK_EVT_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57dee1"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 MUSL_LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
+RECOVERY_INIT_SHA256 = "2e67e3c81d3da2127ee524f1cf9ec49b3ffe4b9f57d4e2102905e835dcbf6290"
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
@@ -44,7 +45,6 @@ CONNECTIVITY_STOCK_SYSTEM_SHA256 = "56540b3a9ac4437901a5510d9fb5e09b1a8d0cc22954
 CONNECTIVITY_EVIDENCE_MANIFEST_SHA256 = "d1eedd04efe0dbc78853f2b0f9357c092b4ca66242648908c0369956538441eb"
 
 STOCK_FILES = {
-    "init": (0o750, "0564299ebbdd4b76fc00b7f48b434355b484874c2ad013f7c6a3dc5cbd103df7"),
     "sbin/adbd": (0o750, "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"),
     "sepolicy": (0o644, "c144b15bff55da40125055b3e8aa134d204e0877c1712f15a313bc5555e8113a"),
     "file_contexts.bin": (0o644, "1bc8fa508de455f391edabe1c44dc4cf230b7a21dab5824f29f0d36b2a6944ac"),
@@ -443,6 +443,22 @@ def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
         target.chmod(mode)
         overlay_manifest[relative] = {"sha256": sha256(data), "size": len(data), "mode": f"{mode:04o}"}
 
+    # The stock ramdisk's /init is an Android ELF that is incompatible with
+    # this ARM32 recovery kernel.  PID 1 must be the audited LibreEcho shell
+    # control script, installed at the real runtime path (not merely staged
+    # as /libreecho-init).
+    init_script = read(overlay / "libreecho-init")
+    require_hash("LibreEcho recovery /init", init_script, RECOVERY_INIT_SHA256)
+    init_target = stage / "init"
+    init_target.write_bytes(init_script)
+    init_target.chmod(0o755)
+    overlay_manifest["init"] = {
+        "sha256": RECOVERY_INIT_SHA256,
+        "size": len(init_script),
+        "mode": "0755",
+        "source": "libreecho-init",
+    }
+
     busybox_data = read(busybox)
     loader_data = read(loader)
     require_hash("ARM32 BusyBox", busybox_data, BUSYBOX_SHA256)
@@ -518,13 +534,20 @@ def validate_stage(stage: Path) -> None:
         if ident is not None and ident != (1, 40):
             raise SystemExit(f"ERROR: non-ARM32 ELF in initramfs: {path} class={ident[0]} machine={ident[1]}")
 
-    for relative in ("init", "sbin/adbd"):
-        output = subprocess.run(
-            ["readelf", "-l", str(stage / relative)], check=True,
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        ).stdout
-        if "Requesting program interpreter" in output:
-            raise SystemExit(f"ERROR: {relative} is not static")
+    # /init is intentionally a script.  Only the native helper is required
+    # to be a static ARM32 ELF here; treating the script as an ELF was the
+    # stale-builder bug that allowed the stock PID 1 back into the image.
+    output = subprocess.run(
+        ["readelf", "-l", str(stage / "sbin/adbd")], check=True,
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    ).stdout
+    if "Requesting program interpreter" in output:
+        raise SystemExit("ERROR: sbin/adbd is not static")
+    init_script = read(stage / "init")
+    if init_script != read(stage / "libreecho-init"):
+        raise SystemExit("ERROR: runtime /init differs from audited libreecho-init")
+    if not init_script.startswith(b"#!/bin/busybox sh\n"):
+        raise SystemExit("ERROR: runtime /init is not the audited BusyBox shell script")
 
     busybox_program = subprocess.run(
         ["readelf", "-l", str(stage / "bin/busybox")], check=True,
@@ -673,6 +696,8 @@ def package_boot(source: bytes, zimage: bytes, ramdisk: bytes, raw_dtb: bytes,
     old_kernel = source[PAGE_SIZE:PAGE_SIZE + old_kernel_size]
     if old_kernel[:4] != MKIMG_MAGIC or old_kernel[8:14] != b"KERNEL":
         raise SystemExit("ERROR: source MediaTek KERNEL header contract changed")
+    if old_kernel[14] != 0:
+        raise SystemExit("ERROR: source MediaTek KERNEL header name not null-terminated")
     dtb = padded_dtb(raw_dtb)
     payload = zimage + dtb
     mkimg = bytearray(old_kernel[:MKIMG_SIZE])

@@ -3,6 +3,8 @@
 #
 #include $(srctree)/drivers/misc/mediatek/Makefile.custom
 ccflags-$(CONFIG_USB_MTK_HDRC) += -I$(srctree)/drivers/misc/mediatek/usb20
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 
 obj-$(CONFIG_USB_MTK_HDRC)	:= usb20.o usb20_phy.o
 obj-$(CONFIG_USB_MTK_HDRC)  += usb20_host.o

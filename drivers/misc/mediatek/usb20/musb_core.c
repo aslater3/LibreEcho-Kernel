@@ -1224,8 +1224,12 @@ void musb_start(struct musb *musb)
 	int vbusdet_retry = 5;
 
 	u8 intrusbe;
+	u8 devctl;
 
 	DBG(0, "start, is_host=%d is_active=%d\n", musb->is_host, musb->is_active);
+	pr_info("usb20: musb_start host=%d active=%d power=%d devctl=%02x power_reg=%02x\n",
+		musb->is_host, musb->is_active, musb->power,
+		musb_readb(regs, MUSB_DEVCTL), musb_readb(regs, MUSB_POWER));
 
 	if (musb->is_active) {
 		if (musb->is_host) {
@@ -1271,6 +1275,16 @@ void musb_start(struct musb *musb)
 #if defined(CONFIG_USBIF_COMPLIANCE)
 		intrusbe |= MUSB_INTR_CONNECT;	/* device mode enable connect interrupt */
 #endif
+		/*
+		 * The Echo board is wired as a fixed peripheral and does not
+		 * provide a usable OTG ID/VBUS event.  Start the local MUSB
+		 * session explicitly; otherwise SOFTCONN can be set while the
+		 * controller remains outside a B-device session and the host sees
+		 * no pull-up.
+		 */
+		devctl = musb_readb(regs, MUSB_DEVCTL);
+		devctl |= MUSB_DEVCTL_SESSION;
+		musb_writeb(regs, MUSB_DEVCTL, devctl);
 	}
 
 	musb_writeb(regs, MUSB_INTRUSBE, intrusbe);
@@ -1287,6 +1301,10 @@ void musb_start(struct musb *musb)
 			    | MUSB_POWER_ENSUSPEND);
 	}
 	musb->is_active = 1;
+	pr_info("usb20: musb_start done host=%d active=%d devctl=%02x power_reg=%02x intrusb=%02x\n",
+		musb->is_host, musb->is_active,
+		musb_readb(regs, MUSB_DEVCTL), musb_readb(regs, MUSB_POWER),
+		musb_readb(regs, MUSB_INTRUSBE));
 }
 
 void musb_generic_disable(struct musb *musb)

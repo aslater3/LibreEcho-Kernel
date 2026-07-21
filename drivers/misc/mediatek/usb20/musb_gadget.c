@@ -2503,6 +2503,11 @@ static int musb_gadget_set_self_powered(struct usb_gadget *gadget, int is_selfpo
 
 static void musb_pullup(struct musb *musb, int is_on, bool usb_in)
 {
+	pr_info("usb20: pullup request on=%d usb_in=%d host=%d active=%d ready=%d power=%d soft=%d devctl=%02x power_reg=%02x\n",
+		is_on, usb_in, musb->is_host, musb->is_active, musb->is_ready,
+		musb->power, musb->softconnect,
+		musb_readb(musb->mregs, MUSB_DEVCTL),
+		musb_readb(musb->mregs, MUSB_POWER));
 
 #if 0
 	u8 power;
@@ -2531,7 +2536,10 @@ static void musb_pullup(struct musb *musb, int is_on, bool usb_in)
 	else
 		musb_stop(musb);
 
-
+	pr_info("usb20: pullup complete on=%d active=%d power=%d soft=%d devctl=%02x power_reg=%02x\n",
+		is_on, musb->is_active, musb->power, musb->softconnect,
+		musb_readb(musb->mregs, MUSB_DEVCTL),
+		musb_readb(musb->mregs, MUSB_POWER));
 	DBG(0, "MUSB: gadget pull up %d end\n", is_on);
 #endif
 }
@@ -2601,6 +2609,8 @@ static int musb_gadget_pullup(struct usb_gadget *gadget, int is_on)
 
 	/* NOTE: pmic would enable irq internally */
 	usb_in = usb_cable_connected();
+	pr_info("usb20: gadget_pullup on=%d usb_in=%d soft_before=%d active=%d host=%d\n",
+		is_on, usb_in, musb->softconnect, musb->is_active, musb->is_host);
 
 	/* NOTE: this assumes we are sensing vbus; we'd rather
 	 * not pullup unless the B-session is active.
@@ -2795,6 +2805,10 @@ static int musb_gadget_start(struct usb_gadget *g, struct usb_gadget_driver *dri
 	int retval = 0;
 
 	DBG(0, "musb_gadget_start\n");
+	pr_info("usb20: gadget_start driver=%s host=%d active=%d last_event=%d state=%s\n",
+		driver->function ? driver->function : "<unnamed>",
+		musb->is_host, musb->is_active, musb->xceiv->last_event,
+		otg_state_string(musb->xceiv->state));
 
 	if (driver->max_speed < USB_SPEED_HIGH) {
 		retval = -EINVAL;
@@ -2820,6 +2834,9 @@ static int musb_gadget_start(struct usb_gadget *g, struct usb_gadget_driver *dri
 	 * ensures HdrcStart is indirectly called.
 	 */
 	retval = usb_add_hcd(hcd, 0, 0);
+	pr_info("usb20: gadget_start add_hcd retval=%d host=%d active=%d last_event=%d state=%s\n",
+		retval, musb->is_host, musb->is_active, musb->xceiv->last_event,
+		otg_state_string(musb->xceiv->state));
 	if (retval < 0) {
 		DBG(2, "add_hcd failed, %d\n", retval);
 		goto err;

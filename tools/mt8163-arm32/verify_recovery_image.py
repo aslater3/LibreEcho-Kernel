@@ -37,7 +37,7 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "0564299ebbdd4b76fc00b7f48b434355b484874c2ad013f7c6a3dc5cbd103df7"
+INIT_SHA256 = "2e67e3c81d3da2127ee524f1cf9ec49b3ffe4b9f57d4e2102905e835dcbf6290"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
@@ -140,6 +140,20 @@ CONNECTIVITY_PATCH_ROUTES = {
 
 def fail(message: str) -> None:
     raise SystemExit("ERROR: " + message)
+
+
+def validate_mkimg_header(kernel: bytes) -> None:
+    """Validate the MediaTek mkimg header wrapping the kernel payload.
+
+    LK compares the name field as a null-terminated C string; a header
+    whose name bytes are correct but lack a trailing NUL (e.g. 0xFF fill)
+    will be rejected with "KERNEL partition name not match" and the DTB
+    will never be located.
+    """
+    if kernel[:4] != MKIMG_MAGIC or kernel[8:14] != b"KERNEL":
+        fail("MediaTek KERNEL header missing")
+    if kernel[14] != 0:
+        fail("MediaTek KERNEL header name not null-terminated (LK rejects this)")
 
 
 def sha256(data: bytes) -> str:
@@ -597,12 +611,11 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
     if any(entry.uid or entry.gid or entry.mtime for entry in entries.values()):
         fail("initramfs ownership or mtime is not normalized")
 
-    init = require_member(entries, "init", INIT_SHA256, 0o750)
+    init = require_member(entries, "init", INIT_SHA256, 0o755)
     adbd = require_member(entries, "sbin/adbd", ADBD_SHA256, 0o750)
     busybox = require_member(entries, "bin/busybox", BUSYBOX_SHA256, 0o755)
     loader = require_member(entries, "lib/ld-musl-armhf.so.1", LOADER_SHA256, 0o755)
     for name, member, expected_interpreter in (
-        ("init", init, None),
         ("sbin/adbd", adbd, None),
         ("bin/busybox", busybox, "/lib/ld-musl-armhf.so.1"),
         ("lib/ld-musl-armhf.so.1", loader, None),
@@ -649,6 +662,16 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         verified_overlay[name] = entry
 
     control = verified_overlay["libreecho-init"]
+    if init.data != control.data:
+        fail("runtime /init is not byte-identical to audited libreecho-init")
+    init_record = overlay_manifest.get("init", {})
+    if init_record != {
+        "sha256": INIT_SHA256,
+        "size": len(control.data),
+        "mode": "0755",
+        "source": "libreecho-init",
+    }:
+        fail("runtime /init overlay manifest mismatch")
     for marker in (
         b"FASTBOOT_PLEASE", b"/tmp/runme", b"functionfs", b"/dev/stpwmt", b"/dev/stpbt",
         b"PARTNAME=expdb", b"/sys/class/block/mmcblk0p7", b"20480", b"bs=15 count=1",
@@ -748,8 +771,7 @@ def main() -> None:
 
     kernel = boot[PAGE:PAGE + kernel_size]
     source_kernel = source[PAGE:PAGE + source_fields[0]]
-    if kernel[:4] != MKIMG_MAGIC or kernel[8:14] != b"KERNEL":
-        fail("MediaTek KERNEL header missing")
+    validate_mkimg_header(kernel)
     source_mkimg, output_mkimg = bytearray(source_kernel[:MKIMG_SIZE]), bytearray(kernel[:MKIMG_SIZE])
     source_mkimg[4:8] = output_mkimg[4:8] = b"\0" * 4
     if source_mkimg != output_mkimg:
