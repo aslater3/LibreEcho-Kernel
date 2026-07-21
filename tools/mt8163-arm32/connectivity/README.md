@@ -129,6 +129,39 @@ wait "$responder_pid"
 Do not retry it.  There is intentionally no Wi-Fi activation path in any of
 the three helpers.
 
+### Gate 3: development command/response gate
+
+The exact stock launcher was attempted on the ARM32 image, but it did not
+consume the kernel's `srh_patch` command; the kernel timed out and retained
+command ownership. The bounded ARM32 `wmt_responder --ok` correctly implements
+the required poll/read/write protocol and is the currently verified
+bring-up responder. It is a diagnostic tool, not a production launcher: it
+responds `ok` to every command and must never be installed as an unattended
+service.
+
+Use another fresh boot and run the configure-only gate first, then keep one
+responder open while the loader and function-on operation run:
+
+```sh
+/sbin/wmt_configure --device /dev/stpwmt --firmware-dir /lib/firmware
+/sbin/wmt_responder --device /dev/stpwmt --ok >/tmp/wmt-responder.log 2>&1 &
+responder_pid=$!
+/system/vendor/bin/wmt_loader >/tmp/wmt-loader.log 2>&1
+```
+
+Require:
+
+```text
+ECHO_STP_INIT: hifType=2 using_btif=1
+ECHO_BTIF_OPEN: btif_open succeed
+no cmd timeout str(srh_patch)
+```
+
+The responder must be killed and reaped at the end of the bounded gate.
+
+**Real-world value:** proves that the kernel-to-userspace ownership protocol is
+live and that patch search can advance far enough for a real function-on test.
+
 ### Gate 4: exact stock-runtime A/B test
 
 Use another fresh boot; do not mix this comparison with Gates 2 or 3.  Run the
@@ -151,22 +184,20 @@ gate stable.
 
 ### Gate 5: one Wi-Fi function-on
 
-Only after Gate 4 is stable, use another fresh boot.  Repeat the exact Gate 4
-loader/launcher bootstrap once on that boot, keeping the single launcher
-running as the WMT command responder.  After the same patch/init success
-evidence and stability window, perform exactly one write:
+Only after Gate 3 is stable, use another fresh boot. Run the configure-only
+helper, start exactly one bounded `wmt_responder --ok`, run the stock loader,
+and then perform exactly one write:
 
 ```sh
-/system/vendor/bin/wmt_loader
-/system/vendor/bin/wmt_launcher -p /vendor/firmware/ \
-  >/tmp/wmt-launcher.log 2>&1 &
-launcher_pid=$!
-# Advance only after the one launcher reaches the verified bootstrap/patch gate.
+/sbin/wmt_configure --device /dev/stpwmt --firmware-dir /lib/firmware
+/sbin/wmt_responder --device /dev/stpwmt --ok >/tmp/wmt-responder.log 2>&1 &
+responder_pid=$!
+/system/vendor/bin/wmt_loader >/tmp/wmt-loader.log 2>&1
 printf '1' > /dev/wmtWifi
 ```
 
 Poll `/sys/class/net/wlan0` for at most 30 seconds.  Do not issue a second
-write, start another launcher, or retry in the same boot.  On failure,
-preserve UART, `dmesg`, `/tmp/wmt-launcher.log`, and the recorded launcher PID,
-then reboot.  A persistent, usable `wlan0` is the milestone; staging firmware
-or reaching an intermediate WMT callback is not.
+write, start another responder, or retry in the same boot.  On failure,
+preserve UART, `dmesg`, the responder/loader logs, and the recorded responder
+PID, then reboot. A persistent, usable `wlan0` is the milestone; staging
+firmware or reaching an intermediate WMT callback is not.

@@ -21,7 +21,7 @@ The image combines:
 * the reviewed ARM32 `zImage` from `mt8163_arm32_defconfig`;
 * the proven Android-v0 and MediaTek `KERNEL` envelope from the stock ARM32
   image;
-* the stock EVT DTB for the initial ADB-parity gate only;
+* the pinned MT8163 EVT Wi-Fi DTB with the required CONSYS `bus` clock;
 * the stock static ARM32 Android `init` and `adbd` binaries;
 * ARM32 musl BusyBox, its loader, and 304 relative applet links; and
 * the audited v97 recovery flow in `initramfs/libreecho-init`.
@@ -142,8 +142,9 @@ flashed by these tools.
 ## Wi-Fi DTB stage
 
 Omitting `--dtb` deliberately selects the exact stock EVT DTB for the ADB
-parity gate.  That DTB has the old three-resource CONSYS layout and no named
-`bus` clock, so it is not yet a Wi-Fi candidate for the current driver.
+parity gate.  The canonical pipeline now generates and supplies the pinned
+Wi-Fi DTB by default; direct builder users must explicitly pass the Wi-Fi DTB
+when testing connectivity.
 
 The current source-built `giza_evt.dtb` is 66,135 bytes, which exceeds LK's
 proven 64 KiB appended-FDT envelope by 599 bytes.  It must not be forced into
