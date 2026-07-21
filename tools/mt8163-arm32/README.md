@@ -1,8 +1,20 @@
-# MT8163 ARM32 recovery image
+# LibreEcho MT8163 ARM32 Development OS Base
 
-This directory builds the first post-kernel-entry milestone: an ARM32 recovery
-image with the v97 fast-iteration behavior.  It is intentionally an ADB and
-recovery image, not evidence that Wi-Fi works.
+This directory builds the first verified ARM32 LibreEcho OS foundation. It is
+the development control plane for building the final OS: a production-directed
+ARM32 kernel plus a deliberately small bring-up userspace with root ADB,
+fastboot escape, rollback protection, and staged connectivity tools.
+
+It is **not** a disposable recovery image and it is not yet the finished OS.
+Android `init` and stock static ARM32 `adbd` remain temporarily because they
+provide a proven control plane while native LibreEcho services are added. Some
+internal builder, verifier, service, and manifest names still contain
+`recovery`; those compatibility names must be migrated atomically later rather
+than renamed piecemeal.
+
+For the normal edit/build/flash loop, root access, panic handling, fastboot
+semantics, and the path toward the final OS, read
+[ITERATION.md](ITERATION.md).
 
 The image combines:
 
@@ -20,10 +32,11 @@ un-pinned DTB, an invalid zImage range, and overlapping physical ranges.
 `qemu-arm-static` is used only at build time to obtain the applet list from the
 pinned ARM32 BusyBox binary; the resulting target symlinks are then verified.
 
-## Recovery behavior
+## Development control-plane behavior
 
-Android `init` remains PID 1 so the stock property-backed root ADB behavior is
-preserved.  The `libreecho-recovery` service performs these operations:
+Android `init` remains PID 1 temporarily so the stock property-backed root ADB
+behavior is preserved. The `libreecho-recovery` compatibility service performs
+these operations:
 
 1. creates direct MMC aliases from sysfs, proves partition 7 is the expected
    20,480-sector `expdb`, writes exactly `FASTBOOT_PLEASE`, and reads it back;
