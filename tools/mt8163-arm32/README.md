@@ -30,8 +30,9 @@ preserved.  The `libreecho-recovery` service performs these operations:
 2. creates the stable WMT aliases, leaving dynamically allocated `btif` to
    ueventd/devtmpfs;
 3. starts the `/tmp/runme` to `/tmp/result` root command loop;
-4. waits two seconds before configuring FunctionFS, starts ARM32 `adbd`, waits
-   another three seconds, and enables the gadget; and
+4. waits two seconds before configuring FunctionFS, starts ARM32 `adbd` with
+   `--device_banner=device`, waits three seconds for descriptor publication,
+   then enables the gadget and verifies FunctionFS endpoint readiness; and
 5. stays alive even if ADB or an optional driver fails.
 
 The ramdisk contains no HPS, CPU-online, cpufreq, or cpuidle forcing.  Those
@@ -113,10 +114,12 @@ The image is marked `PREPARED_NOT_FLASHED`.  Before advancing to connectivity,
 capture all of the following from one boot:
 
 1. UART reaches `fastboot-please-written` (which is emitted only after expdb
-   identity and marker read-back pass), `functionfs-mounted`,
-   `adbd-started`, `android-usb-enabled`, and `init-ready-pid1-managed`.
-2. `adb shell id` reports UID 0 and push/pull both work.
-3. A pushed `/tmp/runme` produces `/tmp/result` as root.
+   identity and marker read-back pass), `functionfs-mounted`, `adbd-started`,
+   `android-usb-enabled`, `functionfs-ready`, and
+   `init-ready-pid1-managed`.
+2. host `adb get-state` reports `device`, and ADB push/pull both work.
+3. A pushed `/tmp/runme` produces `/tmp/result` as UID 0; interactive
+   `adb shell` is not the acceptance path.
 4. A controlled reboot returns to fastboot through the expdb marker.
 5. The opposite boot slot remains untouched as rollback.
 

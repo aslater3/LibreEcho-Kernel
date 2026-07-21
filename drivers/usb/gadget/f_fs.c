@@ -417,6 +417,8 @@ static ssize_t ffs_ep0_write(struct file *file, const char __user *buf,
 	char *data;
 
 	ENTER();
+	pr_info("functionfs: ep0 write state=%d len=%zu\n",
+		ffs->state, len);
 
 	/* Fast check if setup was canceled */
 	if (FFS_SETUP_STATE(ffs) == FFS_SETUP_CANCELED)
@@ -442,11 +444,16 @@ static ssize_t ffs_ep0_write(struct file *file, const char __user *buf,
 			ret = PTR_ERR(data);
 			break;
 		}
+		pr_info("functionfs: ep0 data magic=0x%08x\n",
+			len >= sizeof(u32) ? get_unaligned_le32(data) : 0);
 
 		/* Handle data */
 		if (ffs->state == FFS_READ_DESCRIPTORS) {
 			pr_info("read descriptors\n");
 			ret = __ffs_data_got_descs(ffs, data, len);
+			pr_info("functionfs: descriptors ret=%zd fs=%u hs=%u ss=%u\n",
+				ret, ffs->fs_descs_count, ffs->hs_descs_count,
+				ffs->ss_descs_count);
 			if (unlikely(ret < 0))
 				break;
 
@@ -455,6 +462,7 @@ static ssize_t ffs_ep0_write(struct file *file, const char __user *buf,
 		} else {
 			pr_info("read strings\n");
 			ret = __ffs_data_got_strings(ffs, data, len);
+			pr_info("functionfs: strings ret=%zd\n", ret);
 			if (unlikely(ret < 0))
 				break;
 
@@ -468,6 +476,7 @@ static ssize_t ffs_ep0_write(struct file *file, const char __user *buf,
 			mutex_unlock(&ffs->mutex);
 
 			ret = functionfs_ready_callback(ffs);
+			pr_info("functionfs: ready callback ret=%zd\n", ret);
 			if (unlikely(ret < 0)) {
 				ffs->state = FFS_CLOSING;
 				return ret;

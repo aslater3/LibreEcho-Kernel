@@ -37,7 +37,7 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "2e67e3c81d3da2127ee524f1cf9ec49b3ffe4b9f57d4e2102905e835dcbf6290"
+INIT_SHA256 = "673ae243156eb33f642a430cd2a2bf0e59dedf76ce1f46595721edd73edb5df5"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
@@ -679,6 +679,14 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
     ):
         if marker not in control.data:
             fail(f"libreecho-init lacks {marker!r}")
+    adbd_launches = tuple(
+        line.strip() for line in control.data.splitlines()
+        if line.lstrip().startswith(b"/sbin/adbd ")
+    )
+    if adbd_launches != (
+        b"/sbin/adbd --root_seclabel=u:r:su:s0 --device_banner=device </dev/null >/tmp/adbd.log 2>&1 &",
+    ):
+        fail(f"unexpected ARM32 adbd launch contract: {adbd_launches!r}")
     for forbidden in (b"/proc/hps/enabled", b"scaling_governor", b"cpuidle"):
         if forbidden in control.data:
             fail(f"libreecho-init contains forbidden policy override {forbidden!r}")

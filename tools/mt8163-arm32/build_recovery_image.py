@@ -37,7 +37,7 @@ SOURCE_BOOT_SHA256 = "c0f52a3b079d214495cd3dd22f92fd85695d1b868c58b491a2edb933bc
 STOCK_EVT_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57dee1"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 MUSL_LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-RECOVERY_INIT_SHA256 = "2e67e3c81d3da2127ee524f1cf9ec49b3ffe4b9f57d4e2102905e835dcbf6290"
+RECOVERY_INIT_SHA256 = "673ae243156eb33f642a430cd2a2bf0e59dedf76ce1f46595721edd73edb5df5"
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
@@ -570,6 +570,14 @@ def validate_stage(stage: Path) -> None:
     ):
         if marker not in init_script:
             raise SystemExit(f"ERROR: recovery control script lacks {marker!r}")
+    adbd_launches = tuple(
+        line.strip() for line in init_script.splitlines()
+        if line.lstrip().startswith(b"/sbin/adbd ")
+    )
+    if adbd_launches != (
+        b"/sbin/adbd --root_seclabel=u:r:su:s0 --device_banner=device </dev/null >/tmp/adbd.log 2>&1 &",
+    ):
+        raise SystemExit(f"ERROR: unexpected ARM32 adbd launch contract: {adbd_launches!r}")
     for forbidden in (b"/proc/hps/enabled", b"scaling_governor", b"cpuidle"):
         if forbidden in init_script:
             raise SystemExit(f"ERROR: recovery control script contains forbidden policy override {forbidden!r}")

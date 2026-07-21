@@ -10,6 +10,30 @@ umask 022
 $BB mkdir -p /dev/pts /dev/usb-ffs/adb /dev/socket /proc /sys /tmp
 $BB chmod 0777 /tmp
 
+# Create /dev/null before the first stderr redirection.  If it is absent, a
+# shell `2>/dev/null` creates a regular file; a later mknod then fails with
+# EEXIST.  Replace any non-character placeholder before creating each node.
+ensure_chr()
+{
+	path=$1
+	major=$2
+	minor=$3
+	if [ ! -c "$path" ]; then
+		$BB rm -f "$path"
+		$BB mknod "$path" c "$major" "$minor"
+	fi
+}
+ensure_chr /dev/null 1 3
+ensure_chr /dev/zero 1 5
+ensure_chr /dev/full 1 7
+ensure_chr /dev/random 1 8
+ensure_chr /dev/urandom 1 9
+ensure_chr /dev/console 5 1
+ensure_chr /dev/ptmx 5 2
+$BB chmod 0666 /dev/null /dev/zero /dev/full /dev/random /dev/urandom
+$BB chmod 0600 /dev/console
+$BB chmod 0666 /dev/ptmx
+
 # Android init normally mounts these before parsing init.rc.  Keep the script
 # usable in a reduced recovery environment without mounting over /dev, because
 # doing so would hide Android's property area and break adbd.
@@ -19,8 +43,12 @@ $BB grep -q ' /dev/pts ' /proc/mounts 2>/dev/null || $BB mount -t devpts devpts 
 
 log()
 {
-    printf '%s\n' "$*" >> /tmp/init.log
-    printf 'libreecho-init: %s\n' "$*" > /dev/kmsg 2>/dev/null
+	msg="libreecho-init: $*"
+	printf '%s\n' "$*" >> /tmp/init.log
+	# Explicit priority keeps these diagnostics visible on the UART even when
+	# the old /dev/kmsg writer does not default to INFO.
+	printf '<6>%s\n' "$msg" > /dev/kmsg 2>/dev/null
+	printf '%s\n' "$msg" > /dev/console 2>/dev/null
 }
 
 log init-started
@@ -120,21 +148,100 @@ if [ -d "$USB" ]; then
     echo 18D1 > "$USB/idVendor" 2>/dev/null
     echo D001 > "$USB/idProduct" 2>/dev/null
     echo adb > "$USB/f_ffs/aliases" 2>/dev/null
-    echo rndis,adb > "$USB/functions" 2>/dev/null
+	# Isolate the FunctionFS/ADB path first.  RNDIS is an independent composite
+	# function and a bind failure there can hide a healthy ADB transport.
+	echo adb > "$USB/functions" 2>/dev/null
     echo LibreEcho > "$USB/iManufacturer" 2>/dev/null
     echo MT8163-ARM32-recovery > "$USB/iProduct" 2>/dev/null
     serial=$($BB sed -n 's/.*androidboot.serialno=\([^ ]*\).*/\1/p' /proc/cmdline)
     echo "${serial:-G2A0RF0485020316}" > "$USB/iSerial" 2>/dev/null
     log android-ffs-composition-set
 
-    if $BB mount -t functionfs adb /dev/usb-ffs/adb -o uid=2000,gid=2000 2>/tmp/functionfs.log; then
-        log functionfs-mounted
-        /sbin/adbd --root_seclabel=u:r:su:s0 --device_banner=device > /tmp/adbd.log 2>&1 &
-        adbd_pid=$!
-        log "adbd-started:$adbd_pid"
-        $BB sleep 3
-        echo 1 > "$USB/enable" 2>/dev/null
-        log android-usb-enabled
+	if $BB mount -t functionfs -o uid=2000,gid=2000 adb /dev/usb-ffs/adb 2>/tmp/functionfs.log; then
+		log functionfs-mounted
+
+		# v97-proven ordering: start adbd FIRST so it writes its FunctionFS
+		# descriptors to /dev/usb-ffs/adb/ep0, THEN enable the gadget.
+		# android.c holds an extra disable_depth reference until FunctionFS
+		# publishes descriptors; enabling before adbd runs leaves the gadget
+		# disconnected forever and adbd exits immediately.
+
+		# Diagnose adbd launchability before starting it.
+		if [ ! -x /sbin/adbd ]; then
+			log adbd-binary-missing-or-not-executable
+		fi
+		# Log the ELF interpreter the binary expects.
+		interp=$($BB head -c 512 /sbin/adbd 2>/dev/null | $BB strings 2>/dev/null | $BB grep -m1 '/.*linker' 2>/dev/null)
+		[ -n "$interp" ] && log "adbd-interp:$interp"
+		[ -n "$interp" ] && [ ! -e "$interp" ] && log "adbd-interp-missing:$interp"
+		# Log available shared library paths.
+		for libdir in /system/lib /system/bin /sbin /lib; do
+			[ -d "$libdir" ] && log "libdir:$libdir:$($BB ls "$libdir" 2>/dev/null | $BB head -5 | $BB tr '\n' ',')"
+		done
+
+		/sbin/adbd --root_seclabel=u:r:su:s0 --device_banner=device </dev/null >/tmp/adbd.log 2>&1 &
+		adbd_pid=$!
+		log "adbd-started:$adbd_pid"
+
+		# Give adbd time to open the FunctionFS endpoint and write descriptors.
+		$BB sleep 3
+
+		# Capture exit status if adbd died during the sleep.
+		if ! $BB kill -0 "$adbd_pid" 2>/dev/null; then
+			wait "$adbd_pid" 2>/dev/null
+			log "adbd-exit-status:$?"
+			[ -s /tmp/adbd.log ] && $BB sed 's/^/<3>adbd-log: /' /tmp/adbd.log > /dev/kmsg 2>/dev/null
+			# Check kernel log for segfaults or signals.
+			$BB dmesg 2>/dev/null | $BB grep -i "adbd\|segfault\|sig\|killed" | $BB tail -5 | $BB sed 's/^/<3>kern: /' > /dev/kmsg 2>/dev/null
+			# Check if ep0 exists and is accessible.
+			[ -e /dev/usb-ffs/adb/ep0 ] && log "ep0-exists:yes" || log "ep0-exists:no"
+			$BB ls -la /dev/usb-ffs/adb/ 2>/dev/null | $BB head -5 | $BB sed 's/^/<3>ffs-ls: /' > /dev/kmsg 2>/dev/null
+			# Try running adbd in foreground briefly to capture any output.
+			ADBD_BIN=/sbin/adbd
+			"$ADBD_BIN" --version >/tmp/adbd-version.log 2>&1
+			log "adbd-version-rc:$?"
+			[ -s /tmp/adbd-version.log ] && $BB sed 's/^/<3>adbd-ver: /' /tmp/adbd-version.log > /dev/kmsg 2>/dev/null
+			# Check if /dev/null and /dev/zero exist (adbd needs them).
+			[ -c /dev/null ] && log "dev-null:ok" || log "dev-null:missing"
+			[ -c /dev/zero ] && log "dev-zero:ok" || log "dev-zero:missing"
+		fi
+
+		if echo 1 > "$USB/enable" 2>/tmp/android-usb-enable.err; then
+			log android-usb-enabled
+		else
+			log android-usb-enable-write-failed
+		fi
+
+		# Verify the daemon survived and FunctionFS endpoints appeared.
+		ffs_ready=0
+		i=0
+		while [ "$i" -lt 10 ]; do
+			if [ -e /dev/usb-ffs/adb/ep1 ] && [ -e /dev/usb-ffs/adb/ep2 ]; then
+				ffs_ready=1
+				break
+			fi
+			if ! $BB kill -0 "$adbd_pid" 2>/dev/null; then
+				log adbd-exited-early
+				if [ -s /tmp/adbd.log ]; then
+					$BB sed 's/^/<3>adbd: /' /tmp/adbd.log > /dev/kmsg 2>/dev/null
+				fi
+				break
+			fi
+			$BB sleep 1
+			i=$((i + 1))
+		done
+
+		if [ "$ffs_ready" -eq 1 ]; then
+			log functionfs-ready
+		else
+			log functionfs-not-ready
+			if [ -s /tmp/adbd.log ]; then
+				$BB tail -n 8 /tmp/adbd.log | $BB sed 's/^/<3>adbd: /' > /dev/kmsg 2>/dev/null
+			fi
+			if [ -s /tmp/functionfs.log ]; then
+				$BB tail -n 4 /tmp/functionfs.log > /dev/kmsg 2>/dev/null
+			fi
+		fi
     else
         log functionfs-mount-failed
     fi
