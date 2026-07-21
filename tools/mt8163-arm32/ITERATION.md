@@ -48,6 +48,16 @@ compatibility is absent.
 
 ## Workspace and tools
 
+The complete reusable agent procedure is:
+
+```text
+~/.hermes/skills/devops/libreecho-mt8163-iteration/SKILL.md
+```
+
+Use that skill together with this project runbook; it is the maintained checklist
+for live-candidate discovery, build/flash gates, bounded WMT tests, and autonomous
+reboot recovery.
+
 ```text
 Project root: /home/andy/workspace/mt8163-arm32-wifi-candidate
 Kernel:       LibreEcho-Kernel/

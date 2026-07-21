@@ -191,6 +191,26 @@ class PolicyTests(unittest.TestCase):
         }
         verifier.validate_no_connectivity_autostart(entries)
 
+    def test_wifi_activation_is_deferred_until_adb_ready(self) -> None:
+        source = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
+        self.assertLess(
+            source.index("log init-ready-pid1-managed"),
+            source.index("start_wifi_network &"),
+        )
+        self.assertIn("wifi-network-worker-started-after-adb", source)
+        self.assertIn("reboot-supervisor-started", source)
+        self.assertIn("/tmp/reboot.request", source)
+        self.assertIn("runme-timeout", source)
+        self.assertIn("/tmp/runme.cancel", source)
+        self.assertIn("wmt_stock_compat", source)
+        self.assertIn("--no-function-on", source)
+        self.assertIn("--ok --once", source)
+        self.assertIn("pidof wmt_launcher", source)
+        self.assertIn("timeout 30", source)
+        self.assertIn("/sbin/libreecho-wifi", source)
+        self.assertIn("/etc/udhcpc.script", (TOOLS_DIR / "initramfs/libreecho-wifi").read_text())
+        self.assertNotIn("/system/vendor/bin/wmt_loader >/tmp/wifi-wmt-loader.log", source)
+
     def test_schema2_disabled_record_is_exact(self) -> None:
         record = {
             "id": verifier.CONNECTIVITY_BUNDLE_ID,

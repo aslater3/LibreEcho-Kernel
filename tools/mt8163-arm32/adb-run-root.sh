@@ -66,4 +66,6 @@ while ((SECONDS < deadline)); do
 done
 
 echo "ERROR: timed out after ${timeout}s waiting for root result" >&2
+printf 'cancel\n' > "$work/cancel"
+"$adb_bin" -s "$serial" push "$work/cancel" /tmp/runme.cancel >/dev/null 2>&1 || true
 exit 124

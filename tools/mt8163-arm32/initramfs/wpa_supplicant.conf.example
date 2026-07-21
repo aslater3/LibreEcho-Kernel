@@ -1,0 +1,10 @@
+# Credential-free template. Copy to /etc/wifi/wpa_supplicant.conf and fill in
+# the SSID/PSK, or provide a profile to pipeline/build.sh with --wifi-config.
+ctrl_interface=/tmp/wpa_ctrl
+update_config=0
+country=GB
+network={
+    ssid="CHANGE_ME"
+    psk="CHANGE_ME"
+    key_mgmt=WPA-PSK
+}

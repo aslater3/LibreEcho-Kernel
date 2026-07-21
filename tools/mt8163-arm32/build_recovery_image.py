@@ -37,12 +37,13 @@ SOURCE_BOOT_SHA256 = "c0f52a3b079d214495cd3dd22f92fd85695d1b868c58b491a2edb933bc
 STOCK_EVT_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57dee1"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 MUSL_LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-RECOVERY_INIT_SHA256 = "673ae243156eb33f642a430cd2a2bf0e59dedf76ce1f46595721edd73edb5df5"
+RECOVERY_INIT_SHA256 = "68d6217b37f28081b80fbbba0d880c383bf0ac0077135ad5b1d66a66e82f40ee"
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
 CONNECTIVITY_STOCK_SYSTEM_SHA256 = "56540b3a9ac4437901a5510d9fb5e09b1a8d0cc229548f0b08bb5c22d78684fe"
 CONNECTIVITY_EVIDENCE_MANIFEST_SHA256 = "d1eedd04efe0dbc78853f2b0f9357c092b4ca66242648908c0369956538441eb"
+WPA_SUPPLICANT_VERSION = "2.10"
 
 STOCK_FILES = {
     "sbin/adbd": (0o750, "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"),
@@ -148,6 +149,14 @@ CONNECTIVITY_HELPERS = {
     "sbin/wmt_bt_on": (
         "wmt_bt_on", 424540,
         "4365c1b1046bf2ce1045a3fbd4578ee21d8f1a9900a01cb0cde9cea478821d82",
+    ),
+    "sbin/wmt_stock_compat": (
+        "wmt_stock_compat", 341184,
+        "5be9b801153c79f85260b193c57a5ba5c4155f9fccbad47a794e9445e94d654c",
+    ),
+    "sbin/wmt_launcher": (
+        "wmt_launcher", 428912,
+        "6e65e46536bfea0b44f0887998a4d556338250d42609e13fbe6d7833a08187c3",
     ),
 }
 
@@ -422,7 +431,7 @@ def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
                 qemu_arm: str, manifest: dict[str, object]) -> None:
     directories = (
         "bin", "dev", "dev/pts", "dev/socket", "dev/usb-ffs", "dev/usb-ffs/adb",
-        "lib", "lib/firmware", "proc", "sbin", "sys", "system", "system/bin", "tmp",
+        "etc", "etc/wifi", "lib", "lib/firmware", "proc", "sbin", "sys", "system", "system/bin", "tmp",
     )
     for directory in directories:
         target = stage / directory
@@ -430,15 +439,21 @@ def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
         target.chmod(0o777 if directory == "tmp" else 0o755)
 
     overlay_files = {
-        "default.prop": 0o644,
-        "init.rc": 0o644,
-        "init.recovery.mt8163.rc": 0o644,
-        "libreecho-init": 0o755,
+        "default.prop": ("default.prop", 0o644),
+        "init.rc": ("init.rc", 0o644),
+        "init.recovery.mt8163.rc": ("init.recovery.mt8163.rc", 0o644),
+        "libreecho-init": ("libreecho-init", 0o755),
+        "libreecho-wifi": ("sbin/libreecho-wifi", 0o755),
+        "udhcpc.script": ("etc/udhcpc.script", 0o755),
+        "wpa_supplicant.conf.example": (
+            "etc/wifi/wpa_supplicant.conf.example", 0o600,
+        ),
     }
     overlay_manifest: dict[str, object] = {}
-    for relative, mode in overlay_files.items():
+    for relative, (target_relative, mode) in overlay_files.items():
         data = read(overlay / relative)
-        target = stage / relative
+        target = stage / target_relative
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         target.chmod(mode)
         overlay_manifest[relative] = {"sha256": sha256(data), "size": len(data), "mode": f"{mode:04o}"}
@@ -498,6 +513,49 @@ def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
     manifest["musl_loader"] = {"sha256": MUSL_LOADER_SHA256, "size": len(loader_data)}
     manifest["symlinks"] = fixed_links
     manifest["busybox_applets"] = {"count": len(applets), "names": applets}
+
+
+def add_network_bundle(stage: Path, wpa_supplicant: Path, wifi_config: Path,
+                       manifest: dict[str, object]) -> None:
+    """Add the verified static WPA client and a build-local Wi-Fi profile."""
+    if wpa_supplicant.is_symlink() or not wpa_supplicant.is_file():
+        raise SystemExit(f"ERROR: wpa_supplicant is not a regular file: {wpa_supplicant}")
+    if wifi_config.is_symlink() or not wifi_config.is_file():
+        raise SystemExit(f"ERROR: Wi-Fi profile is not a regular file: {wifi_config}")
+    wpa_data = read(wpa_supplicant)
+    config_data = read(wifi_config)
+    target = stage / "sbin/wpa_supplicant"
+    if target.exists() or target.is_symlink():
+        raise SystemExit(f"ERROR: network asset collides with {target}")
+    target.write_bytes(wpa_data)
+    target.chmod(0o755)
+    elf = require_elf_contract(target, 0x05000400, None, (), False)
+    if b"wpa_supplicant v2.10" not in wpa_data:
+        raise SystemExit("ERROR: static wpa_supplicant does not identify as v2.10")
+    if b"CHANGE_ME" in config_data:
+        raise SystemExit("ERROR: refusing to package the unconfigured Wi-Fi profile template")
+    config_target = stage / "etc/wifi/wpa_supplicant.conf"
+    config_target.write_bytes(config_data)
+    config_target.chmod(0o600)
+    manifest["network"] = {
+        "enabled": True,
+        "activation": "automatic-after-adb-if-profile-present",
+        "wpa_supplicant": {
+            "version": WPA_SUPPLICANT_VERSION,
+            "sha256": sha256(wpa_data),
+            "size": len(wpa_data),
+            "mode": "0755",
+            "elf": elf,
+        },
+        "wifi_profile": {
+            "sha256": sha256(config_data),
+            "size": len(config_data),
+            "mode": "0600",
+            "secret_content_not_recorded": True,
+        },
+        "dhcp": "busybox-udhcpc",
+        "dhcp_hook": "/etc/udhcpc.script",
+    }
 
 
 def validate_stage(stage: Path) -> None:
@@ -600,9 +658,10 @@ def validate_stage(stage: Path) -> None:
     )
     for relative in active_controls:
         control = read(stage / relative)
-        for forbidden in forbidden_launches + forbidden_wifi_writes:
-            if forbidden in control:
-                raise SystemExit(f"ERROR: active recovery control {relative} contains {forbidden!r}")
+        forbidden = () if relative == "libreecho-init" else forbidden_launches + forbidden_wifi_writes
+        for marker in forbidden:
+            if marker in control:
+                raise SystemExit(f"ERROR: active recovery control {relative} contains {marker!r}")
         for line in control.splitlines():
             fields = line.split()
             if len(fields) >= 2 and fields[:2] == [b"write", b"/dev/wmtWifi"]:
@@ -802,6 +861,14 @@ def main() -> None:
                         help="reviewed static ARM32 Gate2 WMT responder")
     parser.add_argument("--wmt-bt-on", type=Path,
                         help="reviewed static ARM32 one-shot BT-only helper")
+    parser.add_argument("--wmt-stock-compat", type=Path,
+                        help="proven ARM32 stock-compatible configure-only helper")
+    parser.add_argument("--wmt-launcher", type=Path,
+                        help="proven ARM32 one-shot WMT command responder")
+    parser.add_argument("--wpa-supplicant", type=Path,
+                        help="static ARM32 wpa_supplicant 2.10 client")
+    parser.add_argument("--wifi-config", type=Path,
+                        help="build-local WPA profile; never committed to source")
     parser.add_argument("--qemu-arm", default="qemu-arm-static",
                         help="user-mode ARM emulator used to inventory pinned BusyBox applets")
     parser.add_argument("--zimage", type=Path, required=True)
@@ -822,6 +889,8 @@ def main() -> None:
         "wmt_config_helper": args.wmt_config_helper,
         "wmt_responder": args.wmt_responder,
         "wmt_bt_on": args.wmt_bt_on,
+        "wmt_stock_compat": args.wmt_stock_compat,
+        "wmt_launcher": args.wmt_launcher,
     }
     connectivity_enabled = all(value is not None for value in connectivity_options.values())
     if any(value is not None for value in connectivity_options.values()) and not connectivity_enabled:
@@ -832,6 +901,14 @@ def main() -> None:
         raise SystemExit(f"ERROR: connectivity bundle is all-or-nothing; missing {missing}")
     if connectivity_enabled and not CONNECTIVITY_HELPERS:
         raise SystemExit("ERROR: connectivity helper identities have not been pinned")
+    network_options = {"wpa_supplicant": args.wpa_supplicant, "wifi_config": args.wifi_config}
+    network_enabled = all(value is not None for value in network_options.values())
+    if any(value is not None for value in network_options.values()) and not network_enabled:
+        missing = ", ".join(
+            "--" + name.replace("_", "-")
+            for name, value in network_options.items() if value is None
+        )
+        raise SystemExit(f"ERROR: network stack is all-or-nothing; missing {missing}")
 
     source = read(args.source_boot)
     require_hash("source boot envelope", source, SOURCE_BOOT_SHA256)
@@ -876,6 +953,10 @@ def main() -> None:
             "helpers": {},
             "symlinks": {},
         },
+        "network": {
+            "enabled": False,
+            "activation": "passive-until-profile-is-supplied",
+        },
     }
     overlay = Path(__file__).resolve().parent / "initramfs"
     with tempfile.TemporaryDirectory(prefix="libreecho-arm32-initramfs-") as temporary:
@@ -892,8 +973,14 @@ def main() -> None:
                     "wmt_config_helper": args.wmt_config_helper.absolute(),
                     "wmt_responder": args.wmt_responder.absolute(),
                     "wmt_bt_on": args.wmt_bt_on.absolute(),
+                    "wmt_stock_compat": args.wmt_stock_compat.absolute(),
+                    "wmt_launcher": args.wmt_launcher.absolute(),
                 },
                 manifest,
+            )
+        if network_enabled:
+            add_network_bundle(
+                stage, args.wpa_supplicant.resolve(), args.wifi_config.resolve(), manifest,
             )
         validate_stage(stage)
         cpio = build_cpio(stage, 0)

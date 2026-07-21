@@ -113,6 +113,46 @@ while [ "$marker_written" -eq 0 ]; do
 done
 log fastboot-please-written
 
+# Independent recovery supervisor.  This loop is intentionally separate from
+# runme_loop: a blocked experiment must never prevent an operator or host
+# harness from requesting a controlled reboot into fastboot.
+reboot_request_loop()
+{
+    while true; do
+        if [ -f /tmp/reboot.request ]; then
+            request=$($BB cat /tmp/reboot.request 2>/dev/null)
+            $BB rm -f /tmp/reboot.request
+            case "$request" in
+                fastboot)
+                    log reboot-request-fastboot-accepted
+                    if printf FASTBOOT_PLEASE > "$EXPDB" 2>/tmp/reboot-marker.err; then
+                        $BB sync
+                        marker=$($BB dd if="$EXPDB" bs=15 count=1 2>/dev/null)
+                        if [ "$marker" = FASTBOOT_PLEASE ]; then
+                            log reboot-request-marker-verified
+                            $BB reboot -f
+                        else
+                            log reboot-request-marker-readback-failed
+                        fi
+                    else
+                        log reboot-request-marker-write-failed
+                    fi
+                    ;;
+                reboot)
+                    log reboot-request-reboot-accepted
+                    $BB reboot -f
+                    ;;
+                *)
+                    log reboot-request-rejected
+                    ;;
+            esac
+        fi
+        $BB sleep 1
+    done
+}
+reboot_request_loop &
+log reboot-supervisor-started
+
 # Stable MediaTek connectivity aliases.  btif is dynamically allocated and is
 # intentionally left to devtmpfs/ueventd.
 [ -c /dev/wmtWifi ] || $BB mknod /dev/wmtWifi c 153 0 2>/dev/null
@@ -123,14 +163,102 @@ log fastboot-please-written
 $BB chmod 0666 /dev/wmtWifi /dev/wmtdetect /dev/stpwmt /dev/stpbt 2>/dev/null
 log wmt-nodes-created
 
-# Preserve v97's root command loop.  Wi-Fi activation is staged through this
-# hook after ADB parity; it must not make PID 1 or recovery depend on WLAN.
+# The network stack is build-time opt-in: images without a supplied Wi-Fi
+# profile remain passive, while a profile-bearing image performs exactly one
+# bounded WMT activation and then starts the verified ARM32 client stack.
+start_wifi_network()
+{
+    [ -r /etc/wifi/wpa_supplicant.conf ] || { log wifi-profile-absent; return 0; }
+    log wifi-profile-present
+    # This is the proven manual choreography from session e8c21eb3bbae:
+    # stock-compatible configure-only init, stale-launcher cleanup, exactly one
+    # one-shot command responder, then one timed Wi-Fi function-on write.  Do
+    # not substitute the stock wmt_loader here; that path exits 255 on this
+    # image before creating wlan0.
+    /sbin/wmt_stock_compat --device /dev/wmt --firmware-dir /lib/firmware \
+        --no-function-on >/tmp/wifi-wmt-configure.log 2>&1 || {
+        log wifi-stock-compat-failed
+        return 1
+    }
+    stale=$($BB pidof wmt_launcher 2>/dev/null)
+    if [ -n "$stale" ]; then
+        $BB kill -9 $stale 2>/dev/null
+        $BB sleep 1
+    fi
+    stale_after=$($BB pidof wmt_launcher 2>/dev/null)
+    [ -z "$stale_after" ] || { log wifi-stale-launcher-remains; return 1; }
+    /sbin/wmt_launcher --device /dev/wmt --ok --once \
+        >/tmp/wifi-wmt-responder.log 2>&1 &
+    responder_pid=$!
+    $BB sleep 1
+    responder_count=$($BB pidof wmt_launcher 2>/dev/null | $BB wc -w)
+    [ "$responder_count" -eq 1 ] || {
+        log wifi-launcher-count-failed
+        return 1
+    }
+    log wifi-launcher-ready
+    $BB timeout 30 /bin/busybox sh -c "printf '1' > /dev/wmtWifi" \
+        >/tmp/wifi-function-on.log 2>&1
+    wifi_on_rc=$?
+    log "wifi-function-on-rc:$wifi_on_rc"
+    wait "$responder_pid" 2>/dev/null
+    [ "$wifi_on_rc" -eq 0 ] || { log wifi-function-on-failed; return "$wifi_on_rc"; }
+    i=0
+    while [ "$i" -lt 30 ] && [ ! -e /sys/class/net/wlan0 ]; do
+        $BB sleep 1
+        i=$((i + 1))
+    done
+    [ -e /sys/class/net/wlan0 ] || { log wlan0-registration-timeout; return 1; }
+    /sbin/libreecho-wifi start >/tmp/wifi-client.log 2>&1
+    client_rc=$?
+    log "wifi-client-rc:$client_rc"
+    return "$client_rc"
+}
+log wifi-network-worker-deferred
+
+# Preserve v97's root command loop, but never let one experiment monopolize
+# the control plane.  A request is atomically claimed as runme.active, then
+# executed under a hard timeout with a separate cancellation poller.  The
+# reboot supervisor above remains independent even while this child is stuck.
+RUNME_TIMEOUT=${LIBREECHO_RUNME_TIMEOUT:-120}
 runme_loop()
 {
     while true; do
-        if [ -f /tmp/runme ]; then
-            /bin/busybox sh /tmp/runme > /tmp/result 2>&1
-            $BB rm -f /tmp/runme
+        if [ -f /tmp/runme ] && [ ! -e /tmp/runme.active ]; then
+            $BB mv /tmp/runme /tmp/runme.active
+            $BB rm -f /tmp/runme.cancel
+            printf 'LIBREECHO_RUNME_STARTED\n' > /tmp/runme.status
+            $BB setsid $BB timeout -k 2 "$RUNME_TIMEOUT" /bin/busybox sh /tmp/runme.active > /tmp/result 2>&1 &
+            runme_pid=$!
+            cancelled=0
+            while $BB kill -0 "$runme_pid" 2>/dev/null; do
+                if [ -f /tmp/runme.cancel ]; then
+                    cancelled=1
+                    $BB rm -f /tmp/runme.cancel
+                    log runme-cancel-requested
+                    $BB kill -TERM -- "-$runme_pid" 2>/dev/null
+                    $BB sleep 1
+                    $BB kill -KILL -- "-$runme_pid" 2>/dev/null
+                    break
+                fi
+                $BB sleep 1
+            done
+            wait "$runme_pid" 2>/dev/null
+            runme_rc=$?
+            if [ "$cancelled" -eq 1 ]; then
+                runme_rc=125
+                printf 'LIBREECHO_RUNME_CANCELLED\n' >> /tmp/result
+                printf 'LIBREECHO_RUNME_CANCELLED\n' > /tmp/runme.status
+            elif [ "$runme_rc" -eq 124 ]; then
+                $BB kill -KILL -- "-$runme_pid" 2>/dev/null
+                printf 'LIBREECHO_RUNME_TIMEOUT=%s\n' "$RUNME_TIMEOUT" >> /tmp/result
+                printf 'LIBREECHO_RUNME_TIMEOUT=%s\n' "$RUNME_TIMEOUT" > /tmp/runme.status
+                log runme-timeout
+            else
+                printf 'LIBREECHO_RUNME_RC=%s\n' "$runme_rc" >> /tmp/result
+                printf 'LIBREECHO_RUNME_RC=%s\n' "$runme_rc" > /tmp/runme.status
+            fi
+            $BB rm -f /tmp/runme.active
         fi
         $BB sleep 1
     done
@@ -250,6 +378,17 @@ else
 fi
 
 log init-ready-pid1-managed
+
+# Connectivity is deliberately launched only after the ADB/FunctionFS control
+# plane is ready.  A profile-bearing development image performs one bounded
+# Wi-Fi activation; a failed activation is recorded but never takes PID 1 or
+# the recovery runner down.
+if [ "${ffs_ready:-0}" -eq 1 ]; then
+    start_wifi_network &
+    log wifi-network-worker-started-after-adb
+else
+    log wifi-network-skipped-adb-not-ready
+fi
 
 # Android init remains PID 1.  Keep this service alive so the runme loop and
 # recovery diagnostics survive optional driver failures.

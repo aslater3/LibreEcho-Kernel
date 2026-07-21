@@ -11,6 +11,7 @@ import stat
 import struct
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 
 ANDROID_MAGIC = b"ANDROID!"
@@ -37,7 +38,7 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "673ae243156eb33f642a430cd2a2bf0e59dedf76ce1f46595721edd73edb5df5"
+INIT_SHA256 = "68d6217b37f28081b80fbbba0d880c383bf0ac0077135ad5b1d66a66e82f40ee"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
@@ -123,6 +124,12 @@ CONNECTIVITY_HELPERS = {
     ),
     "sbin/wmt_bt_on": (
         424540, "4365c1b1046bf2ce1045a3fbd4578ee21d8f1a9900a01cb0cde9cea478821d82",
+    ),
+    "sbin/wmt_stock_compat": (
+        341184, "5be9b801153c79f85260b193c57a5ba5c4155f9fccbad47a794e9445e94d654c",
+    ),
+    "sbin/wmt_launcher": (
+        428912, "6e65e46536bfea0b44f0887998a4d556338250d42609e13fbe6d7833a08187c3",
     ),
 }
 
@@ -430,9 +437,10 @@ def validate_no_connectivity_autostart(entries: dict[str, Entry]) -> None:
     )
     for name in active_controls:
         control = entries[name].data
-        for forbidden in forbidden_launches + forbidden_wifi_writes:
-            if forbidden in control:
-                fail(f"active recovery control {name} contains {forbidden!r}")
+        forbidden = () if name == "libreecho-init" else forbidden_launches + forbidden_wifi_writes
+        for marker in forbidden:
+            if marker in control:
+                fail(f"active recovery control {name} contains {marker!r}")
         for line in control.splitlines():
             fields = line.split()
             if len(fields) >= 2 and fields[:2] == [b"write", b"/dev/wmtWifi"]:
@@ -606,6 +614,43 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
     validate_archive_tree(entries)
     validate_symlinks(entries)
     validate_no_connectivity_autostart(entries)
+    network = manifest.get("network", {"enabled": False})
+    if not isinstance(network, dict) or not isinstance(network.get("enabled"), bool):
+        fail("network manifest record is malformed")
+    network = cast(dict[str, object], network)
+    network_names = {"sbin/wpa_supplicant", "etc/wifi/wpa_supplicant.conf"}
+    if network.get("enabled"):
+        if network.get("activation") != "automatic-after-adb-if-profile-present":
+            fail("network activation policy changed")
+        raw_wpa_record = network.get("wpa_supplicant")
+        raw_profile_record = network.get("wifi_profile")
+        if not isinstance(raw_wpa_record, dict) or not isinstance(raw_profile_record, dict):
+            fail("network asset manifest is incomplete")
+        wpa_record = cast(dict[str, object], raw_wpa_record)
+        profile_record = cast(dict[str, object], raw_profile_record)
+        wpa_hash_value = wpa_record.get("sha256")
+        profile_hash_value = profile_record.get("sha256")
+        if not isinstance(wpa_hash_value, str) or not isinstance(profile_hash_value, str):
+            fail("network asset hashes are malformed")
+        wpa_hash: str = cast(str, wpa_hash_value)
+        profile_hash: str = cast(str, profile_hash_value)
+        wpa = require_member(entries, "sbin/wpa_supplicant", wpa_hash, 0o755)
+        if elf_info(wpa.data) != (1, 40, 0x05000400, None, (), False):
+            fail("wpa_supplicant is not static ARM32 hard-float")
+        profile = require_member(entries, "etc/wifi/wpa_supplicant.conf", profile_hash, 0o600)
+        if b"CHANGE_ME" in profile.data:
+            fail("configured network image contains the profile template")
+        for required in (
+            "sbin/libreecho-wifi",
+            "etc/udhcpc.script",
+            "etc/wifi/wpa_supplicant.conf.example",
+        ):
+            if required not in entries:
+                fail(f"network stack member missing: {required}")
+    else:
+        unexpected = sorted(name for name in network_names if name in entries)
+        if unexpected:
+            fail(f"network stack is disabled but members are present: {unexpected}")
     if sha256(cpio) != manifest["initramfs"]["cpio_sha256"]:
         fail("manifest cpio hash mismatch")
     if any(entry.uid or entry.gid or entry.mtime for entry in entries.values()):
@@ -843,12 +888,17 @@ def main() -> None:
             "connectivity bundle expectation mismatch: "
             f"expected={args.expected_connectivity_bundle} actual={actual}"
         )
+    network_record = manifest.get("network", {})
+    network_activation = (
+        network_record.get("activation", "passive")
+        if isinstance(network_record, dict) else "passive"
+    )
     print(
         "arm32_recovery_image_contract=PASS android_v0=yes mtk_wrapper=yes "
         "zimage=yes evt_dtb=yes initramfs_arm32=yes fastboot_marker=yes "
         "root_adb_staged=yes runme=yes memory_disjoint=yes "
         f"connectivity_bundle={'yes' if connectivity_enabled else 'no'} "
-        "activation=manual-only status=PREPARED_NOT_FLASHED"
+        f"network_activation={network_activation} status=PREPARED_NOT_FLASHED"
     )
 
 

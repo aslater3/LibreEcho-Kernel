@@ -164,7 +164,36 @@ Supply that output to the recovery builder with both `--dtb` and
 first prove recovery/ADB stability, then CONSYS and BT-only stability, and only
 then attempt one bounded Wi-Fi function-on operation.
 
-## Staged connectivity bundle
+The recovery image can now be built as a stable network-stack iteration by
+supplying a private WPA profile. The profile is never committed; the generated
+manifest records only its size and SHA-256. The image includes a static ARM32
+`wpa_supplicant` 2.10, `libreecho-wifi`, and the BusyBox `udhcpc` lease hook.
+When `/etc/wifi/wpa_supplicant.conf` is present, `libreecho-init` waits until
+ADB/FunctionFS reaches `init-ready-pid1-managed`, then performs the proven
+manual sequence recovered from session `e8c21eb3bbae`:
+
+```text
+ADB ready -> wmt_stock_compat --no-function-on
+-> remove stale wmt_launcher processes
+-> one wmt_launcher --device /dev/wmt --ok --once
+-> one timed /dev/wmtWifi=1 -> wlan0
+-> wpa_supplicant association -> udhcpc -> route/DNS
+```
+
+The automatic path deliberately does **not** invoke the stock
+`/system/vendor/bin/wmt_loader`; that substitution returned 255 before creating
+`wlan0` in the ARM32 image, while the manual path reached association, DHCP
+lease `192.168.0.125/24`, gateway `192.168.0.1`, gateway ping, and external HTTP
+verification. The stock loader and older configure/responder helpers remain
+packaged for separately bounded diagnostic gates.
+
+The current pinned `wpa_supplicant` is station-only; it explicitly reports
+`AP mode support not included in the build`. Therefore this image does not yet
+claim the future default AP/setup-page behavior. That requires a verified ARM32
+`hostapd`/AP-capable wireless control binary plus a DHCP/DNS service and a small
+HTTP setup service. The present profile is a static development station config,
+kept private by the pipeline.
+
 
 Bundle `mt8163-v181-stock-v1` adds the exact v181 Bionic runtime, WMT tools,
 firmware, and three narrow gate helpers to the recovery image.  It does not

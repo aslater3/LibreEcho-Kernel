@@ -31,22 +31,9 @@ state=$("$adb_bin" -s "$serial" get-state 2>/dev/null || true)
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-request="$work/runme"
-cat > "$request" <<'EOF'
-#!/bin/busybox sh
-set -eu
-EXPDB=/dev/mmcblk0p7
-SYS=/sys/class/block/mmcblk0p7
-[ -b "$EXPDB" ]
-grep -qx 'PARTNAME=expdb' "$SYS/uevent"
-[ "$(cat "$SYS/size")" = 20480 ]
-printf FASTBOOT_PLEASE > "$EXPDB"
-sync
-[ "$(dd if="$EXPDB" bs=15 count=1 2>/dev/null)" = FASTBOOT_PLEASE ]
-/sbin/busybox reboot -f
-EOF
-
-"$adb_bin" -s "$serial" push "$request" /tmp/runme >/dev/null
+printf 'fastboot\n' > "$work/reboot.request"
+"$adb_bin" -s "$serial" push "$work/reboot.request" /tmp/reboot.request.new >/dev/null
+"$adb_bin" -s "$serial" shell 'mv /tmp/reboot.request.new /tmp/reboot.request'
 
 deadline=$((SECONDS + timeout))
 while ((SECONDS < deadline)); do
