@@ -126,7 +126,8 @@ The helper:
 3. pushes the script to `/tmp/runme`;
 4. waits for the PID-1-managed root runner;
 5. prints `/tmp/result`; and
-6. returns the remote script's exit status.
+6. returns the remote script's exit status, including scripts that call `exit`
+   directly (the helper uses a remote `EXIT` trap).
 
 The `/tmp/runme` runner is an intentional development facility, not an
 exploit. Use it for module loading, device-node inspection, bounded WMT tests,

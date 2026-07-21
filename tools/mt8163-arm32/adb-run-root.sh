@@ -40,11 +40,10 @@ result="$work/result"
   printf '#!/bin/busybox sh\n'
   printf 'printf "%s\\n" %q\n' "$nonce" "$nonce"
   printf 'set +e\n'
+  printf 'trap '\''rc=$?; printf "LIBREECHO_RUNME_RC=%%s\\n" "$rc"'\'' EXIT\n'
   printf '# ---- user script begins ----\n'
   cat -- "$script"
   printf '\n# ---- user script ends ----\n'
-  printf 'rc=$?\n'
-  printf 'printf "LIBREECHO_RUNME_RC=%%s\\n" "$rc"\n'
 } > "$wrapper"
 
 "$adb_bin" -s "$serial" push "$wrapper" /tmp/runme >/dev/null
