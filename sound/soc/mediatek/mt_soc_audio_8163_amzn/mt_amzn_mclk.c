@@ -1,9 +1,12 @@
 #include <linux/clk.h>
+#include <linux/io.h>
 #include <linux/types.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/of_platform.h>
 #include <linux/of_address.h>
+#include <linux/errno.h>
+#include <asm/div64.h>
 #ifndef CONFIG_MTK_SMI_VARIANT /* Power Domain */
 #include <linux/pm_runtime.h>
 #else
@@ -242,6 +245,8 @@ int mclk_divider_reg(uint64_t freq)
 {
 	uint32_t clkcnt, clkf_pol, clkf_edge;
 	uint32_t clkr_edge = 0, clk_pol = 0, pad_clkinv = 0;
+	uint32_t freq32;
+	u64 divider;
 	int ret;
 
 	/* Load register address first */
@@ -252,7 +257,14 @@ int mclk_divider_reg(uint64_t freq)
 	}
 
 	/* TG1_SEN_CK.CLKCNT = 48M/9.6M -1 = 4 */
-	clkcnt = (uint32_t) ((PLL_FREQ_48_MHZ/freq) - 1);
+	if (!freq || freq > 0xffffffffULL)
+		return -EINVAL;
+	freq32 = (uint32_t)freq;
+	if (freq32 > PLL_FREQ_48_MHZ)
+		return -EINVAL;
+	divider = PLL_FREQ_48_MHZ;
+	do_div(divider, freq32);
+	clkcnt = (uint32_t)(divider - 1);
 
 	clkf_pol = !(clkcnt & 0x1);
 	clkf_edge = clkcnt > 1 ? ((clkcnt + 1) >> 1) : 1;

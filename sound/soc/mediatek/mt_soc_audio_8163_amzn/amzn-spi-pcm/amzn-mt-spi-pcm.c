@@ -318,13 +318,18 @@ static int amzn_mt_spi_pcm_hw_params(struct snd_pcm_substream *ss,
 static int amzn_mt_spi_pcm_new(struct snd_soc_pcm_runtime *rtd)
 {
 	int ret = 0;
+	struct device *dma_dev = rtd->platform->dev;
 
 	pr_info("%s\n", __func__);
+
+	dma_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+	if (!dma_dev->dma_mask)
+		dma_dev->dma_mask = &dma_dev->coherent_dma_mask;
 
 #if !defined SPI_USES_HDMI_BUFFER && !defined SPI_USES_LOCAL_DMA
 	/* Preallocate pages */
 	ret = snd_pcm_lib_preallocate_pages_for_all(rtd->pcm,
-			SNDRV_DMA_TYPE_DEV, rtd->card->dev,
+			SNDRV_DMA_TYPE_DEV, dma_dev,
 			SPI_DMA_BYTES_MAX, SPI_DMA_BYTES_MAX);
 	if (ret < 0)
 		pr_err("%s: Preallocated pages failed\n", __func__);

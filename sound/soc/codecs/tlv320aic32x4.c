@@ -620,11 +620,6 @@ static const struct snd_kcontrol_new hpl_output_mixer_controls[] = {
 	SOC_DAPM_SINGLE("IN1_L Switch", AIC32X4_HPLROUTE, 2, 1, 0),
 };
 
-static const struct snd_kcontrol_new hpr_output_mixer_controls[] = {
-	SOC_DAPM_SINGLE("R_DAC Switch", AIC32X4_HPRROUTE, 3, 1, 0),
-	SOC_DAPM_SINGLE("IN1_R Switch", AIC32X4_HPRROUTE, 2, 1, 0),
-};
-
 static const struct snd_kcontrol_new lol_output_mixer_controls[] = {
 	SOC_DAPM_SINGLE("L_DAC Switch", AIC32X4_LOLROUTE, 3, 1, 0),
 };
@@ -646,7 +641,7 @@ static const struct snd_kcontrol_new right_input_mixer_controls[] = {
 };
 
 static const struct snd_soc_dapm_widget aic32x4_dapm_widgets[] = {
-	SND_SOC_DAPM_DAC("Left DAC", "Left Playback", AIC32X4_DACSETUP, 7, 0),
+	SND_SOC_DAPM_DAC("Left DAC", "Playback", AIC32X4_DACSETUP, 7, 0),
 	SND_SOC_DAPM_MIXER("HPL Output Mixer", SND_SOC_NOPM, 0, 0,
 			   &hpl_output_mixer_controls[0],
 			   ARRAY_SIZE(hpl_output_mixer_controls)),
@@ -657,10 +652,9 @@ static const struct snd_soc_dapm_widget aic32x4_dapm_widgets[] = {
 			   ARRAY_SIZE(lol_output_mixer_controls)),
 	SND_SOC_DAPM_PGA("LOL Power", AIC32X4_OUTPWRCTL, 3, 0, NULL, 0),
 
-	SND_SOC_DAPM_DAC("Right DAC", "Right Playback", AIC32X4_DACSETUP, 6, 0),
-	SND_SOC_DAPM_MIXER("HPR Output Mixer", SND_SOC_NOPM, 0, 0,
-			   &hpr_output_mixer_controls[0],
-			   ARRAY_SIZE(hpr_output_mixer_controls)),
+	SND_SOC_DAPM_DAC("Right DAC", "Playback", AIC32X4_DACSETUP, 6, 0),
+	/* The Echo tweeter is a fixed right-DAC-to-HPR path. */
+	SND_SOC_DAPM_PGA("HPR DAC Route", AIC32X4_HPRROUTE, 3, 0, NULL, 0),
 	SND_SOC_DAPM_PGA("HPR Power", AIC32X4_OUTPWRCTL, 4, 0, NULL, 0),
 	SND_SOC_DAPM_MIXER("LOR Output Mixer", SND_SOC_NOPM, 0, 0,
 			   &lor_output_mixer_controls[0],
@@ -702,10 +696,8 @@ static const struct snd_soc_dapm_route aic32x4_dapm_routes[] = {
 	{"LOL", NULL, "LOL Power"},
 
 	/* Right Output */
-	{"HPR Output Mixer", "R_DAC Switch", "Right DAC"},
-	{"HPR Output Mixer", "IN1_R Switch", "IN1_R"},
-
-	{"HPR Power", NULL, "HPR Output Mixer"},
+	{"HPR DAC Route", NULL, "Right DAC"},
+	{"HPR Power", NULL, "HPR DAC Route"},
 	{"HPR", NULL, "HPR Power"},
 
 	{"LOR Output Mixer", "R_DAC Switch", "Right DAC"},

@@ -51,7 +51,58 @@ log()
 	printf '%s\n' "$msg" > /dev/console 2>/dev/null
 }
 
+create_audio_nodes()
+{
+    nodes=0
+    $BB mkdir -p /dev/snd
+    for sys_sound in /sys/class/sound/*; do
+        [ -r "$sys_sound/dev" ] || continue
+        name=${sys_sound##*/}
+        case "$name" in
+            ''|*/*) continue ;;
+            dsp|mixer|audio|adsp|sequencer|timer) target="/dev/$name" ;;
+            *) target="/dev/snd/$name" ;;
+        esac
+        devno=$($BB cat "$sys_sound/dev" 2>/dev/null)
+        case "$devno" in
+            ''|*[!0-9:]*|*:*:*) continue ;;
+        esac
+        major=${devno%:*}
+        minor=${devno#*:}
+        [ -n "$major" ] && [ -n "$minor" ] || continue
+        if [ ! -e "$target" ]; then
+            $BB mknod "$target" c "$major" "$minor" 2>/dev/null || continue
+        fi
+        [ -c "$target" ] || continue
+        $BB chmod 0660 "$target" 2>/dev/null
+        nodes=$((nodes + 1))
+    done
+    $BB chmod 0755 /dev/snd 2>/dev/null
+    AUDIO_NODES_CREATED=$nodes
+}
+
 log init-started
+
+# Android's reduced ramdisk does not mount devtmpfs over /dev: doing so hides
+# the property area needed by adbd.  Materialize only the ALSA character
+# devices advertised by sysfs instead, with a bounded retry for late probes.
+audio_node_worker()
+{
+    i=0
+    while [ "$i" -lt 20 ]; do
+        create_audio_nodes
+        if [ "${AUDIO_NODES_CREATED:-0}" -gt 0 ]; then
+            log "audio-devnodes-created:$AUDIO_NODES_CREATED"
+            return 0
+        fi
+        $BB sleep 1
+        i=$((i + 1))
+    done
+    log audio-devnodes-timeout
+    return 1
+}
+audio_node_worker &
+log audio-node-worker-started
 
 # The GPT used by Biscuit exposes expdb as Linux partition 7.  Wait for the
 # kernel's block identity, then create direct aliases from sysfs rather than
@@ -378,6 +429,65 @@ else
 fi
 
 log init-ready-pid1-managed
+
+# Play the bring-up confirmation clip only after the normal control plane has
+# reached its ready point.  This is deliberately a bounded background worker:
+# a missing codec node or a failed amplifier must never hold PID 1 or prevent
+# ADB/fastboot recovery.  The numeric controls are the verified IDs from the
+# fixed Amazon AIC32x4 HPR route in this image.
+startup_audio_worker()
+{
+    i=0
+    while [ "$i" -lt 30 ]; do
+        if [ -r /etc/audio/windows95-startup.wav ] &&
+           [ -x /sbin/tinyplay ] && [ -x /sbin/tinymix ] &&
+           [ -c /dev/snd/controlC0 ]; then
+            break
+        fi
+        $BB sleep 1
+        i=$((i + 1))
+    done
+    if [ ! -r /etc/audio/windows95-startup.wav ] ||
+       [ ! -x /sbin/tinyplay ] || [ ! -x /sbin/tinymix ] ||
+       [ ! -c /dev/snd/controlC0 ]; then
+        log audio-startup-skipped
+        return 0
+    fi
+
+    controls_ok=1
+    /sbin/tinymix -D 0 set 61 103 103 || controls_ok=0
+    /sbin/tinymix -D 0 set 62 6 6 || controls_ok=0
+    /sbin/tinymix -D 0 set 63 6 6 || controls_ok=0
+    /sbin/tinymix -D 0 set 64 1 1 || controls_ok=0
+    /sbin/tinymix -D 0 set 65 0 0 || controls_ok=0
+    /sbin/tinymix -D 0 set 233 0 || controls_ok=0
+    /sbin/tinymix -D 0 set 234 0 || controls_ok=0
+    /sbin/tinymix -D 0 set 88 Off || controls_ok=0
+    /sbin/tinymix -D 0 set 5 On || controls_ok=0
+    if [ "$controls_ok" -ne 1 ]; then
+        log audio-startup-controls-failed
+        return 1
+    fi
+    log audio-startup-playback-started
+    /sbin/tinyplay /etc/audio/windows95-startup.wav -D 0 -d 23 -p 1024 -n 2 \
+        >/tmp/audio-startup.log 2>&1
+    playback_rc=$?
+
+    # Return to the safe idle state after the one-shot confirmation sound.
+    /sbin/tinymix -D 0 set 233 0 || true
+    /sbin/tinymix -D 0 set 234 0 || true
+    /sbin/tinymix -D 0 set 65 0 0 || true
+    /sbin/tinymix -D 0 set 64 0 0 || true
+    /sbin/tinymix -D 0 set 61 127 127 || true
+    /sbin/tinymix -D 0 set 62 6 6 || true
+    /sbin/tinymix -D 0 set 63 6 6 || true
+    /sbin/tinymix -D 0 set 5 Off || true
+    /sbin/tinymix -D 0 set 88 On || true
+    log "audio-startup-playback-rc:$playback_rc"
+    return "$playback_rc"
+}
+startup_audio_worker &
+log audio-startup-worker-started
 
 # Connectivity is deliberately launched only after the ADB/FunctionFS control
 # plane is ready.  A profile-bearing development image performs one bounded

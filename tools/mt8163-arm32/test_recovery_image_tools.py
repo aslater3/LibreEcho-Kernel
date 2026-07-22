@@ -138,6 +138,30 @@ class SourceTests(unittest.TestCase):
                 with self.subTest(relative=relative), self.assertRaises(SystemExit):
                     builder.pinned_source(root, relative, "test")
 
+    def test_audio_tools_are_pinned_and_gpu_input_wait_is_interruptible(self) -> None:
+        tools = TOOLS_DIR / "audio-tools"
+        self.assertTrue((tools / "tinyplay").is_file())
+        self.assertTrue((tools / "tinycap").is_file())
+        self.assertTrue((tools / "tinymix").is_file())
+        self.assertIn("--tinyplay", (TOOLS_DIR.parent.parent.parent / "pipeline/build.sh").read_text())
+        self.assertIn("--tinymix", (TOOLS_DIR.parent.parent.parent / "pipeline/build.sh").read_text())
+        gpufreq = (
+            TOOLS_DIR.parent.parent
+            / "drivers/misc/mediatek/base/power/mt8163/mt_gpufreq.c"
+        ).read_text()
+        self.assertIn("wait_event_interruptible(mt_gpufreq_input_boost_wq", gpufreq)
+        self.assertNotIn("set_current_state(TASK_INTERRUPTIBLE)", gpufreq)
+        self.assertIn("wake_up_process(mt_gpufreq_up_task)", gpufreq)
+
+        spi_pcm = (
+            TOOLS_DIR.parent.parent
+            / "sound/soc/mediatek/mt_soc_audio_8163_amzn/amzn-spi-pcm"
+            / "amzn-mt-spi-pcm.c"
+        ).read_text()
+        self.assertIn("struct device *dma_dev = rtd->platform->dev", spi_pcm)
+        self.assertIn("dma_dev->coherent_dma_mask = DMA_BIT_MASK(64)", spi_pcm)
+        self.assertIn("SNDRV_DMA_TYPE_DEV, dma_dev", spi_pcm)
+
 
 class PatchRouteContractTests(unittest.TestCase):
     def test_stock_route_contract_is_shared_and_decodes_exactly(self) -> None:

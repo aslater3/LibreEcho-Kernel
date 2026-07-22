@@ -37,7 +37,7 @@ SOURCE_BOOT_SHA256 = "c0f52a3b079d214495cd3dd22f92fd85695d1b868c58b491a2edb933bc
 STOCK_EVT_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57dee1"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 MUSL_LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-RECOVERY_INIT_SHA256 = "68d6217b37f28081b80fbbba0d880c383bf0ac0077135ad5b1d66a66e82f40ee"
+RECOVERY_INIT_SHA256 = "362b88597c4199aa734b3db98f2f4e7593069cd75f52b13ab5333c2599f6c5f5"
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
@@ -515,6 +515,112 @@ def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
     manifest["busybox_applets"] = {"count": len(applets), "names": applets}
 
 
+def add_audio_probe(stage: Path, audio_probe: Path,
+                    manifest: dict[str, object]) -> None:
+    """Install the dependency-free ARM32 ALSA capability probe."""
+    if audio_probe.is_symlink() or not audio_probe.is_file():
+        raise SystemExit(f"ERROR: audio probe is not a regular file: {audio_probe}")
+    data = read(audio_probe)
+    target = stage / "sbin/audio_probe"
+    if target.exists() or target.is_symlink():
+        raise SystemExit(f"ERROR: audio probe collides with {target}")
+    target.write_bytes(data)
+    target.chmod(0o755)
+    manifest["audio"] = {
+        "enabled": True,
+        "activation": "manual-only",
+        "probe": {
+            "path": str(audio_probe.resolve()),
+            "sha256": sha256(data),
+            "size": len(data),
+            "mode": "0755",
+            "elf": require_elf_contract(target, 0x05000400, None, (), False),
+        },
+    }
+
+
+def add_audio_tools(stage: Path, tinyplay: Path, tinycap: Path, tinymix: Path,
+                    manifest: dict[str, object]) -> None:
+    """Install the patched static TinyALSA playback/capture/mixer utilities."""
+    audio = manifest.get("audio")
+    if not isinstance(audio, dict) or not audio.get("enabled"):
+        raise SystemExit("ERROR: audio tools require the audio probe")
+
+    tools: dict[str, object] = {}
+    for name, source, target_name in (
+        ("tinyplay", tinyplay, "sbin/tinyplay"),
+        ("tinycap", tinycap, "sbin/tinycap"),
+        ("tinymix", tinymix, "sbin/tinymix"),
+    ):
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit(f"ERROR: {name} is not a regular file: {source}")
+        data = read(source)
+        target = stage / target_name
+        if target.exists() or target.is_symlink():
+            raise SystemExit(f"ERROR: audio tool collides with {target}")
+        target.write_bytes(data)
+        target.chmod(0o755)
+        tools[name] = {
+            "path": str(source.resolve()),
+            "sha256": sha256(data),
+            "size": len(data),
+            "mode": "0755",
+            "elf": require_elf_contract(target, 0x05000400, None, (), False),
+        }
+    audio["tools"] = tools
+
+
+def add_startup_audio(stage: Path, startup_audio: Path,
+                      manifest: dict[str, object]) -> None:
+    """Install the bounded post-init HPR confirmation clip."""
+    audio = manifest.get("audio")
+    if not isinstance(audio, dict) or not audio.get("enabled"):
+        raise SystemExit("ERROR: startup audio requires the audio tools")
+    if startup_audio.is_symlink() or not startup_audio.is_file():
+        raise SystemExit(f"ERROR: startup audio is not a regular file: {startup_audio}")
+    data = read(startup_audio)
+    try:
+        import io
+        import wave
+        with wave.open(io.BytesIO(data), "rb") as wav:
+            audio_format = {
+                "channels": wav.getnchannels(),
+                "sample_rate": wav.getframerate(),
+                "sample_width_bits": wav.getsampwidth() * 8,
+                "compression": wav.getcomptype(),
+            }
+    except (EOFError, wave.Error) as exc:
+        raise SystemExit(f"ERROR: startup audio is not a readable WAV: {startup_audio}") from exc
+    if audio_format != {
+        "channels": 2,
+        "sample_rate": 48000,
+        "sample_width_bits": 16,
+        "compression": "NONE",
+    }:
+        raise SystemExit(f"ERROR: startup audio format is not stereo 48kHz PCM16: {audio_format}")
+    target = stage / "etc/audio/windows95-startup.wav"
+    if target.exists() or target.is_symlink():
+        raise SystemExit(f"ERROR: startup audio collides with {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    target.chmod(0o644)
+    audio["activation"] = "automatic-after-successful-init"
+    audio["startup_playback"] = {
+        "path": str(startup_audio.resolve()),
+        "sha256": sha256(data),
+        "size": len(data),
+        "mode": "0644",
+        "format": audio_format,
+        "route": "hpr-only",
+        "pcm_volume": "103/103",
+        "pcm_db": "-12.0",
+        "hp_driver_gain": "6/6",
+        "lineout_dac_switches": "off",
+        "playback_device": "0:23",
+        "plays_once": True,
+    }
+
+
 def add_network_bundle(stage: Path, wpa_supplicant: Path, wifi_config: Path,
                        manifest: dict[str, object]) -> None:
     """Add the verified static WPA client and a build-local Wi-Fi profile."""
@@ -853,6 +959,16 @@ def main() -> None:
                         help="extracted v184 ARM32 root-adb ramdisk")
     parser.add_argument("--busybox", type=Path, required=True)
     parser.add_argument("--musl-loader", type=Path, required=True)
+    parser.add_argument("--audio-probe", type=Path,
+                        help="static ARM32 ALSA capability probe to add to the initramfs")
+    parser.add_argument("--tinyplay", type=Path,
+                        help="static ARM32 TinyALSA playback utility to add to the initramfs")
+    parser.add_argument("--tinycap", type=Path,
+                        help="static ARM32 TinyALSA capture utility to add to the initramfs")
+    parser.add_argument("--tinymix", type=Path,
+                        help="static ARM32 TinyALSA mixer utility to add to the initramfs")
+    parser.add_argument("--startup-audio", type=Path,
+                        help="stereo 48kHz PCM16 WAV to play once after successful init")
     parser.add_argument("--connectivity-stock-root", type=Path,
                         help="pinned v181 ARM32 WMT runtime and firmware root")
     parser.add_argument("--wmt-config-helper", type=Path,
@@ -909,6 +1025,22 @@ def main() -> None:
             for name, value in network_options.items() if value is None
         )
         raise SystemExit(f"ERROR: network stack is all-or-nothing; missing {missing}")
+    audio_tool_options = {
+        "tinyplay": args.tinyplay,
+        "tinycap": args.tinycap,
+        "tinymix": args.tinymix,
+    }
+    audio_tools_enabled = all(value is not None for value in audio_tool_options.values())
+    if any(value is not None for value in audio_tool_options.values()) and not audio_tools_enabled:
+        missing = ", ".join(
+            "--" + name.replace("_", "-")
+            for name, value in audio_tool_options.items() if value is None
+        )
+        raise SystemExit(f"ERROR: audio tools are all-or-nothing; missing {missing}")
+    if audio_tools_enabled and args.audio_probe is None:
+        raise SystemExit("ERROR: audio tools require --audio-probe")
+    if args.startup_audio is not None and not audio_tools_enabled:
+        raise SystemExit("ERROR: startup audio requires --audio-probe and all audio tools")
 
     source = read(args.source_boot)
     require_hash("source boot envelope", source, SOURCE_BOOT_SHA256)
@@ -957,6 +1089,12 @@ def main() -> None:
             "enabled": False,
             "activation": "passive-until-profile-is-supplied",
         },
+        "audio": {
+            "enabled": False,
+            "activation": "manual-only",
+            "probe": {},
+            "tools": {},
+        },
     }
     overlay = Path(__file__).resolve().parent / "initramfs"
     with tempfile.TemporaryDirectory(prefix="libreecho-arm32-initramfs-") as temporary:
@@ -966,6 +1104,15 @@ def main() -> None:
             stage, overlay, args.busybox.resolve(), args.musl_loader.resolve(),
             qemu_arm, manifest,
         )
+        if args.audio_probe is not None:
+            add_audio_probe(stage, args.audio_probe.resolve(), manifest)
+        if audio_tools_enabled:
+            add_audio_tools(
+                stage, args.tinyplay.resolve(), args.tinycap.resolve(),
+                args.tinymix.resolve(), manifest,
+            )
+        if args.startup_audio is not None:
+            add_startup_audio(stage, args.startup_audio.resolve(), manifest)
         if connectivity_enabled:
             add_connectivity_bundle(
                 args.connectivity_stock_root.resolve(), stage,
