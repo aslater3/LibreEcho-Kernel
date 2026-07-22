@@ -1,0 +1,23 @@
+#!/bin/busybox sh
+# BusyBox udhcpc lease hook for the ARM32 Development OS WLAN stack.
+set +e
+
+case "$1" in
+    deconfig)
+        /bin/ip addr flush dev "$interface" scope global 2>/dev/null
+        /bin/ip route flush dev "$interface" 2>/dev/null
+        ;;
+    bound|renew)
+        /bin/ip addr flush dev "$interface" scope global 2>/dev/null
+        /bin/ip addr add "$ip/${subnet:-255.255.255.0}" dev "$interface"
+        if [ -n "$router" ]; then
+            /bin/ip route del default dev "$interface" 2>/dev/null
+            /bin/ip route add default via "${router%% *}" dev "$interface"
+        fi
+        : > /etc/resolv.conf
+        for ns in $dns; do
+            printf 'nameserver %s\n' "$ns" >> /etc/resolv.conf
+        done
+        ;;
+esac
+exit 0

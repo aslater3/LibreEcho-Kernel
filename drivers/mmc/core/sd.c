@@ -11,6 +11,7 @@
  */
 
 #include <linux/err.h>
+#include <linux/math64.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
@@ -79,15 +80,18 @@ void sd_metrics_timeout_work(struct work_struct *work)
 {
 	struct mmc_host *host = container_of(work, struct mmc_host, metrics_timeout_work.work);
 	char buf[256] = {0};
+	u64 data_count;
+	u64 timeout_count;
 
-	if ((u64)atomic64_read(&host->data_timeout_count) > SD_TIMEOUT_THRESHOLD) {
+	timeout_count = (u64)atomic64_read(&host->data_timeout_count);
+	data_count = (u64)atomic64_read(&host->data_count);
+	if (timeout_count > SD_TIMEOUT_THRESHOLD && data_count) {
 		mutex_lock(&host->cid_mutex);
 		snprintf(buf, sizeof(buf),
 			"%s:def:sdcard_datatimeout_ratio=%llu;CT;1,"
 			"sdcard_datatimeout_count=%llu;CT;1,sdcard_data_count=%llu;CT;1:NR",
-			host->cid, ((u64)atomic64_read(&host->data_timeout_count)*1000000)/(u64)atomic64_read(&host->data_count),
-			(u64)atomic64_read(&host->data_timeout_count),
-			(u64)atomic64_read(&host->data_count));
+			host->cid, div64_u64(timeout_count * 1000000ULL, data_count),
+			timeout_count, data_count);
 		mutex_unlock(&host->cid_mutex);
 
 		log_to_metrics(ANDROID_LOG_INFO, "SDTimeoutEvent", buf);
@@ -1424,4 +1428,3 @@ err:
 
 	return err;
 }
-

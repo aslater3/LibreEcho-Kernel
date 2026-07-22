@@ -409,7 +409,7 @@ int m4u_pte_allocator_init(void)
 {
 	gM4u_pte_kmem = kmem_cache_create("m4u_pte", IMU_BYTES_PER_PTE, IMU_BYTES_PER_PTE, 0, NULL);
 	M4UINFO("%s: gM4u_pte_kmem = 0x%p, IMU_BYTES_PER_PTE = 0x%lx\n", __func__,
-		gM4u_pte_kmem, IMU_BYTES_PER_PTE);
+		gM4u_pte_kmem, (unsigned long)IMU_BYTES_PER_PTE);
 
 	if (IS_ERR_OR_NULL(gM4u_pte_kmem)) {
 		M4UMSG("error in %s: ret = 0x%p\n", __func__, gM4u_pte_kmem);

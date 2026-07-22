@@ -299,14 +299,27 @@ static void android_work(struct work_struct *data)
 static void android_enable(struct android_dev *dev)
 {
 	struct usb_composite_dev *cdev = dev->cdev;
+	int before = dev->disable_depth;
+	int ret;
+
+	pr_info("[USB] android_enable entry depth=%d\n", before);
 
 	if (WARN_ON(!dev->disable_depth))
 		return;
 
 	if (--dev->disable_depth == 0) {
-		usb_add_config(cdev, &android_config_driver,
+		pr_info("[USB] android_enable depth %d->0: binding gadget\n",
+			before);
+		ret = usb_add_config(cdev, &android_config_driver,
 					android_bind_config);
-		usb_gadget_connect(cdev->gadget);
+		pr_info("[USB] usb_add_config ret=%d\n", ret);
+		if (ret)
+			return;
+		ret = usb_gadget_connect(cdev->gadget);
+		pr_info("[USB] usb_gadget_connect ret=%d\n", ret);
+	} else {
+		pr_info("[USB] android_enable depth %d->%d: waiting for FunctionFS\n",
+			before, dev->disable_depth);
 	}
 }
 
@@ -353,6 +366,8 @@ static void ffs_function_enable(struct android_usb_function *f)
 	struct functionfs_config *config = f->config;
 
 	config->enabled = true;
+	pr_info("[USB] ffs enable opened=%d depth=%d\n",
+		config->opened, dev->disable_depth);
 
 	/* Disable the gadget until the function is ready */
 	if (!config->opened)
@@ -375,7 +390,11 @@ static int ffs_function_bind_config(struct android_usb_function *f,
 				    struct usb_configuration *c)
 {
 	struct functionfs_config *config = f->config;
-	return functionfs_bind_config(c->cdev, c, config->data);
+	int ret = functionfs_bind_config(c->cdev, c, config->data);
+
+	pr_info("[USB] FunctionFS bind_config ret=%d data=%p\n",
+		ret, config->data);
+	return ret;
 }
 
 static ssize_t
@@ -441,6 +460,7 @@ static int functionfs_ready_callback(struct ffs_data *ffs)
 		mutex_lock(&dev->mutex);
 		ret = functionfs_bind(ffs, dev->cdev);
 		if (ret) {
+			pr_err("[USB] FunctionFS ready bind ret=%d\n", ret);
 			mutex_unlock(&dev->mutex);
 			return ret;
 		}
@@ -452,6 +472,8 @@ static int functionfs_ready_callback(struct ffs_data *ffs)
 
 	config->data = ffs;
 	config->opened = true;
+	pr_info("[USB] FunctionFS ready opened=1 enabled=%d depth=%d\n",
+		config->enabled, dev->disable_depth);
 	/* Save dev in case the adb function will get disabled */
 	config->dev = dev;
 
@@ -482,6 +504,9 @@ static void functionfs_closed_callback(struct ffs_data *ffs)
 
 	if (dev)
 		mutex_lock(&dev->mutex);
+	pr_info("[USB] FunctionFS closed enabled=%d opened=%d depth=%d\n",
+		config->enabled, config->opened,
+		dev ? dev->disable_depth : -1);
 
 	if (config->enabled && dev)
 		android_disable(dev);

@@ -712,7 +712,14 @@ static void __init arch_timer_init(struct device_node *np)
 	 * If no interrupt provided for virtual timer, we'll have to
 	 * stick to the physical timer. It'd better be accessible...
 	 */
-	if (is_hyp_mode_available() || !arch_timer_ppi[VIRT_PPI]) {
+	/*
+	 * MT8163's ARM32 firmware exposes the virtual PPI, but the
+	 * secondary-CPU virtual timer interrupts are not reliable.  Use the
+	 * physical timer on ARM32; retain the normal HYP-based selection on
+	 * ARM64.
+	 */
+	if (IS_ENABLED(CONFIG_ARM) || is_hyp_mode_available() ||
+	    !arch_timer_ppi[VIRT_PPI]) {
 		arch_timer_use_virtual = false;
 
 		if (!arch_timer_ppi[PHYS_SECURE_PPI] ||

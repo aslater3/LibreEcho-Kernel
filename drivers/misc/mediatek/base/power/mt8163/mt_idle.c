@@ -349,7 +349,11 @@ int __attribute__((weak)) cpu_xgpt_register_timer(unsigned int id,
 
 static bool is_valid_reg(void __iomem *addr)
 {
+#ifdef CONFIG_ARM64
 	return ((u64)addr & 0xf0000000) || (((u64)addr >> 32) & 0xf0000000);
+#else
+	return ((unsigned long)addr & 0xf0000000);
+#endif
 }
 
 unsigned int __attribute__((weak)) spm_get_cpu_pwr_status(void)

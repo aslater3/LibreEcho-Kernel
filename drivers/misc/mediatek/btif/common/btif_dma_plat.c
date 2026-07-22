@@ -1,4 +1,5 @@
 #include <linux/kernel.h>
+#include <mt-plat/mtk_ram_console.h>
 
 #ifdef DFT_TAG
 #undef DFT_TAG
@@ -1028,6 +1029,8 @@ int hal_rx_dma_irq_handler(P_MTK_DMA_INFO_STR p_dma_info,
 	unsigned int rpt = 0;
 	unsigned int tail_len = 0;
 	unsigned int real_len = 0;
+	unsigned int passes = 0;
+	unsigned int total_processed = 0;
 	unsigned long base = p_dma_info->base;
 	P_DMA_VFIFO p_vfifo = p_dma_info->p_vfifo;
 	dma_rx_buf_write rx_cb = p_dma_info->rx_cb;
@@ -1066,16 +1069,26 @@ int hal_rx_dma_irq_handler(P_MTK_DMA_INFO_STR p_dma_info,
 	i_ret = 0;
 
 	while ((0 < valid_len) || (rpt != wpt)) {
+		if (passes++ >= BTIF_RX_IRQ_MAX_PASSES) {
+			aee_rr_rec_fiq_step(0xA2); /* bounded RX IRQ drain escape */
+			break;
+		}
+
 		rpt_wrap = rpt & DMA_RPT_WRAP;
 		wpt_wrap = wpt & DMA_WPT_WRAP;
 		rpt &= DMA_RPT_MASK;
 		wpt &= DMA_WPT_MASK;
 
 /*calcaute length of available data  in vFIFO*/
-		if (wpt_wrap != p_mtk_vfifo->last_wpt_wrap)
+		if (wpt_wrap != rpt_wrap)
 			real_len = wpt + vff_size - rpt;
 		else
 			real_len = wpt - rpt;
+
+		if (unlikely((real_len == 0) || (real_len > vff_size))) {
+			aee_rr_rec_fiq_step(0xA1); /* zero-progress RX IRQ escape */
+			break;
+		}
 
 		if (NULL != rx_cb) {
 			tail_len = vff_size - rpt;
@@ -1106,8 +1119,14 @@ int hal_rx_dma_irq_handler(P_MTK_DMA_INFO_STR p_dma_info,
 		p_mtk_vfifo->rpt = rpt;
 		p_mtk_vfifo->last_rpt_wrap = rpt_wrap;
 
-/*update rpt information to DMA controller*/
+		/*update rpt information to DMA controller*/
 		btif_reg_sync_writel(rpt, RX_DMA_VFF_RPT(base));
+
+		total_processed += real_len;
+		if (total_processed >= vff_size) {
+			aee_rr_rec_fiq_step(0xA2); /* bounded RX byte escape */
+			break;
+		}
 
 /*get vff valid size again and check if rx data is processed completely*/
 		valid_len = BTIF_READ32(RX_DMA_VFF_VALID_SIZE(base));
@@ -1454,4 +1473,3 @@ int _btif_dma_dump_dbg_reg(void)
 #endif
 	return 0;
 }
-

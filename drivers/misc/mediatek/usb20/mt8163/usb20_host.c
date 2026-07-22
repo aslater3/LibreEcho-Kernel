@@ -53,7 +53,7 @@
 #ifdef CONFIG_OF
 static unsigned int iddig_pin;
 static unsigned int iddig_pin_mode;
-static unsigned int iddig_if_config = 1;
+static unsigned int iddig_if_config __maybe_unused = 1;
 #ifdef CONFIG_MTK_USB_RESET_WIFI_DONGLE
 int wifi_reset_pin = 0;
 #endif
@@ -875,9 +875,16 @@ void mt_usb_otg_init(struct musb *musb)
 		DBG(0, "USB OTG - get node failed\n");
 	} else {
 		iddig_pin = of_get_named_gpio(node, "iddig_gpio", 0);
-		if (iddig_pin == 0) {
-			iddig_if_config = 0;
-			DBG(0, "iddig_gpio fail\n");
+		if (iddig_pin <= 0) {
+			/*
+			 * Stock DT has no iddig_gpio property on the usb node —
+			 * the pin lives in the pinctrl node as a pin group.
+			 * The physical ID pin on the Echo/Douglas board is
+			 * GPIO38 (douglas.dts: gpio38_mode0_iddig). Hardcode
+			 * it as fallback so the driver reads the correct pin.
+			 */
+			iddig_pin = 38;
+			DBG(0, "iddig_gpio not in DT, using GPIO38 fallback\n");
 		}
 #ifdef CONFIG_MTK_USB_RESET_WIFI_DONGLE
 		wifi_reset_pin = of_get_named_gpio(node, "wifi_reset_gpio", 0);

@@ -1076,6 +1076,7 @@ phys_addr_t arm_lowmem_limit __initdata = 0;
 void __init sanity_check_meminfo(void)
 {
 	int highmem = 0;
+	phys_addr_t memblock_limit = 0;
 	phys_addr_t vmalloc_limit = __pa(vmalloc_min - 1) + 1;
 	struct memblock_region *reg;
 
@@ -1120,6 +1121,16 @@ void __init sanity_check_meminfo(void)
 	}
 
 	high_memory = __va(arm_lowmem_limit - 1) + 1;
+
+	if (!memblock_limit)
+		memblock_limit = arm_lowmem_limit;
+
+	/*
+	 * Round the memblock limit down to a pmd size.  This helps to ensure
+	 * that allocations come from the last full pmd, which is mapped.
+	 */
+	memblock_limit = round_down(memblock_limit, PMD_SIZE);
+	memblock_set_current_limit(memblock_limit);
 
 }
 

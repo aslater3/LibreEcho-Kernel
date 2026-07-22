@@ -347,6 +347,15 @@ __turn_mmu_on_loc:
 #if defined(CONFIG_SMP)
 	.text
 	.arm
+ENTRY(secondary_entry)
+	/* PSCI enters secondary CPUs through an argument-free trampoline. */
+	mov	r0, #0
+	mov	r1, #0
+	mov	r2, #0
+	mov	r3, #0
+	b	secondary_startup
+ENDPROC(secondary_entry)
+
 ENTRY(secondary_startup_arm)
  THUMB(	adr	r9, BSYM(1f)	)	@ Kernel is entered in ARM.
  THUMB(	bx	r9		)	@ If this is a Thumb-2 kernel,

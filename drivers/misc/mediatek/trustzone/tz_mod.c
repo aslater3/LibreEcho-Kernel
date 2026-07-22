@@ -1133,7 +1133,9 @@ static int mtee_probe(struct platform_device *pdev)
 	tzret = KREE_InitTZ();
 	if (tzret != TZ_RESULT_SUCCESS) {
 		pr_warn("tz_client_init: TZ Failed %d\n", (int)tzret);
-		BUG();
+		cdev_del(&tz_client_cdev);
+		unregister_chrdev_region(tz_client_dev, 1);
+		return -ENODEV;
 	}
 
 	kree_irq_init();

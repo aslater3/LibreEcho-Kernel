@@ -16,11 +16,15 @@
 #include <linux/init.h>
 #include <asm/mach/arch.h>
 
+extern bool __init mediatek_smp_init(void);
+
 static const char * const mediatek_board_dt_compat[] = {
 	"mediatek,mt6589",
+	"mediatek,mt8163",
 	NULL,
 };
 
 DT_MACHINE_START(MEDIATEK_DT, "Mediatek Cortex-A7 (Device Tree)")
 	.dt_compat	= mediatek_board_dt_compat,
+	.smp_init	= mediatek_smp_init,
 MACHINE_END

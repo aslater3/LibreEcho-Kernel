@@ -1,0 +1,6 @@
+# Keep this file deliberately small.  In particular, do not force HPS,
+# CPU-online, cpufreq, or cpuidle policy here: those changes hide kernel and
+# power-management defects during bring-up.
+
+on fs
+    symlink /dev/block/platform/soc/11230000.mmc /dev/block/platform/bootdevice

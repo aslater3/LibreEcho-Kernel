@@ -6,6 +6,11 @@ subdir-ccflags-y += -Werror -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 subdir-ccflags-y += -Werror -I$(srctree)/drivers/mmc/host/mediatek/$(MTK_PLATFORM)
 
 obj-$(CONFIG_MTK_BASE_POWER) += base/
+ifeq ($(subst ",,$(CONFIG_MTK_PLATFORM)),mt8163)
+ifneq ($(CONFIG_MTK_BASE_POWER),y)
+obj-y += base/
+endif
+endif
 obj-$(CONFIG_MEDIATEK_SOLUTION)	+= sched/
 obj-$(CONFIG_MEDIATEK_SOLUTION) += mach/
 obj-$(CONFIG_MTK_GPT_COMMON) += gpt/
@@ -155,4 +160,4 @@ obj-$(CONFIG_MTK_MTD_NAND) += nand/
 obj-$(CONFIG_MTK_DUM_CHAR) += nand/
 obj-$(CONFIG_MTK_ICE_DEUBG) += ice_debug/
 obj-$(CONFIG_MTK_DYNAMIC_BOOST) += dynamic_boost/
-
+obj-y += echo_fastboot_marker.o

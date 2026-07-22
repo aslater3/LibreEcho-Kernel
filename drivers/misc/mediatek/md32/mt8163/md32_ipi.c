@@ -1,3 +1,4 @@
+#include <linux/io.h>
 #include <linux/interrupt.h>
 #include <mach/md32_helper.h>
 #include <mach/md32_ipi.h>
@@ -131,4 +132,3 @@ enum ipi_status md32_ipi_send(enum ipi_id id, void *buf, unsigned int len,
 
 	return DONE;
 }
-

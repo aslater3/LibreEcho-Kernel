@@ -1,0 +1,26 @@
+import /init.recovery.${ro.hardware}.rc
+
+on early-init
+    start ueventd
+    start libreecho-recovery
+
+on init
+    export PATH /bin:/sbin:/system/bin
+    export ANDROID_ROOT /system
+    mkdir /dev/pts 0755 root root
+    mkdir /dev/usb-ffs 0770 shell shell
+    mkdir /dev/usb-ffs/adb 0770 shell shell
+    mkdir /tmp 0777 root root
+
+service ueventd /sbin/ueventd
+    class core
+    critical
+    seclabel u:r:ueventd:s0
+
+service libreecho-recovery /bin/busybox sh /libreecho-init
+    class core
+    user root
+    group root shell system adb
+
+on property:sys.powerctl=*
+    powerctl ${sys.powerctl}

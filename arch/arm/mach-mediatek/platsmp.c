@@ -19,8 +19,52 @@
 #include <linux/memblock.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/smp.h>
 #include <linux/string.h>
 #include <linux/threads.h>
+
+#include <asm/memory.h>
+#include <asm/psci.h>
+#include <asm/smp.h>
+#include <asm/smp_plat.h>
+
+#ifdef CONFIG_ARCH_MT8163
+extern int spm_mtcmos_cpu_init(void);
+extern int spm_mtcmos_ctrl_cpu(unsigned int cpu, int state,
+					int chkWfiBeforePdn);
+#ifdef CONFIG_HOTPLUG_CPU
+extern void psci_cpu_die(unsigned int cpu);
+extern int psci_cpu_kill(unsigned int cpu);
+#endif
+
+#define MT8163_CPU_POWER_DOWN	0
+#define MT8163_CPU_POWER_ON	1
+
+#ifdef CONFIG_HOTPLUG_CPU
+static int mt8163_cpu_kill(unsigned int cpu)
+{
+	int ret;
+
+	/*
+	 * PSCI CPU_OFF stops execution, but on MT8163 the per-core power
+	 * island must also be collapsed before a later CPU_ON is valid.
+	 * The ARM64 MTK PSCI wrapper does this in its cpu_kill callback.
+	 */
+	ret = psci_cpu_kill(cpu);
+	if (!ret)
+		pr_warn("MT8163: CPU%u PSCI kill did not confirm shutdown\n", cpu);
+
+	ret = spm_mtcmos_ctrl_cpu(cpu, MT8163_CPU_POWER_DOWN, 1);
+	if (ret) {
+		pr_err("MT8163: CPU%u MTCMOS power-down failed: %d\n", cpu, ret);
+		return 0;
+	}
+
+	pr_info("MT8163: CPU%u MTCMOS power-down complete\n", cpu);
+	return 1;
+}
+#endif
+#endif
 
 #define MTK_MAX_CPU		8
 #define MTK_SMP_REG_SIZE	0x1000
@@ -143,3 +187,48 @@ static struct smp_operations mt6589_smp_ops __initdata = {
 	.smp_boot_secondary = mtk_boot_secondary,
 };
 CPU_METHOD_OF_DECLARE(mt6589_smp, "mediatek,mt6589-smp", &mt6589_smp_ops);
+
+#ifdef CONFIG_ARCH_MT8163
+static void __init mt8163_smp_prepare_cpus(unsigned int max_cpus)
+{
+	spm_mtcmos_cpu_init();
+}
+
+static int mt8163_boot_secondary(unsigned int cpu, struct task_struct *idle)
+{
+	int ret;
+
+	if (!psci_ops.cpu_on)
+		return -ENODEV;
+
+	ret = psci_ops.cpu_on(cpu_logical_map(cpu), __pa(secondary_entry));
+	if (ret < 0) {
+		pr_err("PSCI failed to boot CPU%u: %d\n", cpu, ret);
+		return ret;
+	}
+
+	return spm_mtcmos_ctrl_cpu(cpu, MT8163_CPU_POWER_ON, 1);
+}
+
+static struct smp_operations mt8163_smp_ops __initdata = {
+	.smp_prepare_cpus = mt8163_smp_prepare_cpus,
+	.smp_boot_secondary = mt8163_boot_secondary,
+#ifdef CONFIG_HOTPLUG_CPU
+	.cpu_die = psci_cpu_die,
+	.cpu_kill = mt8163_cpu_kill,
+#endif
+};
+#endif
+
+bool __init mediatek_smp_init(void)
+{
+#ifdef CONFIG_ARCH_MT8163
+	if (of_machine_is_compatible("mediatek,mt8163")) {
+		smp_set_ops(&mt8163_smp_ops);
+		pr_info("MT8163: using PSCI/MTCMOS SMP bring-up\n");
+		return true;
+	}
+#endif
+
+	return false;
+}

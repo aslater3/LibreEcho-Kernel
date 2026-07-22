@@ -51,6 +51,7 @@ arch/*/kernel/vmlinux.lds
 cscope.*
 tags
 TAGS
+tools/mt8163-arm32/__pycache__/
 
 # Generated firmware / logo / initramfs
 firmware/*.gen.S

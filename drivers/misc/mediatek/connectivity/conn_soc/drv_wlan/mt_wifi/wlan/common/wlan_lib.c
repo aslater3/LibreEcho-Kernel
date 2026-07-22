@@ -3337,7 +3337,7 @@ WLAN_STATUS wlanConfigWifiFunc(IN P_ADAPTER_T prAdapter, IN BOOLEAN fgEnable, IN
 		echoWlanExecutionSnapshot(prAdapter, "after-start-100us");
 		udelay(900);
 		echoWlanExecutionSnapshot(prAdapter, "after-start-1ms");
-		udelay(9000);
+		mdelay(9);
 		echoWlanExecutionSnapshot(prAdapter, "after-start-10ms");
 
 		pr_err("ECHO_FW_START_SUBMIT: tx_port_return status=%u; no start-command ACK is waited by this path cpu=%u jiffies=%lu\n",

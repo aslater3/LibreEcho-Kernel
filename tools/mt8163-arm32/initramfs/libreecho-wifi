@@ -1,0 +1,63 @@
+#!/bin/busybox sh
+# Stable WLAN client control plane. Credentials live in /etc/wifi/wpa_supplicant.conf.
+BB=/bin/busybox
+WPA=/sbin/wpa_supplicant
+IFACE=${WIFI_IFACE:-wlan0}
+CONF=${WIFI_CONF:-/etc/wifi/wpa_supplicant.conf}
+PID=/tmp/wpa_supplicant.${IFACE}.pid
+LOG=/tmp/wpa_supplicant.${IFACE}.log
+DHCP_PID=/tmp/udhcpc.${IFACE}.pid
+DHCP_LOG=/tmp/udhcpc.${IFACE}.log
+
+log() { printf 'libreecho-wifi: %s\n' "$*" >> /tmp/wifi.log; }
+
+status() {
+    [ -e "/sys/class/net/$IFACE" ] || { echo absent; return 1; }
+    printf 'interface=%s\n' "$IFACE"
+    printf 'operstate='; $BB cat "/sys/class/net/$IFACE/operstate" 2>/dev/null
+    printf 'carrier='; $BB cat "/sys/class/net/$IFACE/carrier" 2>/dev/null
+    /bin/ip addr show "$IFACE"
+    /bin/ip route
+}
+
+stop() {
+    [ -r "$PID" ] && kill "$($BB cat "$PID")" 2>/dev/null
+    [ -r "$DHCP_PID" ] && kill "$($BB cat "$DHCP_PID")" 2>/dev/null
+    $BB rm -f "$PID" "$DHCP_PID"
+}
+
+start() {
+    [ -r "$CONF" ] || { log "config-missing:$CONF"; return 2; }
+    [ -x "$WPA" ] || { log supplicant-missing; return 3; }
+    [ -e "/sys/class/net/$IFACE" ] || { log "interface-missing:$IFACE"; return 4; }
+    stop
+    /bin/ip link set "$IFACE" up || { log link-up-failed; return 5; }
+    $BB rm -f "$LOG" "$DHCP_LOG"
+    "$WPA" -B -i "$IFACE" -c "$CONF" -P "$PID" -f "$LOG" || {
+        log supplicant-start-failed
+        return 6
+    }
+    i=0
+    while [ "$i" -lt 45 ]; do
+        [ "$($BB cat "/sys/class/net/$IFACE/carrier" 2>/dev/null)" = 1 ] && break
+        $BB sleep 1
+        i=$((i + 1))
+    done
+    [ "$($BB cat "/sys/class/net/$IFACE/carrier" 2>/dev/null)" = 1 ] || {
+        log association-timeout
+        return 7
+    }
+    /bin/udhcpc -n -q -t 5 -T 3 -i "$IFACE" -s /etc/udhcpc.script \
+        -p "$DHCP_PID" >"$DHCP_LOG" 2>&1
+    rc=$?
+    log "dhcp-rc:$rc"
+    return "$rc"
+}
+
+case "${1:-start}" in
+    start) start ;;
+    stop) stop ;;
+    status) status ;;
+    *) echo "usage: $0 {start|stop|status}" >&2; exit 64 ;;
+esac
+exit $?

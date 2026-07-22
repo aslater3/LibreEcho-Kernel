@@ -148,6 +148,8 @@ static int g_thermal_trip[COOLER_NUM] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 struct wmt_tm g_wmt_tm;
 struct wmt_tm *pg_wmt_tm = &g_wmt_tm;
 
+static volatile int echo_v178_suppress_wmt_thermal_registration = 1;
+
 static int wmt_thz_bind(struct thermal_zone_device *, struct thermal_cooling_device *);
 static int wmt_thz_unbind(struct thermal_zone_device *, struct thermal_cooling_device *);
 static int wmt_thz_get_temp(struct thermal_zone_device *, unsigned long *);
@@ -1493,6 +1495,11 @@ static int __init wmt_tm_init(void)
 {
 	int err = 0;
 
+	if (echo_v178_suppress_wmt_thermal_registration) {
+		pr_info("echo-v178: WMT thermal runtime registration suppressed\n");
+		return 0;
+	}
+
 	wmt_tm_printk("[wmt_tm_init] start -->\n");
 
 #if 0
@@ -1560,6 +1567,10 @@ int wmt_tm_deinit_rt(void)
 static void __exit wmt_tm_deinit(void)
 {
 	int err = 0;
+
+	if (echo_v178_suppress_wmt_thermal_registration) {
+		return;
+	}
 
 	wmt_tm_printk("[%s]\n", __func__);
 #if 1

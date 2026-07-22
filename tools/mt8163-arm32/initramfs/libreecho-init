@@ -1,0 +1,397 @@
+#!/bin/busybox sh
+# shellcheck shell=dash
+# v97-compatible ARM32 recovery control plane.
+
+BB=/bin/busybox
+PATH=/bin:/sbin:/system/bin
+export PATH
+umask 022
+
+$BB mkdir -p /dev/pts /dev/usb-ffs/adb /dev/socket /proc /sys /tmp
+$BB chmod 0777 /tmp
+
+# Create /dev/null before the first stderr redirection.  If it is absent, a
+# shell `2>/dev/null` creates a regular file; a later mknod then fails with
+# EEXIST.  Replace any non-character placeholder before creating each node.
+ensure_chr()
+{
+	path=$1
+	major=$2
+	minor=$3
+	if [ ! -c "$path" ]; then
+		$BB rm -f "$path"
+		$BB mknod "$path" c "$major" "$minor"
+	fi
+}
+ensure_chr /dev/null 1 3
+ensure_chr /dev/zero 1 5
+ensure_chr /dev/full 1 7
+ensure_chr /dev/random 1 8
+ensure_chr /dev/urandom 1 9
+ensure_chr /dev/console 5 1
+ensure_chr /dev/ptmx 5 2
+$BB chmod 0666 /dev/null /dev/zero /dev/full /dev/random /dev/urandom
+$BB chmod 0600 /dev/console
+$BB chmod 0666 /dev/ptmx
+
+# Android init normally mounts these before parsing init.rc.  Keep the script
+# usable in a reduced recovery environment without mounting over /dev, because
+# doing so would hide Android's property area and break adbd.
+$BB grep -q ' /proc ' /proc/mounts 2>/dev/null || $BB mount -t proc proc /proc 2>/dev/null
+$BB grep -q ' /sys ' /proc/mounts 2>/dev/null || $BB mount -t sysfs sysfs /sys 2>/dev/null
+$BB grep -q ' /dev/pts ' /proc/mounts 2>/dev/null || $BB mount -t devpts devpts /dev/pts 2>/dev/null
+
+log()
+{
+	msg="libreecho-init: $*"
+	printf '%s\n' "$*" >> /tmp/init.log
+	# Explicit priority keeps these diagnostics visible on the UART even when
+	# the old /dev/kmsg writer does not default to INFO.
+	printf '<6>%s\n' "$msg" > /dev/kmsg 2>/dev/null
+	printf '%s\n' "$msg" > /dev/console 2>/dev/null
+}
+
+log init-started
+
+# The GPT used by Biscuit exposes expdb as Linux partition 7.  Wait for the
+# kernel's block identity, then create direct aliases from sysfs rather than
+# assuming MMC minor numbers.
+EXPDB=/dev/mmcblk0p7
+EXPDB_SYS=/sys/class/block/mmcblk0p7
+i=0
+while [ "$i" -lt 10 ] && [ ! -r "$EXPDB_SYS/dev" ]; do
+    $BB sleep 1
+    i=$((i + 1))
+done
+for sys_block in /sys/class/block/mmcblk0 /sys/class/block/mmcblk0p*; do
+    [ -r "$sys_block/dev" ] || continue
+    name=${sys_block##*/}
+    devno=$($BB cat "$sys_block/dev" 2>/dev/null)
+    major=${devno%:*}
+    minor=${devno#*:}
+    if [ -z "$major" ] || [ -z "$minor" ]; then
+        continue
+    fi
+    [ -b "/dev/$name" ] || $BB mknod "/dev/$name" b "$major" "$minor" 2>/dev/null
+done
+expdb_devno=$($BB cat "$EXPDB_SYS/dev" 2>/dev/null)
+expdb_major=${expdb_devno%:*}
+expdb_minor=${expdb_devno#*:}
+expected_rdev=
+case "$expdb_devno" in
+    *:*) expected_rdev=$($BB printf '%x:%x' "$expdb_major" "$expdb_minor") ;;
+esac
+
+# This is the first persistent state change.  LK consumes the marker on the
+# next reset and enters fastboot, preserving the rapid recovery loop.  Refuse
+# the write unless sysfs proves the target is the expected 0x5000-sector expdb
+# block partition; this prevents shell redirection from creating a regular file.
+# Do not continue into optional driver or USB work without a verified marker
+# target. Retry forever so a slow devtmpfs/eMMC never loses recovery.
+marker_written=0
+marker_attempt=0
+while [ "$marker_written" -eq 0 ]; do
+    marker_attempt=$((marker_attempt + 1))
+    if [ -b "$EXPDB" ] && [ -n "$expected_rdev" ] &&
+       [ "$($BB stat -c '%t:%T' "$EXPDB" 2>/dev/null)" = "$expected_rdev" ] &&
+       $BB grep -qx 'PARTNAME=expdb' "$EXPDB_SYS/uevent" 2>/dev/null &&
+       [ "$($BB cat "$EXPDB_SYS/size" 2>/dev/null)" = 20480 ]; then
+        if printf FASTBOOT_PLEASE > "$EXPDB" 2>/tmp/expdb-marker.err; then
+            $BB sync
+            marker=$($BB dd if="$EXPDB" bs=15 count=1 2>/dev/null)
+            [ "$marker" = FASTBOOT_PLEASE ] && marker_written=1
+        fi
+    elif [ $((marker_attempt % 10)) -eq 1 ]; then
+        log expdb-identity-rejected
+    fi
+    if [ "$marker_written" -eq 0 ]; then
+        if [ $((marker_attempt % 10)) -eq 0 ]; then
+            log fastboot-please-retry
+        fi
+        $BB sleep 1
+    fi
+done
+log fastboot-please-written
+
+# Independent recovery supervisor.  This loop is intentionally separate from
+# runme_loop: a blocked experiment must never prevent an operator or host
+# harness from requesting a controlled reboot into fastboot.
+reboot_request_loop()
+{
+    while true; do
+        if [ -f /tmp/reboot.request ]; then
+            request=$($BB cat /tmp/reboot.request 2>/dev/null)
+            $BB rm -f /tmp/reboot.request
+            case "$request" in
+                fastboot)
+                    log reboot-request-fastboot-accepted
+                    if printf FASTBOOT_PLEASE > "$EXPDB" 2>/tmp/reboot-marker.err; then
+                        $BB sync
+                        marker=$($BB dd if="$EXPDB" bs=15 count=1 2>/dev/null)
+                        if [ "$marker" = FASTBOOT_PLEASE ]; then
+                            log reboot-request-marker-verified
+                            $BB reboot -f
+                        else
+                            log reboot-request-marker-readback-failed
+                        fi
+                    else
+                        log reboot-request-marker-write-failed
+                    fi
+                    ;;
+                reboot)
+                    log reboot-request-reboot-accepted
+                    $BB reboot -f
+                    ;;
+                *)
+                    log reboot-request-rejected
+                    ;;
+            esac
+        fi
+        $BB sleep 1
+    done
+}
+reboot_request_loop &
+log reboot-supervisor-started
+
+# Stable MediaTek connectivity aliases.  btif is dynamically allocated and is
+# intentionally left to devtmpfs/ueventd.
+[ -c /dev/wmtWifi ] || $BB mknod /dev/wmtWifi c 153 0 2>/dev/null
+[ -c /dev/wmtdetect ] || $BB mknod /dev/wmtdetect c 154 0 2>/dev/null
+[ -c /dev/stpwmt ] || $BB mknod /dev/stpwmt c 190 0 2>/dev/null
+[ -e /dev/wmt ] || $BB ln -s stpwmt /dev/wmt 2>/dev/null
+[ -c /dev/stpbt ] || $BB mknod /dev/stpbt c 192 0 2>/dev/null
+$BB chmod 0666 /dev/wmtWifi /dev/wmtdetect /dev/stpwmt /dev/stpbt 2>/dev/null
+log wmt-nodes-created
+
+# The network stack is build-time opt-in: images without a supplied Wi-Fi
+# profile remain passive, while a profile-bearing image performs exactly one
+# bounded WMT activation and then starts the verified ARM32 client stack.
+start_wifi_network()
+{
+    [ -r /etc/wifi/wpa_supplicant.conf ] || { log wifi-profile-absent; return 0; }
+    log wifi-profile-present
+    # This is the proven manual choreography from session e8c21eb3bbae:
+    # stock-compatible configure-only init, stale-launcher cleanup, exactly one
+    # one-shot command responder, then one timed Wi-Fi function-on write.  Do
+    # not substitute the stock wmt_loader here; that path exits 255 on this
+    # image before creating wlan0.
+    /sbin/wmt_stock_compat --device /dev/wmt --firmware-dir /lib/firmware \
+        --no-function-on >/tmp/wifi-wmt-configure.log 2>&1 || {
+        log wifi-stock-compat-failed
+        return 1
+    }
+    stale=$($BB pidof wmt_launcher 2>/dev/null)
+    if [ -n "$stale" ]; then
+        $BB kill -9 $stale 2>/dev/null
+        $BB sleep 1
+    fi
+    stale_after=$($BB pidof wmt_launcher 2>/dev/null)
+    [ -z "$stale_after" ] || { log wifi-stale-launcher-remains; return 1; }
+    /sbin/wmt_launcher --device /dev/wmt --ok --once \
+        >/tmp/wifi-wmt-responder.log 2>&1 &
+    responder_pid=$!
+    $BB sleep 1
+    responder_count=$($BB pidof wmt_launcher 2>/dev/null | $BB wc -w)
+    [ "$responder_count" -eq 1 ] || {
+        log wifi-launcher-count-failed
+        return 1
+    }
+    log wifi-launcher-ready
+    $BB timeout 30 /bin/busybox sh -c "printf '1' > /dev/wmtWifi" \
+        >/tmp/wifi-function-on.log 2>&1
+    wifi_on_rc=$?
+    log "wifi-function-on-rc:$wifi_on_rc"
+    wait "$responder_pid" 2>/dev/null
+    [ "$wifi_on_rc" -eq 0 ] || { log wifi-function-on-failed; return "$wifi_on_rc"; }
+    i=0
+    while [ "$i" -lt 30 ] && [ ! -e /sys/class/net/wlan0 ]; do
+        $BB sleep 1
+        i=$((i + 1))
+    done
+    [ -e /sys/class/net/wlan0 ] || { log wlan0-registration-timeout; return 1; }
+    /sbin/libreecho-wifi start >/tmp/wifi-client.log 2>&1
+    client_rc=$?
+    log "wifi-client-rc:$client_rc"
+    return "$client_rc"
+}
+log wifi-network-worker-deferred
+
+# Preserve v97's root command loop, but never let one experiment monopolize
+# the control plane.  A request is atomically claimed as runme.active, then
+# executed under a hard timeout with a separate cancellation poller.  The
+# reboot supervisor above remains independent even while this child is stuck.
+RUNME_TIMEOUT=${LIBREECHO_RUNME_TIMEOUT:-120}
+runme_loop()
+{
+    while true; do
+        if [ -f /tmp/runme ] && [ ! -e /tmp/runme.active ]; then
+            $BB mv /tmp/runme /tmp/runme.active
+            $BB rm -f /tmp/runme.cancel
+            printf 'LIBREECHO_RUNME_STARTED\n' > /tmp/runme.status
+            $BB setsid $BB timeout -k 2 "$RUNME_TIMEOUT" /bin/busybox sh /tmp/runme.active > /tmp/result 2>&1 &
+            runme_pid=$!
+            cancelled=0
+            while $BB kill -0 "$runme_pid" 2>/dev/null; do
+                if [ -f /tmp/runme.cancel ]; then
+                    cancelled=1
+                    $BB rm -f /tmp/runme.cancel
+                    log runme-cancel-requested
+                    $BB kill -TERM -- "-$runme_pid" 2>/dev/null
+                    $BB sleep 1
+                    $BB kill -KILL -- "-$runme_pid" 2>/dev/null
+                    break
+                fi
+                $BB sleep 1
+            done
+            wait "$runme_pid" 2>/dev/null
+            runme_rc=$?
+            if [ "$cancelled" -eq 1 ]; then
+                runme_rc=125
+                printf 'LIBREECHO_RUNME_CANCELLED\n' >> /tmp/result
+                printf 'LIBREECHO_RUNME_CANCELLED\n' > /tmp/runme.status
+            elif [ "$runme_rc" -eq 124 ]; then
+                $BB kill -KILL -- "-$runme_pid" 2>/dev/null
+                printf 'LIBREECHO_RUNME_TIMEOUT=%s\n' "$RUNME_TIMEOUT" >> /tmp/result
+                printf 'LIBREECHO_RUNME_TIMEOUT=%s\n' "$RUNME_TIMEOUT" > /tmp/runme.status
+                log runme-timeout
+            else
+                printf 'LIBREECHO_RUNME_RC=%s\n' "$runme_rc" >> /tmp/result
+                printf 'LIBREECHO_RUNME_RC=%s\n' "$runme_rc" > /tmp/runme.status
+            fi
+            $BB rm -f /tmp/runme.active
+        fi
+        $BB sleep 1
+    done
+}
+runme_loop &
+log runme-loop-started
+
+USB=/sys/class/android_usb/android0
+if [ -d "$USB" ]; then
+    log android-usb-found
+    $BB sleep 2
+    log android-usb-settle-complete
+
+    echo 0 > "$USB/enable" 2>/dev/null
+    echo 18D1 > "$USB/idVendor" 2>/dev/null
+    echo D001 > "$USB/idProduct" 2>/dev/null
+    echo adb > "$USB/f_ffs/aliases" 2>/dev/null
+	# Isolate the FunctionFS/ADB path first.  RNDIS is an independent composite
+	# function and a bind failure there can hide a healthy ADB transport.
+	echo adb > "$USB/functions" 2>/dev/null
+    echo LibreEcho > "$USB/iManufacturer" 2>/dev/null
+    echo MT8163-ARM32-recovery > "$USB/iProduct" 2>/dev/null
+    serial=$($BB sed -n 's/.*androidboot.serialno=\([^ ]*\).*/\1/p' /proc/cmdline)
+    echo "${serial:-G2A0RF0485020316}" > "$USB/iSerial" 2>/dev/null
+    log android-ffs-composition-set
+
+	if $BB mount -t functionfs -o uid=2000,gid=2000 adb /dev/usb-ffs/adb 2>/tmp/functionfs.log; then
+		log functionfs-mounted
+
+		# v97-proven ordering: start adbd FIRST so it writes its FunctionFS
+		# descriptors to /dev/usb-ffs/adb/ep0, THEN enable the gadget.
+		# android.c holds an extra disable_depth reference until FunctionFS
+		# publishes descriptors; enabling before adbd runs leaves the gadget
+		# disconnected forever and adbd exits immediately.
+
+		# Diagnose adbd launchability before starting it.
+		if [ ! -x /sbin/adbd ]; then
+			log adbd-binary-missing-or-not-executable
+		fi
+		# Log the ELF interpreter the binary expects.
+		interp=$($BB head -c 512 /sbin/adbd 2>/dev/null | $BB strings 2>/dev/null | $BB grep -m1 '/.*linker' 2>/dev/null)
+		[ -n "$interp" ] && log "adbd-interp:$interp"
+		[ -n "$interp" ] && [ ! -e "$interp" ] && log "adbd-interp-missing:$interp"
+		# Log available shared library paths.
+		for libdir in /system/lib /system/bin /sbin /lib; do
+			[ -d "$libdir" ] && log "libdir:$libdir:$($BB ls "$libdir" 2>/dev/null | $BB head -5 | $BB tr '\n' ',')"
+		done
+
+		/sbin/adbd --root_seclabel=u:r:su:s0 --device_banner=device </dev/null >/tmp/adbd.log 2>&1 &
+		adbd_pid=$!
+		log "adbd-started:$adbd_pid"
+
+		# Give adbd time to open the FunctionFS endpoint and write descriptors.
+		$BB sleep 3
+
+		# Capture exit status if adbd died during the sleep.
+		if ! $BB kill -0 "$adbd_pid" 2>/dev/null; then
+			wait "$adbd_pid" 2>/dev/null
+			log "adbd-exit-status:$?"
+			[ -s /tmp/adbd.log ] && $BB sed 's/^/<3>adbd-log: /' /tmp/adbd.log > /dev/kmsg 2>/dev/null
+			# Check kernel log for segfaults or signals.
+			$BB dmesg 2>/dev/null | $BB grep -i "adbd\|segfault\|sig\|killed" | $BB tail -5 | $BB sed 's/^/<3>kern: /' > /dev/kmsg 2>/dev/null
+			# Check if ep0 exists and is accessible.
+			[ -e /dev/usb-ffs/adb/ep0 ] && log "ep0-exists:yes" || log "ep0-exists:no"
+			$BB ls -la /dev/usb-ffs/adb/ 2>/dev/null | $BB head -5 | $BB sed 's/^/<3>ffs-ls: /' > /dev/kmsg 2>/dev/null
+			# Try running adbd in foreground briefly to capture any output.
+			ADBD_BIN=/sbin/adbd
+			"$ADBD_BIN" --version >/tmp/adbd-version.log 2>&1
+			log "adbd-version-rc:$?"
+			[ -s /tmp/adbd-version.log ] && $BB sed 's/^/<3>adbd-ver: /' /tmp/adbd-version.log > /dev/kmsg 2>/dev/null
+			# Check if /dev/null and /dev/zero exist (adbd needs them).
+			[ -c /dev/null ] && log "dev-null:ok" || log "dev-null:missing"
+			[ -c /dev/zero ] && log "dev-zero:ok" || log "dev-zero:missing"
+		fi
+
+		if echo 1 > "$USB/enable" 2>/tmp/android-usb-enable.err; then
+			log android-usb-enabled
+		else
+			log android-usb-enable-write-failed
+		fi
+
+		# Verify the daemon survived and FunctionFS endpoints appeared.
+		ffs_ready=0
+		i=0
+		while [ "$i" -lt 10 ]; do
+			if [ -e /dev/usb-ffs/adb/ep1 ] && [ -e /dev/usb-ffs/adb/ep2 ]; then
+				ffs_ready=1
+				break
+			fi
+			if ! $BB kill -0 "$adbd_pid" 2>/dev/null; then
+				log adbd-exited-early
+				if [ -s /tmp/adbd.log ]; then
+					$BB sed 's/^/<3>adbd: /' /tmp/adbd.log > /dev/kmsg 2>/dev/null
+				fi
+				break
+			fi
+			$BB sleep 1
+			i=$((i + 1))
+		done
+
+		if [ "$ffs_ready" -eq 1 ]; then
+			log functionfs-ready
+		else
+			log functionfs-not-ready
+			if [ -s /tmp/adbd.log ]; then
+				$BB tail -n 8 /tmp/adbd.log | $BB sed 's/^/<3>adbd: /' > /dev/kmsg 2>/dev/null
+			fi
+			if [ -s /tmp/functionfs.log ]; then
+				$BB tail -n 4 /tmp/functionfs.log > /dev/kmsg 2>/dev/null
+			fi
+		fi
+    else
+        log functionfs-mount-failed
+    fi
+else
+    log android-usb-missing
+fi
+
+log init-ready-pid1-managed
+
+# Connectivity is deliberately launched only after the ADB/FunctionFS control
+# plane is ready.  A profile-bearing development image performs one bounded
+# Wi-Fi activation; a failed activation is recorded but never takes PID 1 or
+# the recovery runner down.
+if [ "${ffs_ready:-0}" -eq 1 ]; then
+    start_wifi_network &
+    log wifi-network-worker-started-after-adb
+else
+    log wifi-network-skipped-adb-not-ready
+fi
+
+# Android init remains PID 1.  Keep this service alive so the runme loop and
+# recovery diagnostics survive optional driver failures.
+while true; do
+    $BB sleep 3600
+done

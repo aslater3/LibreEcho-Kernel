@@ -383,6 +383,23 @@ int mtk_wdt_request_en_set(int mark_bit, WD_REQ_CTL en)
 	int res = 0;
 	unsigned int tmp;
 
+#ifdef CONFIG_ARM
+	/*
+	 * The MT8163 ARM32 thermal/SPM request paths are not validated with
+	 * this SMP/timer bring-up.  They can assert an RGU reset even when the
+	 * normal watchdog and PCM watchdog are disabled, so do not let a later
+	 * thermal or SPM initcall re-arm any request source.
+	 */
+	if (en == WD_REQ_EN &&
+	    (mark_bit == MTK_WDT_REQ_MODE_SPM_SCPSYS ||
+	     mark_bit == MTK_WDT_REQ_MODE_SPM_THERMAL ||
+	     mark_bit == MTK_WDT_REQ_MODE_THERMAL)) {
+		pr_notice_once("[WDTDBG] suppressing ARM32 watchdog request enable bit=0x%x\n",
+			       mark_bit);
+		return 0;
+	}
+#endif
+
 	spin_lock(&rgu_reg_operation_spinlock);
 	tmp = __raw_readl(MTK_WDT_REQ_MODE);
 	tmp |= MTK_WDT_REQ_MODE_KEY;
@@ -606,6 +623,9 @@ static int mtk_wdt_probe(struct platform_device *dev)
 		__raw_readl(MTK_WDT_MODE), __raw_readl(MTK_WDT_NONRST_REG));
 	pr_debug("mtk_wdt_probe : done MTK_WDT_REQ_MODE(%x)\n", __raw_readl(MTK_WDT_REQ_MODE));
 	pr_debug("mtk_wdt_probe : done MTK_WDT_REQ_IRQ_EN(%x)\n", __raw_readl(MTK_WDT_REQ_IRQ_EN));
+	pr_notice("[WDTDBG] probe final mode=0x%x status=0x%x req_mode=0x%x req_irq=0x%x\n",
+		  __raw_readl(MTK_WDT_MODE), __raw_readl(MTK_WDT_STATUS),
+		  __raw_readl(MTK_WDT_REQ_MODE), __raw_readl(MTK_WDT_REQ_IRQ_EN));
 	toprgu_register_reset_controller(dev->dev.of_node, toprgu_base, 0x18);
 
 	return ret;
@@ -692,6 +712,8 @@ static int __init mtk_wdt_get_base_addr(void)
 	u32 mode_before;
 	u32 status_before;
 	u32 length_before;
+	u32 req_mode_before;
+	u32 req_irq_before;
 
 	for (i = 0; rgu_of_match[i].compatible; i++) {
 		np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[i].compatible);
@@ -721,13 +743,23 @@ static int __init mtk_wdt_get_base_addr(void)
 	mode_before = __raw_readl(MTK_WDT_MODE);
 	status_before = __raw_readl(MTK_WDT_STATUS);
 	length_before = __raw_readl(MTK_WDT_LENGTH);
-	pr_notice("[WDTDBG] early regs mode=0x%x status=0x%x length=0x%x\n",
-		  mode_before, status_before, length_before);
+	req_mode_before = __raw_readl(MTK_WDT_REQ_MODE);
+	req_irq_before = __raw_readl(MTK_WDT_REQ_IRQ_EN);
+	pr_notice("[WDTDBG] early regs mode=0x%x status=0x%x length=0x%x req_mode=0x%x req_irq=0x%x\n",
+		  mode_before, status_before, length_before, req_mode_before, req_irq_before);
 	mtk_wdt_set_time_out_value(120);
 	mtk_wdt_restart(WD_TYPE_NORMAL);
 	mtk_wdt_mode_config(FALSE, FALSE, TRUE, FALSE, FALSE);
-	pr_notice("[WDTDBG] early watchdog disabled mode=0x%x status=0x%x\n",
-		  __raw_readl(MTK_WDT_MODE), __raw_readl(MTK_WDT_STATUS));
+	/* The bootloader may leave either SPM request watchdog source armed. */
+	mtk_wdt_request_en_set(MTK_WDT_REQ_MODE_SPM_SCPSYS, WD_REQ_DIS);
+	mtk_wdt_request_mode_set(MTK_WDT_REQ_MODE_SPM_SCPSYS, WD_REQ_RST_MODE);
+	mtk_wdt_request_en_set(MTK_WDT_REQ_MODE_SPM_THERMAL, WD_REQ_DIS);
+	mtk_wdt_request_mode_set(MTK_WDT_REQ_MODE_SPM_THERMAL, WD_REQ_RST_MODE);
+	mtk_wdt_request_en_set(MTK_WDT_REQ_MODE_THERMAL, WD_REQ_DIS);
+	mtk_wdt_request_mode_set(MTK_WDT_REQ_MODE_THERMAL, WD_REQ_RST_MODE);
+	pr_notice("[WDTDBG] early watchdog disabled mode=0x%x status=0x%x req_mode=0x%x req_irq=0x%x\n",
+		  __raw_readl(MTK_WDT_MODE), __raw_readl(MTK_WDT_STATUS),
+		  __raw_readl(MTK_WDT_REQ_MODE), __raw_readl(MTK_WDT_REQ_IRQ_EN));
 
 	return 0;
 }
