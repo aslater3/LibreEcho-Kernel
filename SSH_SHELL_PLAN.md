@@ -16,22 +16,25 @@ Provide a real interactive SSH session to the ARM32 development image, not only
 an SSH banner or remote one-shot command. The first acceptance target is:
 
 ```text
-host -> TCP/22 -> authenticated SSH key -> root /bin/sh -> PTY on /dev/pts/N
+host -> TCP/22 -> authenticated root password -> root /bin/sh -> PTY on /dev/pts/N
 ```
 
 The initial development implementation will be intentionally narrow:
 
 - Dropbear server, not OpenSSH, as the first implementation;
-- public-key authentication only;
-- root login allowed only with the supplied development public key;
-- no root password, password authentication, PAM, or private key in the image;
+- password authentication only;
+- root login allowed only with the supplied build-local development password;
+- no public-key authentication, `authorized_keys`, or client private key in the image;
+- no plaintext password in the image; only the salted root password hash is
+  packaged in `/etc/shadow`;
 - no TCP forwarding (`-j -k`); and
 - no automatic SSH startup unless the image has a working network profile and
   reaches the WLAN/IP-ready gate.
 
-This gives a full unrestricted BusyBox shell for development while avoiding a
-password secret embedded in the image and avoiding an SSH listener on an image
-with no network identity.
+This gives a full BusyBox shell for development while avoiding key material in
+the image and avoiding an SSH listener on an image with no network identity.
+Password-only root SSH is intentionally limited to the development image and
+must use a long, build-local password that is never committed or logged.
 
 ## Findings from `origin/main`
 
@@ -99,7 +102,7 @@ image while the pipeline silently points at the buttons or LED worktree.
 ### Decision: Dropbear first
 
 Dropbear is the appropriate first target for this image because it is designed
-for embedded systems and can provide the required server, public-key auth, and
+for embedded systems and can provide the required server, password auth, and
 PTY shell with a small static ARM32 binary and without the distro service stack.
 The host has no Dropbear binary yet, so the target binary must be built and
 pinned; the host's amd64 `dropbear`/`openssh-server` packages are not usable as
@@ -145,13 +148,16 @@ library must be treated as a new closed packaging contract.
 3. Build at least the server and host-key utility. Do not package the client
    unless a later requirement needs outbound SSH.
 4. Disable unused footprint/features where supported, while retaining:
-   public-key authentication, PTY allocation, shell execution, modern host-key
-   algorithms, and logging needed for bring-up.
+   password authentication, PTY allocation, shell execution, modern host-key
+   algorithms, and logging needed for bring-up. Disable server public-key
+   authentication if the selected Dropbear build supports that compile-time
+   option; otherwise omit `authorized_keys` and verify key login is rejected.
 5. Verify the output with `readelf`/`file`: little-endian ELF32 ARM, supported
    ARM ABI, no unexpected `PT_INTERP`, no unpinned shared-library dependency,
    deterministic build flags, executable mode, size, and SHA-256.
-6. Keep the private client key entirely outside the repository and outside the
-   image. Only its public key may be supplied to the image build.
+6. Accept a build-local root password hash rather than a plaintext password
+   where possible. Keep the plaintext password outside the repository, image,
+   manifest, and build logs.
 
 ### Phase 2 — Add explicit SSH packaging contracts
 
@@ -161,7 +167,7 @@ inputs/options:
 ```text
 --dropbear <static ARM32 server>
 --dropbearkey <static ARM32 host-key utility>   # if separate utility is used
---ssh-authorized-key <build-local public key>
+--ssh-root-password-hash <build-local hash file>
 --ssh-enabled                                  # explicit opt-in
 ```
 
@@ -172,24 +178,25 @@ The staged initramfs should contain, at minimum:
 /sbin/dropbearkey                 # if required by the chosen build
 /etc/passwd
 /etc/group
-/root/.ssh/authorized_keys
+/etc/shadow
 /etc/dropbear/                    # directory only or generated-key target
 ```
 
-Use a build-local public-key input rather than committing a user key into the
-source tree. The manifest may record the public-key SHA-256 and metadata but
-must not record private key material. Reject missing, malformed, symlinked, or
-world-writable key inputs.
+Use a build-local salted password-hash input rather than accepting or
+committing a plaintext password. Do not record the hash in the manifest or
+build logs. Reject missing, malformed, symlinked, or world-writable password
+inputs. The resulting `/etc/shadow` must be mode `0600` and contain no blank
+or locked root password.
 
-Use a minimal account database with root's shell set to `/bin/sh`. Do not add a
-root password or enable password authentication in the first candidate.
+Use a minimal account database with root's shell set to `/bin/sh`. Do not add
+`authorized_keys`; the first candidate must not offer public-key authentication.
 
 Add verifier checks for:
 
 - exact Dropbear ELF identity/hash/size/mode;
 - account-file modes and root shell path;
-- authorized-key format and safe ownership/mode;
-- no private-key files in the archive;
+- salted root password hash format and safe `/etc/shadow` ownership/mode;
+- no `authorized_keys` or private-key files in the archive;
 - no unexpected dynamic loader/library dependency;
 - SSH manifest consistency and all-or-nothing enablement; and
 - no SSH startup when the SSH bundle is disabled.
@@ -202,7 +209,7 @@ and `status` behavior and use explicit paths.
 
 Startup sequence:
 
-1. Require the SSH bundle and `/etc/passwd`/authorized key to be present.
+1. Require the SSH bundle and `/etc/passwd`/`/etc/shadow` to be present.
 2. Require the WLAN interface to exist, have carrier, and have an IPv4 address
    and route from the existing verified network worker.
 3. Create a writable runtime directory such as `/tmp/dropbear`.
@@ -213,14 +220,15 @@ Startup sequence:
    settings, equivalent to:
 
 ```text
- dropbear -F -E -p 0.0.0.0:22 -s -j -k \
+ dropbear -F -E -p 0.0.0.0:22 -j -k \
    -r /tmp/dropbear/dropbear_rsa_host_key \
    -r /tmp/dropbear/dropbear_ecdsa_host_key
 ```
 
    The exact key types and options must be confirmed against the pinned
-   Dropbear build before coding. Do not use `-w`, because the first acceptance
-   target is a root development shell; keep password authentication disabled.
+   Dropbear build before coding. Do not use root-login/password-disabling
+   flags such as `-w` or `-g`; password authentication must remain enabled and
+   public-key authentication must remain disabled.
 6. Log stable markers such as `ssh-profile-present`, `ssh-hostkeys-ready`,
    `ssh-started:<pid>`, `ssh-listening`, `ssh-exit:<rc>`, and
    `ssh-startup-skipped:<reason>`.
@@ -238,12 +246,13 @@ Before hardware:
 
 1. Add source-contract tests for the builder/verifier and init script.
 2. Build the Dropbear input twice or otherwise verify deterministic output.
-3. Run `readelf`, hash, mode, archive-tree, and no-private-key checks.
+3. Run `readelf`, hash, mode, archive-tree, no-private-key, no-authorized-key,
+   and password-hash checks.
 4. Rebuild the ARM32 kernel image through the pipeline with the SSH worktree
    explicitly selected.
-5. Extract the final CPIO and verify the daemon, account files, authorized key,
-   shell symlinks, `/dev/ptmx` setup, host-key generation path, and startup
-   markers.
+5. Extract the final CPIO and verify the daemon, account files, salted root
+   password hash, absence of `authorized_keys`, shell symlinks, `/dev/ptmx`
+   setup, host-key generation path, and startup markers.
 6. Run the existing unit tests, shell syntax checks, Python compilation,
    `git diff --check`, and the independent image verifier.
 7. Confirm the final manifest says `PREPARED_NOT_FLASHED` and binds the SSH
@@ -262,8 +271,8 @@ Run the gates separately:
    the existing network gate.
 3. **Daemon:** process exists; `/proc/net/tcp` or a target-side probe shows TCP/22
    listening; init log contains `ssh-listening`.
-4. **Authentication:** the supplied public key succeeds; an unrelated key is
-   rejected; password authentication is rejected.
+4. **Authentication:** the supplied root password succeeds; an incorrect
+   password, an empty password, and a public-key attempt are rejected.
 5. **Full shell:** from the host run an allocated-PTY session and verify:
 
 ```sh
@@ -298,14 +307,16 @@ policy. Before calling it a final OS service, decide separately:
 - where persistent host keys live and how they are provisioned;
 - whether SSH should be disabled by default or enabled only by a physical button
   / provisioning marker;
-- whether a password or an external key-provisioning flow is ever required;
+- whether password-only root SSH is replaced by key provisioning or disabled;
 - whether port forwarding, SCP/SFTP, and agent forwarding are needed;
 - how logs and failed-auth events are rate-limited and retained; and
 - how SSH interacts with SELinux enforcing mode and the eventual native PID-1
   service supervisor.
 
-No private credential should enter Git, `pipeline/inputs/SHA256SUMS`, a manifest,
-or a boot image.
+No plaintext password or private key should enter Git,
+`pipeline/inputs/SHA256SUMS`, a manifest, or a boot image. The salted root
+password hash is necessarily present in `/etc/shadow` for this development
+configuration and must not be copied into logs or manifests.
 
 ## Expected implementation files
 
@@ -338,11 +349,13 @@ build can accidentally package a different checkout, invalidating all results.
 The first implementation is complete only when:
 
 - Dropbear source/binary provenance and hashes are pinned;
-- the image contains no private credential and uses key-only auth;
+- the image contains no plaintext password/private key and uses password-only
+  root auth;
 - the daemon starts only after verified network readiness;
 - the builder/verifier/tests enforce the complete SSH bundle;
 - a fresh verified image is built from `agent/arm32-ssh`;
-- the target accepts the supplied key and rejects an unrelated key/password;
+- the target accepts the supplied password and rejects an incorrect/empty
+  password and public-key authentication;
 - `ssh -tt` provides a functioning root BusyBox shell on `/dev/pts/N`; and
 - independent ADB/recovery operation remains intact.
 
