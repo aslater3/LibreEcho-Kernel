@@ -81,6 +81,39 @@ create_audio_nodes()
     AUDIO_NODES_CREATED=$nodes
 }
 
+create_input_nodes()
+{
+    nodes=0
+    $BB mkdir -p /dev/input
+    for sys_input in /sys/class/input/input*; do
+        [ -d "$sys_input" ] || continue
+        for sys_event in "$sys_input"/event*; do
+            [ -r "$sys_event/dev" ] || continue
+            name=${sys_event##*/}
+            case "$name" in
+                event[0-9]*) ;;
+                *) continue ;;
+            esac
+            target="/dev/input/$name"
+            devno=$($BB cat "$sys_event/dev" 2>/dev/null)
+            case "$devno" in
+                ''|*[!0-9:]*|*:*:*) continue ;;
+            esac
+            major=${devno%:*}
+            minor=${devno#*:}
+            [ -n "$major" ] && [ -n "$minor" ] || continue
+            if [ ! -e "$target" ]; then
+                $BB mknod "$target" c "$major" "$minor" 2>/dev/null || continue
+            fi
+            [ -c "$target" ] || continue
+            $BB chmod 0660 "$target" 2>/dev/null
+            nodes=$((nodes + 1))
+        done
+    done
+    $BB chmod 0755 /dev/input 2>/dev/null
+    INPUT_NODES_CREATED=$nodes
+}
+
 log init-started
 
 # Android's reduced ramdisk does not mount devtmpfs over /dev: doing so hides
@@ -103,6 +136,27 @@ audio_node_worker()
 }
 audio_node_worker &
 log audio-node-worker-started
+
+# The reduced ramdisk deliberately does not mount devtmpfs over /dev.  Expose
+# evdev nodes from the input devices' sysfs major/minor numbers instead, so
+# GPIO keys and the MTK keypad can be consumed by a root event/trigger service.
+input_node_worker()
+{
+    i=0
+    while [ "$i" -lt 20 ]; do
+        create_input_nodes
+        if [ "${INPUT_NODES_CREATED:-0}" -gt 0 ]; then
+            log "input-devnodes-created:$INPUT_NODES_CREATED"
+            return 0
+        fi
+        $BB sleep 1
+        i=$((i + 1))
+    done
+    log input-devnodes-timeout
+    return 1
+}
+input_node_worker &
+log input-node-worker-started
 
 # The GPT used by Biscuit exposes expdb as Linux partition 7.  Wait for the
 # kernel's block identity, then create direct aliases from sysfs rather than
