@@ -3,9 +3,10 @@
 ## Status
 
 - Branch: `agent/arm32-ssh`
-- Base: `origin/main` at `31867ecb59bd60756cbb5694971bfcefe4df4794`
+- Base: `origin/main` at `c729f687` (buttons merge)
 - Worktree: `/home/andy/workspace/mt8163-arm32-ssh`
-- Scope: plan only; no SSH daemon or image files are installed yet.
+- Scope: Dropbear build and opt-in image packaging contracts are implemented;
+  network-gated daemon startup and hardware validation remain.
 
 The buttons branch and its working files remain in the original worktree:
 `/home/andy/workspace/mt8163-arm32-wifi-candidate/LibreEcho-Kernel`.
@@ -141,6 +142,14 @@ library must be treated as a new closed packaging contract.
 
 ### Phase 1 — Pin and build Dropbear
 
+Status: implemented in `tools/mt8163-arm32/ssh/`. Dropbear 2026.93 is
+signature-verified and hash-pinned, the ARM32 server and `dropbearkey` utility
+build statically with password authentication enabled and public-key
+authentication compiled out, and repeated builds are byte-for-byte identical.
+The target ARMHF `libcrypt` development/runtime packages are explicit,
+hash-checked pipeline inputs because the installed cross-toolchain does not
+ship them.
+
 1. Select a pinned Dropbear release/commit and record source archive hash and
    provenance in the pipeline input manifest.
 2. Add a reproducible ARM32 cross-build helper. Prefer a static target binary;
@@ -161,8 +170,13 @@ library must be treated as a new closed packaging contract.
 
 ### Phase 2 — Add explicit SSH packaging contracts
 
-Extend the builder and verifier as an all-or-nothing SSH bundle. Proposed
-inputs/options:
+Status: implemented as an explicit `--ssh-enabled` opt-in in the recovery image
+builder, verifier, and pipeline. The default candidate remains SSH-disabled;
+the enabled path requires a private, non-world-writable salted root hash file,
+never records that hash in the manifest/logs, stages no `authorized_keys`, and
+does not publish a password-bearing image until that local input is supplied.
+
+The builder and verifier use this all-or-nothing SSH bundle interface:
 
 ```text
 --dropbear <static ARM32 server>

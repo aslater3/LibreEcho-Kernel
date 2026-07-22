@@ -37,13 +37,16 @@ SOURCE_BOOT_SHA256 = "c0f52a3b079d214495cd3dd22f92fd85695d1b868c58b491a2edb933bc
 STOCK_EVT_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57dee1"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 MUSL_LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-RECOVERY_INIT_SHA256 = "bc6719473ae96dcde8bd029ba70f257d6a8d7948391946f86bf159d2fd54df13"
+RECOVERY_INIT_SHA256 = "bd789ca4a4d6785af76534f13bd9865da96448453fe929bd7309be3d6d118847"
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
 CONNECTIVITY_STOCK_SYSTEM_SHA256 = "56540b3a9ac4437901a5510d9fb5e09b1a8d0cc229548f0b08bb5c22d78684fe"
 CONNECTIVITY_EVIDENCE_MANIFEST_SHA256 = "d1eedd04efe0dbc78853f2b0f9357c092b4ca66242648908c0369956538441eb"
 WPA_SUPPLICANT_VERSION = "2.10"
+SSH_PASSWORD_HASH_RE = re.compile(
+    r"\$(?:1|5|6|2[abxy]?|y|gy)\$[^$:\r\n]{1,64}\$[^:\r\n]{1,512}\Z"
+)
 
 STOCK_FILES = {
     "sbin/adbd": (0o750, "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"),
@@ -440,6 +443,7 @@ def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
 
     overlay_files = {
         "default.prop": ("default.prop", 0o644),
+        "profile": ("etc/profile", 0o644),
         "init.rc": ("init.rc", 0o644),
         "init.recovery.mt8163.rc": ("init.recovery.mt8163.rc", 0o644),
         "libreecho-init": ("libreecho-init", 0o755),
@@ -570,6 +574,54 @@ def add_audio_tools(stage: Path, tinyplay: Path, tinycap: Path, tinymix: Path,
     audio["tools"] = tools
 
 
+def add_network_tools(stage: Path, iwconfig: Path,
+                      manifest: dict[str, object]) -> None:
+    """Install the manual network inspection tools.
+
+    ifconfig is provided by the already-pinned BusyBox applet set.  Expose a
+    conventional /sbin path for it and pair it with a separately pinned,
+    static wireless-tools iwconfig binary.
+    """
+    ifconfig = stage / "bin/ifconfig"
+    if not ifconfig.is_symlink() or os.readlink(ifconfig) != "busybox":
+        raise SystemExit("ERROR: BusyBox ifconfig applet is missing or changed")
+    ifconfig_target = stage / "sbin/ifconfig"
+    if ifconfig_target.exists() or ifconfig_target.is_symlink():
+        raise SystemExit(f"ERROR: network tool collides with {ifconfig_target}")
+    os.symlink("../bin/ifconfig", ifconfig_target)
+
+    if iwconfig.is_symlink() or not iwconfig.is_file():
+        raise SystemExit(f"ERROR: iwconfig is not a regular file: {iwconfig}")
+    iwconfig_data = read(iwconfig)
+    iwconfig_target = stage / "sbin/iwconfig"
+    if iwconfig_target.exists() or iwconfig_target.is_symlink():
+        raise SystemExit(f"ERROR: network tool collides with {iwconfig_target}")
+    iwconfig_target.write_bytes(iwconfig_data)
+    iwconfig_target.chmod(0o755)
+    iwconfig_elf = require_elf_contract(iwconfig_target, 0x05000400, None, (), False)
+
+    manifest["network_tools"] = {
+        "enabled": True,
+        "activation": "manual-only",
+        "autostart": False,
+        "tools": {
+            "ifconfig": {
+                "path": "/sbin/ifconfig",
+                "provider": "busybox",
+                "target": "../bin/ifconfig",
+                "mode": "0777",
+            },
+            "iwconfig": {
+                "path": str(iwconfig.resolve()),
+                "sha256": sha256(iwconfig_data),
+                "size": len(iwconfig_data),
+                "mode": "0755",
+                "elf": iwconfig_elf,
+            },
+        },
+    }
+
+
 def add_startup_audio(stage: Path, startup_audio: Path,
                       manifest: dict[str, object]) -> None:
     """Install the bounded post-init HPR confirmation clip."""
@@ -618,6 +670,94 @@ def add_startup_audio(stage: Path, startup_audio: Path,
         "lineout_dac_switches": "off",
         "playback_device": "0:23",
         "plays_once": True,
+    }
+
+
+def read_ssh_password_hash(path: Path) -> str:
+    """Read one build-local crypt(3) hash without accepting a plaintext secret."""
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit(f"ERROR: SSH password hash is not a regular file: {path}")
+    if path.stat().st_mode & 0o022:
+        raise SystemExit(f"ERROR: SSH password hash is group/world-writable: {path}")
+    data = read(path)
+    if data.endswith(b"\n"):
+        data = data[:-1]
+    if not data or b"\n" in data or b"\r" in data:
+        raise SystemExit("ERROR: SSH password hash must be exactly one line")
+    try:
+        value = data.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise SystemExit("ERROR: SSH password hash is not ASCII") from exc
+    if not SSH_PASSWORD_HASH_RE.fullmatch(value):
+        raise SystemExit("ERROR: SSH password hash is not a supported salted crypt(3) hash")
+    return value
+
+
+def add_ssh_bundle(stage: Path, dropbear: Path, dropbearkey: Path,
+                   password_hash: Path, manifest: dict[str, object]) -> None:
+    """Install the opt-in password-only root SSH bundle."""
+    hash_value = read_ssh_password_hash(password_hash)
+    files: dict[str, object] = {}
+
+    (stage / "root").mkdir(parents=True, exist_ok=True)
+    (stage / "root").chmod(0o755)
+    (stage / "etc/dropbear").mkdir(parents=True, exist_ok=True)
+    (stage / "etc/dropbear").chmod(0o700)
+
+    account_files = {
+        "etc/passwd": (b"root:x:0:0:root:/root:/bin/sh\n", 0o644),
+        "etc/group": (b"root:x:0:\n", 0o644),
+        "etc/shells": (b"/bin/sh\n", 0o644),
+        "etc/shadow": (f"root:{hash_value}:0:0:99999:7:::\n".encode("ascii"), 0o600),
+    }
+    for relative, (data, mode) in account_files.items():
+        target = stage / relative
+        if target.exists() or target.is_symlink():
+            raise SystemExit(f"ERROR: SSH account file collides with {target}")
+        target.write_bytes(data)
+        target.chmod(mode)
+        record: dict[str, object] = {
+            "path": "/" + relative,
+            "size": len(data),
+            "mode": f"{mode:04o}",
+        }
+        if relative == "etc/shadow":
+            record["secret_content_not_recorded"] = True
+        else:
+            record["sha256"] = sha256(data)
+        files[relative] = record
+
+    for relative, source in (
+        ("sbin/dropbear", dropbear),
+        ("sbin/dropbearkey", dropbearkey),
+    ):
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit(f"ERROR: SSH binary is not a regular file: {source}")
+        data = read(source)
+        if b"authorized_keys" in data:
+            raise SystemExit(f"ERROR: public-key authorization marker found in {source}")
+        target = stage / relative
+        if target.exists() or target.is_symlink():
+            raise SystemExit(f"ERROR: SSH binary collides with {target}")
+        target.write_bytes(data)
+        target.chmod(0o755)
+        files[relative] = {
+            "path": str(source.resolve()),
+            "sha256": sha256(data),
+            "size": len(data),
+            "mode": "0755",
+            "elf": require_elf_contract(target, 0x05000400, None, (), False),
+        }
+
+    manifest["ssh"] = {
+        "enabled": True,
+        "activation": "manual-only",
+        "autostart": False,
+        "authentication": "password-only",
+        "public_key_auth": False,
+        "root_login": True,
+        "host_keys": "generated-ephemerally-under-/tmp/dropbear",
+        "files": files,
     }
 
 
@@ -967,8 +1107,18 @@ def main() -> None:
                         help="static ARM32 TinyALSA capture utility to add to the initramfs")
     parser.add_argument("--tinymix", type=Path,
                         help="static ARM32 TinyALSA mixer utility to add to the initramfs")
+    parser.add_argument("--iwconfig", type=Path,
+                        help="static ARM32 wireless-tools iwconfig utility")
     parser.add_argument("--startup-audio", type=Path,
                         help="stereo 48kHz PCM16 WAV to play once after successful init")
+    parser.add_argument("--ssh-enabled", action="store_true",
+                        help="explicitly enable the password-only root SSH bundle")
+    parser.add_argument("--dropbear", type=Path,
+                        help="static ARM32 password-only Dropbear server")
+    parser.add_argument("--dropbearkey", type=Path,
+                        help="static ARM32 Dropbear host-key utility")
+    parser.add_argument("--ssh-root-password-hash", type=Path,
+                        help="build-local salted root crypt(3) hash file")
     parser.add_argument("--connectivity-stock-root", type=Path,
                         help="pinned v181 ARM32 WMT runtime and firmware root")
     parser.add_argument("--wmt-config-helper", type=Path,
@@ -1041,6 +1191,20 @@ def main() -> None:
         raise SystemExit("ERROR: audio tools require --audio-probe")
     if args.startup_audio is not None and not audio_tools_enabled:
         raise SystemExit("ERROR: startup audio requires --audio-probe and all audio tools")
+    ssh_options = {
+        "dropbear": args.dropbear,
+        "dropbearkey": args.dropbearkey,
+        "ssh_root_password_hash": args.ssh_root_password_hash,
+    }
+    ssh_enabled = args.ssh_enabled
+    if ssh_enabled and not all(value is not None for value in ssh_options.values()):
+        missing = ", ".join(
+            "--" + name.replace("_", "-")
+            for name, value in ssh_options.items() if value is None
+        )
+        raise SystemExit(f"ERROR: SSH bundle is explicitly enabled but missing {missing}")
+    if not ssh_enabled and any(value is not None for value in ssh_options.values()):
+        raise SystemExit("ERROR: SSH inputs require the explicit --ssh-enabled opt-in")
 
     source = read(args.source_boot)
     require_hash("source boot envelope", source, SOURCE_BOOT_SHA256)
@@ -1095,6 +1259,22 @@ def main() -> None:
             "probe": {},
             "tools": {},
         },
+        "network_tools": {
+            "enabled": False,
+            "activation": "manual-only",
+            "autostart": False,
+            "tools": {},
+        },
+        "ssh": {
+            "enabled": False,
+            "activation": "manual-only",
+            "autostart": False,
+            "authentication": "password-only",
+            "public_key_auth": False,
+            "root_login": True,
+            "host_keys": "generated-ephemerally-under-/tmp/dropbear",
+            "files": {},
+        },
     }
     overlay = Path(__file__).resolve().parent / "initramfs"
     with tempfile.TemporaryDirectory(prefix="libreecho-arm32-initramfs-") as temporary:
@@ -1111,8 +1291,15 @@ def main() -> None:
                 stage, args.tinyplay.resolve(), args.tinycap.resolve(),
                 args.tinymix.resolve(), manifest,
             )
+        if args.iwconfig is not None:
+            add_network_tools(stage, args.iwconfig.resolve(), manifest)
         if args.startup_audio is not None:
             add_startup_audio(stage, args.startup_audio.resolve(), manifest)
+        if ssh_enabled:
+            add_ssh_bundle(
+                stage, args.dropbear.resolve(), args.dropbearkey.resolve(),
+                args.ssh_root_password_hash.resolve(), manifest,
+            )
         if connectivity_enabled:
             add_connectivity_bundle(
                 args.connectivity_stock_root.resolve(), stage,

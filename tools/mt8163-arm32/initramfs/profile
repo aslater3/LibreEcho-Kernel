@@ -1,0 +1,17 @@
+# LibreEcho interactive root-shell profile.
+export PATH=/bin:/sbin:/system/bin:/usr/bin:/usr/sbin
+
+case "$-" in
+	*i*)
+		printf '\n'
+		printf '%s\n' '  _     _ _                  _____      _             '
+		printf '%s\n' ' | |   (_) |__  _ __ ___    | ____|__ _| |__   ___   '
+		printf '%s\n' " | |   | | '_ \| '__/ _ \   |  _| / _\` | '_ \ / _ \  "
+		printf '%s\n' ' | |___| | |_) | | | (_) |  | |__| (_| | | | |  __/  '
+		printf '%s\n' ' |_____|_|_.__/|_|  \___/   |_____\__,_|_| |_|\___|  '
+		printf '\n'
+		printf '%s\n' ' LibreEcho Development OS · MT8163 ARM32'
+		printf '%s\n\n' ' BusyBox utilities are available in /bin.'
+		PS1='libreecho# '
+		;;
+esac

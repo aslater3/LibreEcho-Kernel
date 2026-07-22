@@ -29,10 +29,11 @@ ensure_chr /dev/full 1 7
 ensure_chr /dev/random 1 8
 ensure_chr /dev/urandom 1 9
 ensure_chr /dev/console 5 1
+ensure_chr /dev/tty 5 0
 ensure_chr /dev/ptmx 5 2
 $BB chmod 0666 /dev/null /dev/zero /dev/full /dev/random /dev/urandom
 $BB chmod 0600 /dev/console
-$BB chmod 0666 /dev/ptmx
+$BB chmod 0666 /dev/tty /dev/ptmx
 
 # Android init normally mounts these before parsing init.rc.  Keep the script
 # usable in a reduced recovery environment without mounting over /dev, because
