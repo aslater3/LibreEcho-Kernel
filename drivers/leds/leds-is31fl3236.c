@@ -27,6 +27,7 @@
 #include <linux/of_gpio.h>
 #include <linux/notifier.h>
 #include <linux/reboot.h>
+#include <linux/sysfs.h>
 
 #define REG_SW_SHUTDOWN 0x00
 #define REG_PWM_BASE 0x01
@@ -50,11 +51,16 @@
 
 struct is31fl3236_data {
 	struct mutex lock;
+	struct mutex anim_lock;
 	bool play_boot_animation;
 	bool setup_device;
+	bool shutting_down;
 	int enable_gpio;
 	uint8_t ch_offset;
 	struct task_struct *boot_anim_task;
+	bool boot_anim_running;
+	bool boot_anim_started;
+	bool boot_anim_exiting;
 	int enabled;
 	uint8_t *state;
 	uint8_t led_current;
@@ -76,25 +82,33 @@ static int is31fl3236_update_led(struct i2c_client *client,
 	return is31fl3236_write_reg(client, REG_PWM_BASE+led, value);
 }
 
-static int update_frame(struct is31fl3236_data *pdata,
-						const uint8_t *buf)
+static int update_frame_locked(struct is31fl3236_data *pdata,
+			       const uint8_t *buf)
 {
 	struct i2c_client *client = pdata->client;
 	int ret;
 	int i;
 
-	mutex_lock(&pdata->lock);
-
 	for (i = 0; i < NUM_CHANNELS; i++) {
-		pdata->state[i] = buf[i];
 		ret = is31fl3236_update_led(client,
 				(i+pdata->ch_offset)%NUM_CHANNELS,
-				pdata->state[i]);
-		if (ret != 0)
-			goto fail;
+				buf[i]);
+		if (ret < 0)
+			return ret;
 	}
 	ret = is31fl3236_write_reg(client, REG_UPDATE, 0x0);
-fail:
+	if (ret >= 0)
+		memcpy(pdata->state, buf, NUM_CHANNELS);
+	return ret;
+}
+
+static int update_frame(struct is31fl3236_data *pdata,
+			const uint8_t *buf)
+{
+	int ret;
+
+	mutex_lock(&pdata->lock);
+	ret = update_frame_locked(pdata, buf);
 	mutex_unlock(&pdata->lock);
 	return ret;
 }
@@ -103,67 +117,170 @@ static int boot_anim_thread(void *data)
 {
 	struct is31fl3236_data *pdata = (struct is31fl3236_data *)data;
 	int i = 0;
+	int ret = 0;
+	int clear_ret;
+
+	mutex_lock(&pdata->lock);
+	pdata->boot_anim_started = true;
+	mutex_unlock(&pdata->lock);
 
 	while (!kthread_should_stop()) {
-		update_frame(pdata, &frames[i][0]);
+		mutex_lock(&pdata->lock);
+		ret = update_frame_locked(pdata, &frames[i][0]);
+		if (ret < 0)
+			pdata->boot_anim_exiting = true;
+		mutex_unlock(&pdata->lock);
+		if (ret < 0) {
+			pr_err("ISSI: boot animation frame update failed: %d\n",
+			       ret);
+			break;
+		}
 		msleep(BOOT_ANIMATION_FRAME_DELAY);
 		i = (i + 1) % ARRAY_SIZE(frames);
 	}
-	update_frame(pdata, clear_frame);
-	return 0;
+	mutex_lock(&pdata->lock);
+	clear_ret = update_frame_locked(pdata, clear_frame);
+	pdata->boot_anim_running = false;
+	mutex_unlock(&pdata->lock);
+	if (ret >= 0 && clear_ret < 0)
+		ret = clear_ret;
+	return ret;
 }
 
+
+static int is31fl3236_start_boot_animation(struct is31fl3236_data *pdata)
+{
+	struct task_struct *task = NULL;
+	int ret = 0;
+
+	mutex_lock(&pdata->anim_lock);
+	mutex_lock(&pdata->lock);
+	if (pdata->shutting_down) {
+		ret = -ESHUTDOWN;
+		goto unlock;
+	}
+	if (pdata->boot_anim_task && pdata->boot_anim_running &&
+	    !pdata->boot_anim_exiting)
+		goto unlock;
+	if (pdata->boot_anim_task) {
+		task = pdata->boot_anim_task;
+		pdata->boot_anim_task = NULL;
+	}
+	mutex_unlock(&pdata->lock);
+
+	/* Join a naturally exited worker before publishing its replacement. */
+	if (task) {
+		ret = kthread_stop(task);
+		put_task_struct(task);
+		mutex_lock(&pdata->lock);
+		pdata->boot_anim_running = false;
+		pdata->boot_anim_started = false;
+		pdata->boot_anim_exiting = false;
+		mutex_unlock(&pdata->lock);
+		if (ret < 0)
+			pr_err("ISSI: previous boot animation failed: %d\n", ret);
+	}
+
+	task = kthread_create(boot_anim_thread, pdata,
+			      "boot_animation_thread");
+	if (IS_ERR(task)) {
+		ret = PTR_ERR(task);
+		goto unlock_anim;
+	}
+
+	/* Pin the task until a serialized start or stop path joins it. */
+	get_task_struct(task);
+	mutex_lock(&pdata->lock);
+	pdata->boot_anim_task = task;
+	pdata->boot_anim_running = true;
+	pdata->boot_anim_started = false;
+	pdata->boot_anim_exiting = false;
+	mutex_unlock(&pdata->lock);
+	wake_up_process(task);
+	ret = 0;
+	goto unlock_anim;
+
+unlock:
+	mutex_unlock(&pdata->lock);
+unlock_anim:
+	mutex_unlock(&pdata->anim_lock);
+	return ret;
+}
+
+static int is31fl3236_stop_boot_animation(struct is31fl3236_data *pdata,
+					  bool shutting_down)
+{
+	struct task_struct *task;
+	bool started = false;
+	int clear_ret;
+	int ret;
+
+	/* Do not permit a replacement worker until the old one has exited. */
+	mutex_lock(&pdata->anim_lock);
+	mutex_lock(&pdata->lock);
+	if (shutting_down)
+		pdata->shutting_down = true;
+	task = pdata->boot_anim_task;
+	if (task)
+		pdata->boot_anim_exiting = true;
+	mutex_unlock(&pdata->lock);
+
+	ret = 0;
+	if (task) {
+		ret = kthread_stop(task);
+		mutex_lock(&pdata->lock);
+		started = pdata->boot_anim_started;
+		if (ret == -EINTR && !started) {
+			clear_ret = update_frame_locked(pdata, clear_frame);
+			if (clear_ret < 0)
+				ret = clear_ret;
+			else
+				ret = 0;
+		}
+		if (pdata->boot_anim_task == task)
+			pdata->boot_anim_task = NULL;
+		pdata->boot_anim_running = false;
+		pdata->boot_anim_started = false;
+		pdata->boot_anim_exiting = false;
+		mutex_unlock(&pdata->lock);
+		put_task_struct(task);
+	}
+	mutex_unlock(&pdata->anim_lock);
+	return ret;
+}
 
 static ssize_t boot_animation_store(struct device *dev,
 				    struct device_attribute *attr,
 				    const char *buf,
 				    size_t len)
 {
-	struct is31fl3236_data *pdata = dev_get_platdata(dev);
+	struct is31fl3236_data *pdata = dev_get_drvdata(dev);
 	uint8_t val;
 	ssize_t ret;
-	struct task_struct *stop_struct = NULL;
 
 	ret = kstrtou8(buf, 10, &val);
-	if (ret) {
-		pr_err("ISSI: Invalid input to store_boot_anim\n");
-		goto fail;
-	}
+	if (ret)
+		return ret;
+	if (val > 1)
+		return -EINVAL;
 
-	mutex_lock(&pdata->lock);
-	if (!val) {
-		if (pdata->boot_anim_task) {
-			stop_struct = pdata->boot_anim_task;
-			pdata->boot_anim_task = NULL;
-		}
-	} else {
-		if (!pdata->boot_anim_task) {
-			pdata->boot_anim_task = kthread_run(boot_anim_thread,
-							(void *)pdata,
-							"boot_animation_thread");
-			if (IS_ERR(pdata->boot_anim_task))
-				pr_err("ISSI: could not create boot animation thread\n");
-		}
-	}
-	mutex_unlock(&pdata->lock);
+	if (val)
+		ret = is31fl3236_start_boot_animation(pdata);
+	else
+		ret = is31fl3236_stop_boot_animation(pdata, false);
 
-	if (stop_struct)
-		kthread_stop(stop_struct);
-
-	ret = len;
-fail:
-	return ret;
+	return ret < 0 ? ret : len;
 }
 
 static ssize_t boot_animation_show(struct device *dev,
 				   struct device_attribute *attr,
 				   char *buf)
 {
-	struct is31fl3236_data *pdata = dev_get_platdata(dev);
+	struct is31fl3236_data *pdata = dev_get_drvdata(dev);
 	int ret;
 
 	mutex_lock(&pdata->lock);
-	ret = sprintf(buf, "%d\n", pdata->boot_anim_task != NULL);
+	ret = sprintf(buf, "%d\n", pdata->boot_anim_running);
 	mutex_unlock(&pdata->lock);
 
 	return ret;
@@ -175,41 +292,41 @@ static ssize_t led_current_store(struct device *dev,
 				 const char *buf,
 				 size_t len)
 {
-	struct is31fl3236_data *pdata = dev_get_platdata(dev);
+	struct is31fl3236_data *pdata = dev_get_drvdata(dev);
 	struct i2c_client *client = pdata->client;
 	uint8_t val;
+	uint8_t reg_val;
 	int i;
 	ssize_t ret;
 
 	ret = kstrtou8(buf, 10, &val);
-	if (ret) {
-		pr_err("ISSI: Invalid input to store_led_current\n");
-		goto fail;
-	}
+	if (ret)
+		return ret;
 	if (val < LED_CURRENT_1 || val > LED_CURRENT_1_4) {
-		pr_err("ISSI: Invalid led current division\n");
-		ret = -EINVAL;
-		goto fail;
+		return -EINVAL;
 	}
 
+	reg_val = (val << 1) | 0x1;
 	mutex_lock(&pdata->lock);
-	pdata->led_current = val;
-	val = (val << 1) | 0x1;
-	for (i = 0; i < NUM_CHANNELS; i++)
-		is31fl3236_write_reg(client, REG_CTRL_BASE + i, val);
-
-	is31fl3236_write_reg(client, REG_UPDATE, 0x0);
+	for (i = 0; i < NUM_CHANNELS; i++) {
+		ret = is31fl3236_write_reg(client, REG_CTRL_BASE + i,
+						  reg_val);
+		if (ret < 0)
+			goto unlock;
+	}
+	ret = is31fl3236_write_reg(client, REG_UPDATE, 0x0);
+	if (ret >= 0)
+		pdata->led_current = val;
+unlock:
 	mutex_unlock(&pdata->lock);
-	ret = len;
-fail:
-	return ret;
+	return ret < 0 ? ret : len;
 }
 
 static ssize_t led_current_show(struct device *dev,
 				struct device_attribute *attr,
 				char *buf)
 {
-	struct is31fl3236_data *pdata = dev_get_platdata(dev);
+	struct is31fl3236_data *pdata = dev_get_drvdata(dev);
 	int ret;
 
 	mutex_lock(&pdata->lock);
@@ -224,52 +341,60 @@ static ssize_t frame_show(struct device *dev,
 			  struct device_attribute *attr,
 			  char *buf)
 {
-	struct is31fl3236_data *pdata = dev_get_platdata(dev);
+	struct is31fl3236_data *pdata = dev_get_drvdata(dev);
 	int len = 0;
-	int i = 0;
+	int i;
 
 	mutex_lock(&pdata->lock);
-	for (i = 0; i < NUM_CHANNELS; i++) {
-		len += sprintf(buf, "%s%02x",
-				buf, pdata->state[i]);
-	}
+	for (i = 0; i < NUM_CHANNELS; i++)
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%02x",
+				 pdata->state[i]);
+	len += scnprintf(buf + len, PAGE_SIZE - len, "\n");
 	mutex_unlock(&pdata->lock);
-	return sprintf(buf, "%s\n", buf);
+	return len;
 }
 
 static ssize_t frame_store(struct device *dev,
 			   struct device_attribute *attr,
 			   const char *buf, size_t len)
 {
-	struct is31fl3236_data *pdata = dev_get_platdata(dev);
+	struct is31fl3236_data *pdata = dev_get_drvdata(dev);
 	uint8_t new_state[NUM_CHANNELS];
 	char val[3];
 	int count = 0;
 	int ret, i;
+
+	if (len != NUM_CHANNELS * 2 &&
+	    !(len == NUM_CHANNELS * 2 + 1 &&
+	      buf[NUM_CHANNELS * 2] == '\n'))
+		return -EINVAL;
 
 	val[2] = '\0';
 	for (i = 0; i < NUM_CHANNELS * 2; i += 2) {
 		val[0] = buf[i];
 		val[1] = buf[i + 1];
 		ret = kstrtou8(val, 16, &new_state[count]);
-		if (ret) {
-			pr_err("ISSI: Invalid input for frame_store: %d\n",
-			       i);
+		if (ret)
 			return ret;
-		}
 		count++;
 	}
 
-	ret = update_frame(pdata, &new_state[0]);
-	if (ret < 0) {
-		pr_err("ISSI: could not update frame\n");
-		return ret;
-	}
-
-	return len;
+	ret = update_frame(pdata, new_state);
+	return ret < 0 ? ret : len;
 }
 
 static DEVICE_ATTR_RW(frame);
+
+static struct attribute *is31fl3236_attrs[] = {
+	&dev_attr_frame.attr,
+	&dev_attr_led_current.attr,
+	&dev_attr_boot_animation.attr,
+	NULL,
+};
+
+static const struct attribute_group is31fl3236_attr_group = {
+	.attrs = is31fl3236_attrs,
+};
 
 static void is31fl3236_parse_dt(struct is31fl3236_data *pdata,
 				struct device_node *node)
@@ -290,7 +415,7 @@ static void is31fl3236_parse_dt(struct is31fl3236_data *pdata,
 
 static int is31fl3236_power_on_device(struct i2c_client *client)
 {
-	struct is31fl3236_data *pdata = dev_get_platdata(&client->dev);
+	struct is31fl3236_data *pdata = dev_get_drvdata(&client->dev);
 	int i;
 	int ret = 0;
 
@@ -324,20 +449,36 @@ static int is31fl3236_power_on_device(struct i2c_client *client)
 	pdata->enabled = LED_CHAN_ENABLED;
 
 	for (i = 0; i < NUM_CHANNELS; i++) {
-		ret = is31fl3236_write_reg(client, REG_CTRL_BASE + i, 0x01);
+		ret = is31fl3236_write_reg(client, REG_CTRL_BASE + i,
+						  (pdata->led_current << 1) |
+						  LED_CHAN_ENABLED);
 		if (ret < 0) {
-			pr_err("ISSI: Could not enabled led: %d\n", i);
+			pr_err("ISSI: Could not enable led: %d\n", i);
 			goto fail;
 		}
 	}
 	ret = is31fl3236_write_reg(client, REG_UPDATE, 0x0);
+	if (ret < 0)
+		goto fail;
 
-	return ret;
+	return 0;
 fail:
-	if (gpio_is_valid(pdata->enable_gpio)) {
+	pdata->enabled = LED_CHAN_DISABLED;
+	if (pdata->setup_device && gpio_is_valid(pdata->enable_gpio)) {
 		gpio_set_value(pdata->enable_gpio, 0);
 		devm_gpio_free(&client->dev, pdata->enable_gpio);
 	}
+	return ret;
+}
+
+static int is31fl3236_power_off_device(struct is31fl3236_data *pdata)
+{
+	int ret;
+
+	ret = is31fl3236_write_reg(pdata->client, REG_RST, 0x0);
+	if (pdata->setup_device && gpio_is_valid(pdata->enable_gpio))
+		gpio_set_value(pdata->enable_gpio, 0);
+	pdata->enabled = LED_CHAN_DISABLED;
 	return ret;
 }
 
@@ -345,115 +486,104 @@ static int is31fl3236_reboot_callback(struct notifier_block *self,
 				      unsigned long val,
 				      void *data)
 {
-	int ret;
-
-	pr_err("ISSI: resetting device before reboot!\n");
 	struct is31fl3236_data *pdata =
 		container_of(self, struct is31fl3236_data, reboot_notifier);
-	ret = is31fl3236_write_reg(pdata->client, REG_RST, 0x0);
-	if (ret < 0) {
-		pr_err("ISSI: Could not reset registers\n");
-		return notifier_from_errno(-EIO);
-	}
+	int anim_ret;
+	int ret;
+
+	anim_ret = is31fl3236_stop_boot_animation(pdata, true);
+
+	mutex_lock(&pdata->lock);
+	ret = is31fl3236_power_off_device(pdata);
+	mutex_unlock(&pdata->lock);
+	if (ret < 0)
+		pr_err("ISSI: Could not reset registers before reboot: %d\n",
+		       ret);
+	if (anim_ret < 0)
+		pr_err("ISSI: Could not stop boot animation before reboot: %d\n",
+		       anim_ret);
 	return NOTIFY_DONE;
 }
 
 static int is31fl3236_probe(struct i2c_client *client,
 			    const struct i2c_device_id *id)
 {
-	struct is31fl3236_data *pdata = devm_kzalloc(&client->dev,
-						sizeof(struct is31fl3236_data),
-						GFP_KERNEL);
-	int ret = 0;
+	struct is31fl3236_data *pdata;
+	int ret;
 
-	if (!pdata) {
-		pr_err("ISSI: Could not allocate memory for platform data\n");
-		ret = -ENOMEM;
-		goto fail;
-	}
+	pdata = devm_kzalloc(&client->dev, sizeof(*pdata), GFP_KERNEL);
+	if (!pdata)
+		return -ENOMEM;
+
+	pdata->state = devm_kzalloc(&client->dev, NUM_CHANNELS, GFP_KERNEL);
+	if (!pdata->state)
+		return -ENOMEM;
 
 	pdata->client = client;
-	pdata->state = devm_kzalloc(&client->dev,
-				    sizeof(uint8_t) * NUM_CHANNELS,
-								GFP_KERNEL);
-	if (!pdata->state) {
-		pr_err("ISSI: Could not allocate memory for state data\n");
-		ret = -ENOMEM;
-		devm_kfree(&client->dev, pdata);
-		goto fail;
-	}
 	pdata->led_current = LED_CURRENT_DEFAULT;
 	pdata->enabled = LED_CHAN_DISABLED;
 	mutex_init(&pdata->lock);
-	pdata->boot_anim_task = NULL;
+	mutex_init(&pdata->anim_lock);
 	pdata->reboot_notifier.notifier_call = is31fl3236_reboot_callback;
 	is31fl3236_parse_dt(pdata, client->dev.of_node);
+	i2c_set_clientdata(client, pdata);
 
-	client->dev.platform_data = pdata;
 	ret = is31fl3236_power_on_device(client);
 	if (ret < 0) {
 		pr_err("ISSI: Could not power on device: %d\n", ret);
-		goto fail;
+		return ret;
 	}
 
-	ret = device_create_file(&client->dev, &dev_attr_frame);
+	ret = sysfs_create_group(&client->dev.kobj, &is31fl3236_attr_group);
 	if (ret) {
-		pr_err("ISSI: Could not create frame sysfs entry\n");
-		goto fail;
-	}
-	ret = device_create_file(&client->dev, &dev_attr_led_current);
-	if (ret) {
-		pr_err("ISSI: Could not create brightness sysfs entry\n");
-		goto fail;
-	}
-
-	ret = device_create_file(&client->dev, &dev_attr_boot_animation);
-	if (ret) {
-		pr_err("ISSI: Could not create boot animation entry\n");
-		goto fail;
+		pr_err("ISSI: Could not create sysfs attribute group\n");
+		goto fail_power;
 	}
 
 	ret = register_reboot_notifier(&pdata->reboot_notifier);
 	if (ret) {
 		pr_err("ISSI: Could not register reboot callback\n");
-		goto fail;
+		goto fail_sysfs;
 	}
 
 	if (pdata->play_boot_animation) {
-		mutex_lock(&pdata->lock);
-		pdata->boot_anim_task = kthread_run(boot_anim_thread,
-						    (void *)pdata,
-						    "boot_animation_thread");
-		if (IS_ERR(pdata->boot_anim_task))
-			pr_err("ISSI: could not start boot animation thread");
-		mutex_unlock(&pdata->lock);
+		ret = is31fl3236_start_boot_animation(pdata);
+		if (ret < 0) {
+			pr_err("ISSI: Could not start boot animation: %d\n", ret);
+			goto fail_notifier;
+		}
 	}
-fail:
+
+	return 0;
+
+fail_notifier:
+	unregister_reboot_notifier(&pdata->reboot_notifier);
+fail_sysfs:
+	sysfs_remove_group(&client->dev.kobj, &is31fl3236_attr_group);
+fail_power:
+	mutex_lock(&pdata->lock);
+	is31fl3236_power_off_device(pdata);
+	mutex_unlock(&pdata->lock);
 	return ret;
 }
 
 static int is31fl3236_remove(struct i2c_client *client)
 {
-	struct is31fl3236_data *pdata = dev_get_platdata(&client->dev);
-	int ret = 0;
+	struct is31fl3236_data *pdata = i2c_get_clientdata(client);
+	int anim_ret;
+	int ret;
+
+	unregister_reboot_notifier(&pdata->reboot_notifier);
+	sysfs_remove_group(&client->dev.kobj, &is31fl3236_attr_group);
+
+	anim_ret = is31fl3236_stop_boot_animation(pdata, true);
 
 	mutex_lock(&pdata->lock);
-	if (pdata->boot_anim_task) {
-		kthread_stop(pdata->boot_anim_task);
-		pdata->boot_anim_task = NULL;
-	}
-
-	ret = is31fl3236_write_reg(client, REG_RST, 0x0);
-	if (ret < 0) {
-		pr_err("ISSI: Could not reset registers\n");
-		goto fail;
-	}
-
-fail:
-	if (gpio_is_valid(pdata->enable_gpio))
-		gpio_set_value(pdata->enable_gpio, 0);
+	ret = is31fl3236_power_off_device(pdata);
 	mutex_unlock(&pdata->lock);
-	return ret;
+	if (ret < 0)
+		pr_err("ISSI: Could not reset registers during remove\n");
+	return ret < 0 ? ret : anim_ret;
 }
 
 static struct i2c_device_id is31fl3236_i2c_match[] = {
