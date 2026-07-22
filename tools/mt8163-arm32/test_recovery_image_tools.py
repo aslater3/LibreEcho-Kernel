@@ -217,6 +217,11 @@ class PolicyTests(unittest.TestCase):
 
     def test_wifi_activation_is_deferred_until_adb_ready(self) -> None:
         source = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
+        defconfig = (TOOLS_DIR.parent.parent / "arch/arm/configs/mt8163_arm32_defconfig").read_text()
+        self.assertIn("CONFIG_KEYBOARD_GPIO=y", defconfig)
+        self.assertIn("create_input_nodes()", source)
+        self.assertIn("/dev/input/$name", source)
+        self.assertIn("input-devnodes-created", source)
         self.assertLess(
             source.index("log init-ready-pid1-managed"),
             source.index("start_wifi_network &"),
