@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import stat
 import sys
 import tempfile
@@ -143,8 +144,13 @@ class SourceTests(unittest.TestCase):
         self.assertTrue((tools / "tinyplay").is_file())
         self.assertTrue((tools / "tinycap").is_file())
         self.assertTrue((tools / "tinymix").is_file())
-        self.assertIn("--tinyplay", (TOOLS_DIR.parent.parent.parent / "pipeline/build.sh").read_text())
-        self.assertIn("--tinymix", (TOOLS_DIR.parent.parent.parent / "pipeline/build.sh").read_text())
+        pipeline_root = Path(os.environ.get(
+            "LIBREECHO_PIPELINE_ROOT",
+            "/home/andy/workspace/mt8163-arm32-wifi-candidate/pipeline",
+        ))
+        pipeline_build = pipeline_root / "build.sh"
+        self.assertIn("--tinyplay", pipeline_build.read_text())
+        self.assertIn("--tinymix", pipeline_build.read_text())
         gpufreq = (
             TOOLS_DIR.parent.parent
             / "drivers/misc/mediatek/base/power/mt8163/mt_gpufreq.c"
@@ -161,6 +167,44 @@ class SourceTests(unittest.TestCase):
         self.assertIn("struct device *dma_dev = rtd->platform->dev", spi_pcm)
         self.assertIn("dma_dev->coherent_dma_mask = DMA_BIT_MASK(64)", spi_pcm)
         self.assertIn("SNDRV_DMA_TYPE_DEV, dma_dev", spi_pcm)
+
+    def test_network_tools_are_pinned_and_manual_only(self) -> None:
+        builder_script = TOOLS_DIR / "network-tools/build_wireless_tools.sh"
+        self.assertTrue(builder_script.is_file())
+        self.assertTrue(os.access(builder_script, os.X_OK))
+        pipeline_root = Path(os.environ.get(
+            "LIBREECHO_PIPELINE_ROOT",
+            "/home/andy/workspace/mt8163-arm32-wifi-candidate/pipeline",
+        ))
+        pipeline_build = (pipeline_root / "build.sh").read_text()
+        pipeline_status = (pipeline_root / "status.sh").read_text()
+        pipeline_flash = (pipeline_root / "flash.sh").read_text()
+        self.assertIn("build_wireless_tools.sh", pipeline_build)
+        self.assertIn("--iwconfig", pipeline_build)
+        self.assertIn("--expected-iwconfig-sha256", pipeline_status)
+        self.assertIn("--expected-iwconfig-sha256", pipeline_flash)
+
+    def test_ssh_password_hash_is_salted_and_private(self) -> None:
+        dropbear_builder = TOOLS_DIR / "ssh/build_dropbear.sh"
+        self.assertIn("-DUSE_DEV_PTMX", dropbear_builder.read_text())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            valid = root / "hash"
+            valid.write_text("$6$LibreEchoTest$0123456789012345678901234567890123456789012\n")
+            valid.chmod(0o600)
+            self.assertEqual(
+                builder.read_ssh_password_hash(valid),
+                "$6$LibreEchoTest$0123456789012345678901234567890123456789012",
+            )
+            for value in ("password\n", "!locked\n", "\n", "$6$missing-checksum\n"):
+                invalid = root / ("invalid-" + str(len(value)))
+                invalid.write_text(value)
+                invalid.chmod(0o600)
+                with self.subTest(value=value), self.assertRaises(SystemExit):
+                    builder.read_ssh_password_hash(invalid)
+            valid.chmod(0o622)
+            with self.assertRaises(SystemExit):
+                builder.read_ssh_password_hash(valid)
 
 
 class PatchRouteContractTests(unittest.TestCase):
@@ -206,6 +250,12 @@ class PolicyTests(unittest.TestCase):
         entries = {"rogue.rc": self.control("rogue.rc", b"write\t/dev/wmtWifi 1\n")}
         with self.assertRaises(SystemExit):
             verifier.validate_no_connectivity_autostart(entries)
+
+    def test_interactive_profile_sets_path_and_identifies_libreecho(self) -> None:
+        profile = (TOOLS_DIR / "initramfs/profile").read_text()
+        self.assertIn("export PATH=/bin:/sbin:/system/bin:/usr/bin:/usr/sbin", profile)
+        self.assertIn("LibreEcho Development OS", profile)
+        self.assertIn("PS1='libreecho# '", profile)
 
     def test_device_node_setup_is_not_activation(self) -> None:
         entries = {

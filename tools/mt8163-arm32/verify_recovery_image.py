@@ -7,6 +7,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import re
 import stat
 import struct
 from dataclasses import dataclass
@@ -38,13 +39,24 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "bc6719473ae96dcde8bd029ba70f257d6a8d7948391946f86bf159d2fd54df13"
+INIT_SHA256 = "bd789ca4a4d6785af76534f13bd9865da96448453fe929bd7309be3d6d118847"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
+    "profile": 0o644,
     "init.rc": 0o644,
     "init.recovery.mt8163.rc": 0o644,
     "libreecho-init": 0o755,
+}
+OVERLAY_TARGETS = {
+    "profile": "etc/profile",
+}
+SSH_PASSWORD_HASH_RE = re.compile(
+    rb"\$(?:1|5|6|2[abxy]?|y|gy)\$[^$:\r\n]{1,64}\$[^:\r\n]{1,512}\Z"
+)
+SSH_MEMBER_NAMES = {
+    "sbin/dropbear", "sbin/dropbearkey", "etc/passwd", "etc/group",
+    "etc/shells", "etc/shadow", "root", "etc/dropbear",
 }
 
 CONNECTIVITY_FILES = {
@@ -447,6 +459,209 @@ def validate_no_connectivity_autostart(entries: dict[str, Entry]) -> None:
                 fail(f"active recovery control {name} activates Wi-Fi through Android init")
 
 
+def validate_ssh(entries: dict[str, Entry], manifest: dict[str, object],
+                 expected_dropbear_sha256: str | None,
+                 expected_dropbearkey_sha256: str | None) -> bool:
+    raw_ssh = manifest.get("ssh")
+    if raw_ssh is None:
+        ssh: dict[str, object] = {"enabled": False}
+    elif not isinstance(raw_ssh, dict) or not isinstance(raw_ssh.get("enabled"), bool):
+        fail("SSH manifest record is malformed")
+    else:
+        ssh = cast(dict[str, object], raw_ssh)
+
+    expected_enabled = (
+        expected_dropbear_sha256 is not None or
+        expected_dropbearkey_sha256 is not None
+    )
+    if bool(ssh.get("enabled")) != expected_enabled:
+        fail(
+            "SSH bundle expectation mismatch: "
+            f"expected={'enabled' if expected_enabled else 'disabled'} "
+            f"actual={'enabled' if ssh.get('enabled') else 'disabled'}"
+        )
+
+    forbidden_ssh_names = sorted(
+        name for name in entries
+        if name.endswith("/authorized_keys") or name == "authorized_keys"
+        or "/.ssh/" in name or name.endswith(("/id_rsa", "/id_ecdsa", "/id_ed25519"))
+    )
+    if forbidden_ssh_names:
+        fail(f"SSH image contains forbidden key material: {forbidden_ssh_names}")
+
+    if not expected_enabled:
+        unexpected = sorted(name for name in SSH_MEMBER_NAMES if name in entries)
+        if unexpected:
+            fail(f"SSH bundle is disabled but members are present: {unexpected}")
+        return False
+
+    if expected_dropbear_sha256 is None or expected_dropbearkey_sha256 is None:
+        fail("SSH binary identities are incomplete")
+    expected_policy = {
+        "enabled": True,
+        "activation": "manual-only",
+        "autostart": False,
+        "authentication": "password-only",
+        "public_key_auth": False,
+        "root_login": True,
+        "host_keys": "generated-ephemerally-under-/tmp/dropbear",
+    }
+    for key, value in expected_policy.items():
+        if ssh.get(key) != value:
+            fail(f"SSH policy changed for {key}: {ssh.get(key)!r}")
+    raw_files = ssh.get("files")
+    if not isinstance(raw_files, dict):
+        fail("SSH file manifest is missing")
+    files = cast(dict[str, object], raw_files)
+    if set(files) != SSH_MEMBER_NAMES - {"root", "etc/dropbear"}:
+        fail("SSH file manifest members changed")
+
+    def static_binary_record(name: str, expected_hash: str) -> None:
+        raw_record = files.get(name)
+        if not isinstance(raw_record, dict):
+            fail(f"SSH binary manifest record is missing: {name}")
+        record = cast(dict[str, object], raw_record)
+        source_path = record.get("path")
+        if not isinstance(source_path, str) or not Path(source_path).is_absolute():
+            fail(f"SSH binary manifest path is not absolute: {name}")
+        member = require_member(entries, name, expected_hash, 0o755)
+        if elf_info(member.data) != (1, 40, 0x05000400, None, (), False):
+            fail(f"SSH binary is not static ARM32 hard-float: {name}")
+        if b"authorized_keys" in member.data:
+            fail(f"public-key authorization marker found in {name}")
+        expected_record = {
+            "path": source_path,
+            "sha256": expected_hash,
+            "size": len(member.data),
+            "mode": "0755",
+            "elf": {
+                "class": 1,
+                "machine": 40,
+                "flags": "0x05000400",
+                "interpreter": None,
+                "needed": [],
+                "dynamic": False,
+            },
+        }
+        if record != expected_record:
+            fail(f"SSH binary manifest record mismatch: {name}")
+
+    static_binary_record("sbin/dropbear", expected_dropbear_sha256)
+    static_binary_record("sbin/dropbearkey", expected_dropbearkey_sha256)
+
+    expected_accounts = {
+        "etc/passwd": b"root:x:0:0:root:/root:/bin/sh\n",
+        "etc/group": b"root:x:0:\n",
+        "etc/shells": b"/bin/sh\n",
+    }
+    for name, data in expected_accounts.items():
+        member = require_member(entries, name, sha256(data), 0o644)
+        record = files.get(name)
+        if record != {
+            "path": "/" + name,
+            "sha256": sha256(data),
+            "size": len(data),
+            "mode": "0644",
+        }:
+            fail(f"SSH account manifest record mismatch: {name}")
+        if member.data != data:
+            fail(f"SSH account content changed: {name}")
+
+    shadow = entries.get("etc/shadow")
+    if shadow is None or not stat.S_ISREG(shadow.mode) or stat.S_IMODE(shadow.mode) != 0o600:
+        fail("SSH /etc/shadow is missing or has unsafe permissions")
+    shadow_fields = shadow.data.rstrip(b"\n").split(b":")
+    if len(shadow_fields) != 9 or shadow_fields[0] != b"root":
+        fail("SSH /etc/shadow root record is malformed")
+    if not SSH_PASSWORD_HASH_RE.fullmatch(shadow_fields[1]):
+        fail("SSH /etc/shadow does not contain a supported salted root hash")
+    if shadow.data.count(b"\n") != 1 or shadow.data.endswith(b"\n\n"):
+        fail("SSH /etc/shadow must contain exactly one normalized record")
+    if files.get("etc/shadow") != {
+        "path": "/etc/shadow",
+        "size": len(shadow.data),
+        "mode": "0600",
+        "secret_content_not_recorded": True,
+    }:
+        fail("SSH shadow manifest record is unsafe or changed")
+
+    for name, mode in (("root", 0o755), ("etc/dropbear", 0o700)):
+        entry = entries.get(name)
+        if entry is None or not stat.S_ISDIR(entry.mode) or stat.S_IMODE(entry.mode) != mode:
+            fail(f"SSH runtime directory contract changed: {name}")
+    if any(name.startswith("etc/dropbear/") for name in entries):
+        fail("SSH image contains persistent host-key material")
+    return True
+
+
+def validate_network_tools(entries: dict[str, Entry], manifest: dict[str, object],
+                           expected_iwconfig_sha256: str | None) -> bool:
+    raw_tools = manifest.get("network_tools", {"enabled": False})
+    if not isinstance(raw_tools, dict) or not isinstance(raw_tools.get("enabled"), bool):
+        fail("network-tools manifest record is malformed")
+    network_tools = cast(dict[str, object], raw_tools)
+    member_names = {"sbin/ifconfig", "sbin/iwconfig"}
+
+    if expected_iwconfig_sha256 is None:
+        if network_tools.get("enabled") or any(name in entries for name in member_names):
+            fail("network tools are present without an expected iwconfig identity")
+        return False
+
+    if not network_tools.get("enabled"):
+        fail("network tools are expected but the manifest is disabled")
+    if network_tools.get("activation") != "manual-only":
+        fail("network-tools activation policy changed")
+    if network_tools.get("autostart") is not False:
+        fail("network-tools autostart policy changed")
+    raw_records = network_tools.get("tools")
+    if not isinstance(raw_records, dict) or set(raw_records) != {"ifconfig", "iwconfig"}:
+        fail("network-tools manifest members changed")
+    records = cast(dict[str, object], raw_records)
+
+    ifconfig = entries.get("sbin/ifconfig")
+    if (ifconfig is None or not stat.S_ISLNK(ifconfig.mode) or
+            stat.S_IMODE(ifconfig.mode) != 0o777 or ifconfig.data != b"../bin/ifconfig"):
+        fail("/sbin/ifconfig symlink contract changed")
+    bin_ifconfig = entries.get("bin/ifconfig")
+    if (bin_ifconfig is None or not stat.S_ISLNK(bin_ifconfig.mode) or
+            bin_ifconfig.data != b"busybox"):
+        fail("BusyBox ifconfig provider changed")
+    if records.get("ifconfig") != {
+        "path": "/sbin/ifconfig",
+        "provider": "busybox",
+        "target": "../bin/ifconfig",
+        "mode": "0777",
+    }:
+        fail("ifconfig manifest record changed")
+
+    raw_iwconfig = records.get("iwconfig")
+    if not isinstance(raw_iwconfig, dict):
+        fail("iwconfig manifest record is missing")
+    iwconfig_record = cast(dict[str, object], raw_iwconfig)
+    iwconfig_path = iwconfig_record.get("path")
+    if not isinstance(iwconfig_path, str) or not Path(iwconfig_path).is_absolute():
+        fail("iwconfig manifest path is not absolute")
+    iwconfig = require_member(entries, "sbin/iwconfig", expected_iwconfig_sha256, 0o755)
+    if elf_info(iwconfig.data) != (1, 40, 0x05000400, None, (), False):
+        fail("iwconfig is not static ARM32 hard-float")
+    if iwconfig_record != {
+        "path": iwconfig_path,
+        "sha256": expected_iwconfig_sha256,
+        "size": len(iwconfig.data),
+        "mode": "0755",
+        "elf": {
+            "class": 1,
+            "machine": 40,
+            "flags": "0x05000400",
+            "interpreter": None,
+            "needed": [],
+            "dynamic": False,
+        },
+    }:
+        fail("iwconfig manifest record changed")
+    return True
+
+
 def validate_connectivity(entries: dict[str, Entry], manifest: dict[str, object],
                           schema_version: int) -> bool:
     record = manifest.get("connectivity", {"enabled": False})
@@ -608,7 +823,10 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
                        expected_tinyplay_sha256: str | None,
                        expected_tinycap_sha256: str | None,
                        expected_tinymix_sha256: str | None,
-                       expected_startup_audio_sha256: str | None) -> bool:
+                       expected_startup_audio_sha256: str | None,
+                       expected_iwconfig_sha256: str | None,
+                       expected_dropbear_sha256: str | None,
+                       expected_dropbearkey_sha256: str | None) -> bool:
     if ramdisk[:4] != b"\x1f\x8b\x08\x00":
         fail("ramdisk gzip header is not deterministic")
     try:
@@ -656,6 +874,7 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         unexpected = sorted(name for name in network_names if name in entries)
         if unexpected:
             fail(f"network stack is disabled but members are present: {unexpected}")
+    validate_network_tools(entries, manifest, expected_iwconfig_sha256)
     audio = manifest.get("audio", {"enabled": False})
     if not isinstance(audio, dict) or not isinstance(audio.get("enabled"), bool):
         fail("audio manifest record is malformed")
@@ -834,7 +1053,8 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
     verified_overlay: dict[str, Entry] = {}
     for name, mode in OVERLAY_FILES.items():
         expected = read(overlay_dir / name)
-        entry = require_member(entries, name, sha256(expected), mode)
+        target_name = OVERLAY_TARGETS.get(name, name)
+        entry = require_member(entries, target_name, sha256(expected), mode)
         record = overlay_manifest.get(name, {})
         if record != {"sha256": sha256(expected), "size": len(expected), "mode": f"{mode:04o}"}:
             fail(f"overlay manifest mismatch for {name}")
@@ -879,6 +1099,7 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         info = elf_info(entry.data)
         if info is not None and info[:2] != (1, 40):
             fail(f"non-ARM32 ELF member {name}: {info[:2]}")
+    validate_ssh(entries, manifest, expected_dropbear_sha256, expected_dropbearkey_sha256)
     return validate_connectivity(entries, manifest, schema_version)
 
 
@@ -917,6 +1138,12 @@ def main() -> None:
                         help="require this static ARM32 TinyALSA mixer utility")
     parser.add_argument("--expected-startup-audio-sha256",
                         help="require this pinned stereo 48kHz PCM16 startup WAV")
+    parser.add_argument("--expected-iwconfig-sha256",
+                        help="require this static ARM32 wireless-tools iwconfig utility")
+    parser.add_argument("--expected-dropbear-sha256",
+                        help="require this static ARM32 Dropbear server in the initramfs")
+    parser.add_argument("--expected-dropbearkey-sha256",
+                        help="require this static ARM32 Dropbear host-key utility in the initramfs")
     parser.add_argument("--expected-dtb-sha256")
     parser.add_argument(
         "--expected-connectivity-bundle",
@@ -1028,6 +1255,8 @@ def main() -> None:
         ramdisk, manifest, schema_version, args.expected_audio_probe_sha256,
         args.expected_tinyplay_sha256, args.expected_tinycap_sha256,
         args.expected_tinymix_sha256, args.expected_startup_audio_sha256,
+        args.expected_iwconfig_sha256,
+        args.expected_dropbear_sha256, args.expected_dropbearkey_sha256,
     )
     expected_connectivity = args.expected_connectivity_bundle != "none"
     if connectivity_enabled != expected_connectivity:

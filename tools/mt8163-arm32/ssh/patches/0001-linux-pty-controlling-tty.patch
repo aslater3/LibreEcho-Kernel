@@ -1,0 +1,65 @@
+--- a/src/sshpty.c
++++ b/src/sshpty.c
+@@ -264,6 +264,30 @@
+ void
+ pty_make_controlling_tty(int *ttyfd, const char *tty_name)
+ {
++#ifdef __linux__
++	/*
++	 * Linux devpts keeps the already-open slave usable even when its
++	 * directory entry is removed as the ptmx master is handed to the
++	 * session. The historical Dropbear routine below is for Solaris:
++	 * it reopens tty_name and optionally vhangups the device. On this
++	 * 3.18 target that turns the slave into /dev/pts/N (deleted), makes
++	 * TIOCSCTTY fail, and leaves the SSH channel without a live master.
++	 * The slave was opened and permissioned by pty_allocate(), so Linux
++	 * only needs a new session; the caller will dup2() this slave onto
++	 * the session standard streams.
++	 */
++	signal(SIGTTOU, SIG_IGN);
++	if (setsid() < 0) {
++		dropbear_log(LOG_ERR, "setsid: %.100s", strerror(errno));
++	}
++#ifdef TIOCSCTTY
++	if (ioctl(*ttyfd, TIOCSCTTY, NULL) < 0) {
++		dropbear_log(LOG_ERR,
++			"ioctl(TIOCSCTTY): %.100s", strerror(errno));
++	}
++#endif /* TIOCSCTTY */
++	return;
++#else
+ 	int fd;
+ #ifdef USE_VHANGUP
+ 	void *old;
+@@ -335,6 +353,7 @@
+ 	} else {
+ 		close(fd);
+ 	}
++#endif /* __linux__ */
+ }
+ 
+ /* Changes the window size associated with the pty. */
+--- a/src/svr-chansession.c
++++ b/src/svr-chansession.c
+@@ -923,10 +923,18 @@
+ 		addchildpid(chansess, pid);
+ 
+ 		close(chansess->slave);
+-		channel->writefd = chansess->master;
++		channel->writefd = dup(chansess->master);
++		if (channel->writefd < 0) {
++			dropbear_log(LOG_ERR, "dup pty master: %.100s", strerror(errno));
++			close(chansess->master);
++			return DROPBEAR_FAILURE;
++		}
+ 		channel->readfd = chansess->master;
+ 		/* don't need to set stderr here */
+ 		ses.maxfd = MAX(ses.maxfd, chansess->master);
++		/* Keep the SSH write and read directions on separate descriptors.
++		 * Closing the write side after SSH stdin EOF must not close the PTY
++		 * master that carries child output. */
+ 		channel->bidir_fd = 0;
+ 
+ 		setnonblocking(chansess->master);
+ 
+ 	}

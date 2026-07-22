@@ -417,6 +417,7 @@ static int pty_common_install(struct tty_driver *driver, struct tty_struct *tty,
 	o_tty->port = ports[0];
 	tty->port = ports[1];
 	o_tty->port->itty = o_tty;
+	tty->port->itty = tty;
 
 	tty_driver_kref_get(driver);
 	tty->count++;
