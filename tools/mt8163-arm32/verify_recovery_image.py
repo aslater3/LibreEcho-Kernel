@@ -38,7 +38,7 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "10da44428db42bbda82eceb22f6ea88815708f794230a639696102e4fcc473af"
+INIT_SHA256 = "362b88597c4199aa734b3db98f2f4e7593069cd75f52b13ab5333c2599f6c5f5"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
@@ -607,7 +607,8 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
                        expected_audio_probe_sha256: str | None,
                        expected_tinyplay_sha256: str | None,
                        expected_tinycap_sha256: str | None,
-                       expected_tinymix_sha256: str | None) -> bool:
+                       expected_tinymix_sha256: str | None,
+                       expected_startup_audio_sha256: str | None) -> bool:
     if ramdisk[:4] != b"\x1f\x8b\x08\x00":
         fail("ramdisk gzip header is not deterministic")
     try:
@@ -661,6 +662,7 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
     audio = cast(dict[str, object], audio)
     audio_names = {
         "sbin/audio_probe", "sbin/tinyplay", "sbin/tinycap", "sbin/tinymix",
+        "etc/audio/windows95-startup.wav",
     }
     expected_audio = (
         expected_audio_probe_sha256,
@@ -738,8 +740,51 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
                 },
             }:
                 fail(f"{name} manifest record mismatch")
-    elif audio.get("enabled") or sorted(name for name in audio_names if name in entries):
+    elif ((audio.get("enabled") and expected_startup_audio_sha256 is None) or
+          sorted(name for name in audio_names
+                 if name in entries and name != "etc/audio/windows95-startup.wav")):
         fail("audio assets are enabled without expected identities")
+    if expected_startup_audio_sha256 is not None:
+        if not audio.get("enabled"):
+            fail("startup audio is expected but audio manifest is disabled")
+        raw_startup = audio.get("startup_playback")
+        if not isinstance(raw_startup, dict):
+            fail("startup audio manifest record is incomplete")
+        startup_record = cast(dict[str, object], raw_startup)
+        if startup_record.get("sha256") != expected_startup_audio_sha256:
+            fail("startup audio manifest hash mismatch")
+        startup_path = startup_record.get("path")
+        if not isinstance(startup_path, str) or not Path(startup_path).is_absolute():
+            fail("startup audio manifest path is not absolute")
+        startup = require_member(
+            entries, "etc/audio/windows95-startup.wav",
+            expected_startup_audio_sha256, 0o644,
+        )
+        expected_startup_record = {
+            "path": startup_path,
+            "sha256": expected_startup_audio_sha256,
+            "size": len(startup.data),
+            "mode": "0644",
+            "format": {
+                "channels": 2,
+                "sample_rate": 48000,
+                "sample_width_bits": 16,
+                "compression": "NONE",
+            },
+            "route": "hpr-only",
+            "pcm_volume": "103/103",
+            "pcm_db": "-12.0",
+            "hp_driver_gain": "6/6",
+            "lineout_dac_switches": "off",
+            "playback_device": "0:23",
+            "plays_once": True,
+        }
+        if startup_record != expected_startup_record:
+            fail("startup audio manifest record mismatch")
+        if audio.get("activation") != "automatic-after-successful-init":
+            fail("startup audio activation policy changed")
+    elif "etc/audio/windows95-startup.wav" in entries:
+        fail("startup audio is present without an expected identity")
     if sha256(cpio) != manifest["initramfs"]["cpio_sha256"]:
         fail("manifest cpio hash mismatch")
     if any(entry.uid or entry.gid or entry.mtime for entry in entries.values()):
@@ -870,6 +915,8 @@ def main() -> None:
                         help="require this static ARM32 TinyALSA capture utility")
     parser.add_argument("--expected-tinymix-sha256",
                         help="require this static ARM32 TinyALSA mixer utility")
+    parser.add_argument("--expected-startup-audio-sha256",
+                        help="require this pinned stereo 48kHz PCM16 startup WAV")
     parser.add_argument("--expected-dtb-sha256")
     parser.add_argument(
         "--expected-connectivity-bundle",
@@ -980,7 +1027,7 @@ def main() -> None:
     connectivity_enabled = validate_initramfs(
         ramdisk, manifest, schema_version, args.expected_audio_probe_sha256,
         args.expected_tinyplay_sha256, args.expected_tinycap_sha256,
-        args.expected_tinymix_sha256,
+        args.expected_tinymix_sha256, args.expected_startup_audio_sha256,
     )
     expected_connectivity = args.expected_connectivity_bundle != "none"
     if connectivity_enabled != expected_connectivity:
