@@ -51,7 +51,8 @@ result="$work/result"
 deadline=$((SECONDS + timeout))
 while ((SECONDS < deadline)); do
   if "$adb_bin" -s "$serial" pull /tmp/result "$result" >/dev/null 2>&1 &&
-     grep -Fxq "$nonce" "$result"; then
+     grep -Fxq "$nonce" "$result" &&
+     grep -Eq '^LIBREECHO_RUNME_RC=[0-9]+$' "$result"; then
     rc_line=$(grep '^LIBREECHO_RUNME_RC=[0-9][0-9]*$' "$result" | tail -1 || true)
     [[ -n "$rc_line" ]] || {
       echo "ERROR: root script ran but did not publish an exit status (did it call exit?)" >&2

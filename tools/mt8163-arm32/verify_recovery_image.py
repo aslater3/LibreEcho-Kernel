@@ -39,17 +39,19 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "bd789ca4a4d6785af76534f13bd9865da96448453fe929bd7309be3d6d118847"
+INIT_SHA256 = "9a5c1de33a8898ff5ae43d5628ce5aca47e568d793a5a31bbbca1e3a397509f3"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
     "profile": 0o644,
+    "no-startup-audio": 0o644,
     "init.rc": 0o644,
     "init.recovery.mt8163.rc": 0o644,
     "libreecho-init": 0o755,
 }
 OVERLAY_TARGETS = {
     "profile": "etc/profile",
+    "no-startup-audio": "etc/libreecho/no-startup-audio",
 }
 SSH_PASSWORD_HASH_RE = re.compile(
     rb"\$(?:1|5|6|2[abxy]?|y|gy)\$[^$:\r\n]{1,64}\$[^:\r\n]{1,512}\Z"
@@ -57,6 +59,24 @@ SSH_PASSWORD_HASH_RE = re.compile(
 SSH_MEMBER_NAMES = {
     "sbin/dropbear", "sbin/dropbearkey", "etc/passwd", "etc/group",
     "etc/shells", "etc/shadow", "root", "etc/dropbear",
+}
+UI_BINARY_NAMES = {
+    "usr/local/sbin/libreecho-web",
+    "usr/local/sbin/libreecho-logd",
+    "usr/local/sbin/libreecho-networkd",
+    "usr/local/sbin/libreecho-audiod",
+    "usr/local/sbin/libreecho-ledd",
+}
+UI_INIT_NAMES = {
+    "etc/init.d/libreecho-web.init",
+    "etc/init.d/libreecho-logd.init",
+    "etc/init.d/libreecho-networkd.init",
+    "etc/init.d/libreecho-audiod.init",
+    "etc/init.d/libreecho-ledd.init",
+}
+UI_FIXED_NAMES = UI_BINARY_NAMES | UI_INIT_NAMES | {
+    "etc/libreecho/web-config.json",
+    "usr/local/share/libreecho/ui-manifest.txt",
 }
 
 CONNECTIVITY_FILES = {
@@ -662,6 +682,85 @@ def validate_network_tools(entries: dict[str, Entry], manifest: dict[str, object
     return True
 
 
+def validate_ui(entries: dict[str, Entry], manifest: dict[str, object],
+                expected_manifest_sha256: str | None,
+                expected_commit: str | None,
+                expected_diff_sha256: str | None) -> bool:
+    raw_ui = manifest.get("ui", {"enabled": False})
+    if not isinstance(raw_ui, dict) or not isinstance(raw_ui.get("enabled"), bool):
+        fail("UI manifest record is malformed")
+    ui = cast(dict[str, object], raw_ui)
+    expected_enabled = expected_manifest_sha256 is not None
+    if bool(ui.get("enabled")) != expected_enabled:
+        fail(
+            "UI bundle expectation mismatch: "
+            f"expected={'enabled' if expected_enabled else 'disabled'} "
+            f"actual={'enabled' if ui.get('enabled') else 'disabled'}"
+        )
+
+    actual_ui_files = {
+        name for name, entry in entries.items()
+        if stat.S_ISREG(entry.mode) and (
+            name in UI_FIXED_NAMES or
+            name.startswith("usr/local/share/libreecho/web/")
+        )
+    }
+    if not expected_enabled:
+        if actual_ui_files:
+            fail(f"UI bundle is disabled but members are present: {sorted(actual_ui_files)}")
+        return False
+
+    if expected_commit is None or expected_diff_sha256 is None:
+        fail("UI source identities are incomplete")
+    expected_policy = {
+        "enabled": True,
+        "activation": "manual-only",
+        "autostart": False,
+        "hardware_ownership": "existing-control-plane",
+        "commit": expected_commit,
+        "diff_sha256": expected_diff_sha256,
+        "manifest_sha256": expected_manifest_sha256,
+    }
+    for key, value in expected_policy.items():
+        if ui.get(key) != value:
+            fail(f"UI policy changed for {key}: {ui.get(key)!r}")
+
+    raw_files = ui.get("files")
+    if not isinstance(raw_files, dict):
+        fail("UI file manifest record is missing")
+    files = cast(dict[str, object], raw_files)
+    if set(files) != actual_ui_files or not UI_FIXED_NAMES.issubset(files):
+        fail("UI file set changed")
+    if not any(name.startswith("usr/local/share/libreecho/web/") for name in files):
+        fail("UI web asset set is empty")
+
+    for name, raw_record in files.items():
+        if not isinstance(raw_record, dict):
+            fail(f"UI file record is malformed: {name}")
+        record = cast(dict[str, object], raw_record)
+        digest = record.get("sha256")
+        size = record.get("size")
+        mode = record.get("mode")
+        source = record.get("source")
+        if (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest) or
+                not isinstance(size, int) or not isinstance(mode, str) or
+                not isinstance(source, str)):
+            fail(f"UI file record is invalid: {name}")
+        expected_mode = 0o755 if name in UI_BINARY_NAMES | UI_INIT_NAMES else (
+            0o600 if name == "etc/libreecho/web-config.json" else 0o644
+        )
+        if mode != f"{expected_mode:04o}":
+            fail(f"UI file mode changed: {name}")
+        member = require_member(entries, name, digest, expected_mode)
+        if len(member.data) != size:
+            fail(f"UI file size changed: {name}")
+        if name in UI_BINARY_NAMES:
+            if elf_info(member.data) != (1, 40, 0x05000400, None, (), False):
+                fail(f"UI binary is not static ARM32 hard-float: {name}")
+
+    return True
+
+
 def validate_connectivity(entries: dict[str, Entry], manifest: dict[str, object],
                           schema_version: int) -> bool:
     record = manifest.get("connectivity", {"enabled": False})
@@ -826,7 +925,10 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
                        expected_startup_audio_sha256: str | None,
                        expected_iwconfig_sha256: str | None,
                        expected_dropbear_sha256: str | None,
-                       expected_dropbearkey_sha256: str | None) -> bool:
+                       expected_dropbearkey_sha256: str | None,
+                       expected_ui_manifest_sha256: str | None,
+                       expected_ui_commit: str | None,
+                       expected_ui_diff_sha256: str | None) -> bool:
     if ramdisk[:4] != b"\x1f\x8b\x08\x00":
         fail("ramdisk gzip header is not deterministic")
     try:
@@ -875,6 +977,10 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         if unexpected:
             fail(f"network stack is disabled but members are present: {unexpected}")
     validate_network_tools(entries, manifest, expected_iwconfig_sha256)
+    validate_ui(
+        entries, manifest, expected_ui_manifest_sha256,
+        expected_ui_commit, expected_ui_diff_sha256,
+    )
     audio = manifest.get("audio", {"enabled": False})
     if not isinstance(audio, dict) or not isinstance(audio.get("enabled"), bool):
         fail("audio manifest record is malformed")
@@ -1144,6 +1250,12 @@ def main() -> None:
                         help="require this static ARM32 Dropbear server in the initramfs")
     parser.add_argument("--expected-dropbearkey-sha256",
                         help="require this static ARM32 Dropbear host-key utility in the initramfs")
+    parser.add_argument("--expected-ui-manifest-sha256",
+                        help="require this pinned LibreEcho-UI file manifest")
+    parser.add_argument("--expected-ui-commit",
+                        help="require this LibreEcho-UI source commit")
+    parser.add_argument("--expected-ui-diff-sha256",
+                        help="require this LibreEcho-UI source diff identity")
     parser.add_argument("--expected-dtb-sha256")
     parser.add_argument(
         "--expected-connectivity-bundle",
@@ -1257,6 +1369,8 @@ def main() -> None:
         args.expected_tinymix_sha256, args.expected_startup_audio_sha256,
         args.expected_iwconfig_sha256,
         args.expected_dropbear_sha256, args.expected_dropbearkey_sha256,
+        args.expected_ui_manifest_sha256, args.expected_ui_commit,
+        args.expected_ui_diff_sha256,
     )
     expected_connectivity = args.expected_connectivity_bundle != "none"
     if connectivity_enabled != expected_connectivity:

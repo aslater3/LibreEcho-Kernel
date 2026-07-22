@@ -37,7 +37,7 @@ SOURCE_BOOT_SHA256 = "c0f52a3b079d214495cd3dd22f92fd85695d1b868c58b491a2edb933bc
 STOCK_EVT_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57dee1"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 MUSL_LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-RECOVERY_INIT_SHA256 = "bd789ca4a4d6785af76534f13bd9865da96448453fe929bd7309be3d6d118847"
+RECOVERY_INIT_SHA256 = "9a5c1de33a8898ff5ae43d5628ce5aca47e568d793a5a31bbbca1e3a397509f3"
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
@@ -444,6 +444,7 @@ def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
     overlay_files = {
         "default.prop": ("default.prop", 0o644),
         "profile": ("etc/profile", 0o644),
+        "no-startup-audio": ("etc/libreecho/no-startup-audio", 0o644),
         "init.rc": ("init.rc", 0o644),
         "init.recovery.mt8163.rc": ("init.recovery.mt8163.rc", 0o644),
         "libreecho-init": ("libreecho-init", 0o755),
@@ -619,6 +620,109 @@ def add_network_tools(stage: Path, iwconfig: Path,
                 "elf": iwconfig_elf,
             },
         },
+    }
+
+
+def add_ui_bundle(stage: Path, bundle: Path, source: Path,
+                  expected_commit: str, expected_diff_sha256: str,
+                  manifest: dict[str, object]) -> None:
+    """Install the separately-built UI as a manual image entry point."""
+    if bundle.is_symlink() or not bundle.is_dir():
+        raise SystemExit(f"ERROR: UI bundle is not a directory: {bundle}")
+    if source.is_symlink() or not source.is_dir():
+        raise SystemExit(f"ERROR: UI source is not a directory: {source}")
+
+    manifest_source = pinned_source(
+        bundle, "share/libreecho/ui-manifest.txt", "UI file manifest",
+    )
+    manifest_data = read(manifest_source)
+    try:
+        manifest_lines = manifest_data.decode("ascii").splitlines()
+    except UnicodeDecodeError as exc:
+        raise SystemExit("ERROR: UI file manifest is not ASCII") from exc
+    if f"source_commit={expected_commit}" not in manifest_lines:
+        raise SystemExit("ERROR: UI source commit does not match the requested pin")
+    if f"source_diff_sha256={expected_diff_sha256}" not in manifest_lines:
+        raise SystemExit("ERROR: UI source diff identity does not match the requested pin")
+
+    bundled_files: dict[str, str] = {}
+    for line in manifest_lines:
+        if not line.startswith("file="):
+            continue
+        fields = line.split()
+        if len(fields) != 2 or not fields[0].startswith("file=") or not fields[1].startswith("sha256="):
+            raise SystemExit(f"ERROR: malformed UI file manifest line: {line!r}")
+        relative = fields[0][len("file="):]
+        digest = fields[1][len("sha256="):]
+        if not relative or relative in bundled_files or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise SystemExit(f"ERROR: invalid UI file manifest entry: {line!r}")
+        source_file = pinned_source(bundle, relative, f"UI bundle file {relative}")
+        actual = sha256(read(source_file))
+        if actual != digest:
+            raise SystemExit(f"ERROR: UI bundle file hash mismatch: {relative}")
+        bundled_files[relative] = digest
+
+    actual_bundle_files = sorted(
+        path.relative_to(bundle).as_posix()
+        for path in bundle.rglob("*")
+        if path.is_file() and path != manifest_source
+    )
+    if actual_bundle_files != sorted(bundled_files):
+        raise SystemExit("ERROR: UI file manifest does not cover the complete bundle")
+
+    files: dict[str, object] = {}
+
+    def copy_file(relative: str, target_name: str, mode: int,
+                  elf: bool = False) -> None:
+        source_file = pinned_source(bundle, relative, f"UI file {relative}")
+        target = stage / target_name
+        if target.exists() or target.is_symlink():
+            raise SystemExit(f"ERROR: UI file collides with {target}")
+        data = read(source_file)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        target.chmod(mode)
+        record: dict[str, object] = {
+            "source": relative,
+            "sha256": sha256(data),
+            "size": len(data),
+            "mode": f"{mode:04o}",
+        }
+        if elf:
+            record["elf"] = require_elf_contract(target, 0x05000400, None, (), False)
+        files[target_name] = record
+
+    for binary in (
+        "libreecho-web", "libreecho-logd", "libreecho-networkd",
+        "libreecho-audiod", "libreecho-ledd",
+    ):
+        copy_file(f"sbin/{binary}", f"usr/local/sbin/{binary}", 0o755, True)
+    for script in (
+        "libreecho-web.init", "libreecho-logd.init", "libreecho-networkd.init",
+        "libreecho-audiod.init", "libreecho-ledd.init",
+    ):
+        copy_file(f"etc/init.d/{script}", f"etc/init.d/{script}", 0o755)
+    copy_file("etc/libreecho/web-config.json", "etc/libreecho/web-config.json", 0o600)
+    for relative in sorted(bundled_files):
+        if not relative.startswith("share/libreecho/web/"):
+            continue
+        target_name = "usr/local/" + relative
+        copy_file(relative, target_name, 0o644)
+    copy_file(
+        "share/libreecho/ui-manifest.txt",
+        "usr/local/share/libreecho/ui-manifest.txt", 0o644,
+    )
+
+    manifest["ui"] = {
+        "enabled": True,
+        "activation": "manual-only",
+        "autostart": False,
+        "hardware_ownership": "existing-control-plane",
+        "source": str(source.resolve()),
+        "commit": expected_commit,
+        "diff_sha256": expected_diff_sha256,
+        "manifest_sha256": sha256(manifest_data),
+        "files": files,
     }
 
 
@@ -1109,6 +1213,14 @@ def main() -> None:
                         help="static ARM32 TinyALSA mixer utility to add to the initramfs")
     parser.add_argument("--iwconfig", type=Path,
                         help="static ARM32 wireless-tools iwconfig utility")
+    parser.add_argument("--ui-bundle", type=Path,
+                        help="staged static ARM32 LibreEcho-UI bundle")
+    parser.add_argument("--ui-source", type=Path,
+                        help="LibreEcho-UI source checkout used for the bundle")
+    parser.add_argument("--expected-ui-commit",
+                        help="expected LibreEcho-UI source commit")
+    parser.add_argument("--expected-ui-diff-sha256",
+                        help="expected LibreEcho-UI source diff identity")
     parser.add_argument("--startup-audio", type=Path,
                         help="stereo 48kHz PCM16 WAV to play once after successful init")
     parser.add_argument("--ssh-enabled", action="store_true",
@@ -1206,6 +1318,22 @@ def main() -> None:
     if not ssh_enabled and any(value is not None for value in ssh_options.values()):
         raise SystemExit("ERROR: SSH inputs require the explicit --ssh-enabled opt-in")
 
+    ui_options = {
+        "ui_bundle": args.ui_bundle,
+        "ui_source": args.ui_source,
+        "expected_ui_commit": args.expected_ui_commit,
+        "expected_ui_diff_sha256": args.expected_ui_diff_sha256,
+    }
+    ui_enabled = args.ui_bundle is not None
+    if ui_enabled and not all(value is not None for value in ui_options.values()):
+        missing = ", ".join(
+            "--" + name.replace("_", "-")
+            for name, value in ui_options.items() if value is None
+        )
+        raise SystemExit(f"ERROR: UI bundle is enabled but missing {missing}")
+    if not ui_enabled and any(value is not None for value in ui_options.values()):
+        raise SystemExit("ERROR: UI inputs require the explicit --ui-bundle opt-in")
+
     source = read(args.source_boot)
     require_hash("source boot envelope", source, SOURCE_BOOT_SHA256)
     zimage = read(args.zimage)
@@ -1275,6 +1403,13 @@ def main() -> None:
             "host_keys": "generated-ephemerally-under-/tmp/dropbear",
             "files": {},
         },
+        "ui": {
+            "enabled": False,
+            "activation": "manual-only",
+            "autostart": False,
+            "hardware_ownership": "existing-control-plane",
+            "files": {},
+        },
     }
     overlay = Path(__file__).resolve().parent / "initramfs"
     with tempfile.TemporaryDirectory(prefix="libreecho-arm32-initramfs-") as temporary:
@@ -1293,6 +1428,11 @@ def main() -> None:
             )
         if args.iwconfig is not None:
             add_network_tools(stage, args.iwconfig.resolve(), manifest)
+        if ui_enabled:
+            add_ui_bundle(
+                stage, args.ui_bundle.resolve(), args.ui_source.resolve(),
+                args.expected_ui_commit, args.expected_ui_diff_sha256, manifest,
+            )
         if args.startup_audio is not None:
             add_startup_audio(stage, args.startup_audio.resolve(), manifest)
         if ssh_enabled:

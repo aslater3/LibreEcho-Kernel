@@ -214,7 +214,17 @@ int hps_cpu_init(void)
 	}
 
 	/* init bound in hps_ctxt */
-#ifdef CONFIG_MTK_MIN_PERF_CORES
+#ifdef CONFIG_ARCH_MT8163
+	/*
+	 * MT8163 is a homogeneous four-core SMP target in this ARM32 port.
+	 * The stock default of one service core makes HPS immediately offline
+	 * CPUs 1-3 after PSCI has successfully brought them up.  Keep the
+	 * validated SMP baseline online; runtime limits can still be lowered
+	 * through the HPS procfs controls when deliberately testing hotplug.
+	 */
+	hps_ctxt.little_num_base_perf_serv =
+		cpumask_weight(&hps_ctxt.little_cpumask);
+#elif defined(CONFIG_MTK_MIN_PERF_CORES)
 	hps_ctxt.little_num_base_perf_serv = 2;
 #else
 	hps_ctxt.little_num_base_perf_serv = 1;
@@ -257,4 +267,3 @@ int hps_cpu_deinit(void)
 
 	return r;
 }
-
