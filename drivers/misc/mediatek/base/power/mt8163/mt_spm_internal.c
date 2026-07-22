@@ -71,8 +71,9 @@ void __spm_reset_and_init_pcm(const struct pcm_desc *pcmdesc)
 	/* init PCM_CON0 (disable event vector) */
 	spm_write(SPM_PCM_CON0, CON0_CFG_KEY | CON0_IM_SLEEP_DVS);
 
-	/* init PCM_CON1 (disable PCM timer but keep PCM WDT setting) */
-	con1 = spm_read(SPM_PCM_CON1) & (CON1_PCM_WDT_WAKE_MODE | CON1_PCM_WDT_EN);
+	/* init PCM_CON1 with the PCM watchdog disabled for ARM32 bring-up */
+	con1 = spm_read(SPM_PCM_CON1) &
+		~(CON1_PCM_WDT_WAKE_MODE | CON1_PCM_WDT_EN);
 	spm_write(SPM_PCM_CON1, con1 | CON1_CFG_KEY | CON1_EVENT_LOCK_EN |
 		  CON1_SPM_SRAM_ISO_B | CON1_SPM_SRAM_SLP_B |
 		  (pcmdesc->replace ? 0 : CON1_IM_NONRP_EN) |

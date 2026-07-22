@@ -36,7 +36,8 @@
 #define SPM_BYPASS_SYSPWREQ     0
 #else
 #define SPM_PWAKE_EN            1
-#define SPM_PCMWDT_EN           1
+/* Keep the SPM PCM watchdog off while validating ARM32 SMP bring-up. */
+#define SPM_PCMWDT_EN           0
 #define SPM_BYPASS_SYSPWREQ     0
 #endif
 

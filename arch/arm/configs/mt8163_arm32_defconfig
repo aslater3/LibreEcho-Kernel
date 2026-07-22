@@ -27,7 +27,7 @@ CONFIG_SCHED_MC=y
 CONFIG_PREEMPT=y
 CONFIG_ZSMALLOC=y
 CONFIG_SECCOMP=y
-CONFIG_CMDLINE="earlyprintk console=tty0 console=ttyMT0,921600n1 root=/dev/ram vmalloc=496M androidboot.hardware=mt8163 androidboot.selinux=permissive slub_max_order=0 slub_debug=O loglevel=8 initcall_debug user_debug=1 print-fatal-signals=1 gpt "
+CONFIG_CMDLINE="earlyprintk console=tty0 console=ttyMT0,921600n1 root=/dev/ram vmalloc=496M androidboot.hardware=mt8163 androidboot.selinux=permissive slub_max_order=0 slub_debug=O loglevel=8 initcall_debug user_debug=1 print-fatal-signals=1 gpt nohlt"
 CONFIG_CMDLINE_FORCE=y
 CONFIG_DEBUG_USER=y
 CONFIG_CPU_FREQ=y
@@ -36,7 +36,9 @@ CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND=y
 CONFIG_CPU_FREQ_GOV_POWERSAVE=y
 CONFIG_CPU_FREQ_GOV_USERSPACE=y
 CONFIG_CPU_FREQ_GOV_INTERACTIVE=y
-CONFIG_CPU_IDLE=y
+# The MT8163 deep/SODI idle backend arms the SPM PCM watchdog and is not
+# usable until its SMP/timer interactions are validated on ARM32.
+# CONFIG_CPU_IDLE is not set
 # CONFIG_CORE_DUMP_DEFAULT_ELF_HEADERS is not set
 CONFIG_PM_AUTOSLEEP=y
 CONFIG_PM_WAKELOCKS=y
@@ -327,6 +329,10 @@ CONFIG_THERMAL_GOV_TMP103=y
 CONFIG_TMP103_THERMAL=y
 CONFIG_WATCHDOG=y
 CONFIG_MTK_WATCHDOG_COMMON=y
+# Keep the vendor RGU kicker aligned with the known-good ARM64 image.  The
+# ARM32 bring-up has a physical timer and polling idle, so its per-CPU kicker
+# threads can safely keep the watchdog service path alive while SMP is tested.
+CONFIG_MTK_WD_KICKER=y
 CONFIG_MFD_MT6323=y
 CONFIG_MFD_SYSCON=y
 CONFIG_REGULATOR=y

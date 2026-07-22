@@ -192,6 +192,7 @@ static int spm_irq_register(void)
 static void spm_register_init(void)
 {
 	unsigned long flags;
+	u32 pcm_con1;
 
 #ifdef CONFIG_OF
 	struct device_node *node;
@@ -279,6 +280,13 @@ static void spm_register_init(void)
 	spm_write(SPM_PCM_CON0, CON0_CFG_KEY | CON0_IM_SLEEP_DVS);
 	spm_write(SPM_PCM_CON1, CON1_CFG_KEY | CON1_EVENT_LOCK_EN |
 		  CON1_SPM_SRAM_ISO_B | CON1_SPM_SRAM_SLP_B | CON1_MIF_APBEN);
+	/* Clear any PCM watchdog state left armed by the boot firmware. */
+	pcm_con1 = spm_read(SPM_PCM_CON1) &
+		~(CON1_PCM_WDT_WAKE_MODE | CON1_PCM_WDT_EN);
+	spm_write(SPM_PCM_CON1, CON1_CFG_KEY | pcm_con1);
+	spm_write(SPM_PCM_WDT_TIMER_VAL, 0);
+	pr_notice("[SPMDBG] PCM watchdog disabled CON1=0x%x TIMER=0x%x\n",
+		  spm_read(SPM_PCM_CON1), spm_read(SPM_PCM_WDT_TIMER_VAL));
 	spm_write(SPM_PCM_IM_PTR, 0);
 	spm_write(SPM_PCM_IM_LEN, 0);
 
