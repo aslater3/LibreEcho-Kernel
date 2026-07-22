@@ -20,6 +20,7 @@
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
 #include <linux/clk.h>
+#include <linux/wait.h>
 
 #include <linux/jiffies.h>
 #include <linux/fs.h>
@@ -380,10 +381,21 @@ static enum GPUFREQ_TABLE_TYPE _mt_gpufreq_get_dvfs_table_type(void)
 
 #ifdef MT_GPUFREQ_INPUT_BOOST
 static struct task_struct *mt_gpufreq_up_task;
+static DECLARE_WAIT_QUEUE_HEAD(mt_gpufreq_input_boost_wq);
+static atomic_t mt_gpufreq_input_boost_pending = ATOMIC_INIT(0);
 
 static int _mt_gpufreq_input_boost_task(void *data)
 {
-	while (1) {
+	while (!kthread_should_stop()) {
+		if (wait_event_interruptible(mt_gpufreq_input_boost_wq,
+				atomic_read(&mt_gpufreq_input_boost_pending) ||
+				kthread_should_stop()))
+			continue;
+
+		if (kthread_should_stop())
+			break;
+
+		atomic_set(&mt_gpufreq_input_boost_pending, 0);
 		gpufreq_dbg("@%s: begin\n", __func__);
 
 		if (NULL != g_pGpufreq_input_boost_notify) {
@@ -392,12 +404,6 @@ static int _mt_gpufreq_input_boost_task(void *data)
 		}
 
 		gpufreq_dbg("@%s: end\n", __func__);
-
-		set_current_state(TASK_INTERRUPTIBLE);
-		schedule();
-
-		if (kthread_should_stop())
-			break;
 	}
 
 	return 0;
@@ -419,7 +425,8 @@ static void _mt_gpufreq_input_event(struct input_handle *handle, unsigned int ty
 	    && (mt_gpufreq_input_boost_state == 1)) {
 		gpufreq_dbg("@%s: accept.\n", __func__);
 
-		wake_up_process(mt_gpufreq_up_task);
+		atomic_set(&mt_gpufreq_input_boost_pending, 1);
+		wake_up(&mt_gpufreq_input_boost_wq);
 	}
 }
 
@@ -1399,6 +1406,7 @@ static int _mt_gpufreq_pdrv_probe(struct platform_device *pdev)
 
 	sched_setscheduler_nocheck(mt_gpufreq_up_task, SCHED_FIFO, &param);
 	get_task_struct(mt_gpufreq_up_task);
+	wake_up_process(mt_gpufreq_up_task);
 
 	rc = input_register_handler(&mt_gpufreq_input_handler);
 #endif

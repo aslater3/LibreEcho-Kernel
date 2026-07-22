@@ -370,7 +370,13 @@ CONFIG_SND_PCM_XRUN_DEBUG=y
 # CONFIG_SND_SPI is not set
 CONFIG_SND_USB_AUDIO=y
 CONFIG_SND_SOC=y
-CONFIG_MT_SND_SOC_8163=y
+# The Echo board uses the Amazon machine driver and TLV codec topology from
+# the stock ARM32 DTB.  The generic MT8163 card registers an ALSA card but
+# leaves the physical speaker/microphone DAPM graph incomplete.
+# CONFIG_MT_SND_SOC_8163 is not set
+CONFIG_MT_SND_SOC_8163_AMZN=y
+CONFIG_SND_SOC_8_MICS=y
+CONFIG_EXTRA_FIRMWARE="i2s_to_spi_v34.bin"
 CONFIG_MTK_AUDIO_USE_SHARED_SRAM=y
 CONFIG_SND_SIMPLE_CARD=y
 CONFIG_SOUND_PRIME=y

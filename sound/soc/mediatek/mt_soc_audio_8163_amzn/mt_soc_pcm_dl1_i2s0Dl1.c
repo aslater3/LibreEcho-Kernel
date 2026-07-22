@@ -31,6 +31,7 @@
 #include "mt_soc_digital_type.h"
 #include "mt_soc_pcm_common.h"
 #include <mt-plat/mt_gpt.h>
+#include <asm/div64.h>
 
 
 #define MAGIC_NUMBER 0xFFFFFFC0
@@ -149,6 +150,7 @@ static long long mtk_pcm_I2S0dl1_get_next_write_timestamp(void)
 	unsigned long flags = 0 ;
 	long long timestamp = 0;
 	long long timeForDataRemained = 0;
+	u64 time_for_data_remained;
 	unsigned int gpt_val[2] = {0, 0};
 	unsigned int u4AdjustDataRemainedSample = 0;
 	int tmp = 0;
@@ -254,9 +256,11 @@ static long long mtk_pcm_I2S0dl1_get_next_write_timestamp(void)
 			}
 		}
 
-		timeForDataRemained =
-			GPT6_CLOCK_COUNT_PER_SEC * u4AdjustDataRemainedSample /
-			I2S0dl1_substream->runtime->rate;
+		time_for_data_remained =
+			GPT6_CLOCK_COUNT_PER_SEC * (u64)u4AdjustDataRemainedSample;
+		do_div(time_for_data_remained,
+			I2S0dl1_substream->runtime->rate);
+		timeForDataRemained = (long long)time_for_data_remained;
 
 		PRINTK_AUD_DL1(
 			"mon=%d,rem=%d,adj=%d,timeRem=%lld,ts0=%lld,ts=%lld\n",

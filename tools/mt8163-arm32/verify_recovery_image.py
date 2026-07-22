@@ -38,7 +38,7 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "68d6217b37f28081b80fbbba0d880c383bf0ac0077135ad5b1d66a66e82f40ee"
+INIT_SHA256 = "10da44428db42bbda82eceb22f6ea88815708f794230a639696102e4fcc473af"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
@@ -603,7 +603,11 @@ def validate_connectivity(entries: dict[str, Entry], manifest: dict[str, object]
 
 
 def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
-                       schema_version: int) -> bool:
+                       schema_version: int,
+                       expected_audio_probe_sha256: str | None,
+                       expected_tinyplay_sha256: str | None,
+                       expected_tinycap_sha256: str | None,
+                       expected_tinymix_sha256: str | None) -> bool:
     if ramdisk[:4] != b"\x1f\x8b\x08\x00":
         fail("ramdisk gzip header is not deterministic")
     try:
@@ -651,6 +655,91 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         unexpected = sorted(name for name in network_names if name in entries)
         if unexpected:
             fail(f"network stack is disabled but members are present: {unexpected}")
+    audio = manifest.get("audio", {"enabled": False})
+    if not isinstance(audio, dict) or not isinstance(audio.get("enabled"), bool):
+        fail("audio manifest record is malformed")
+    audio = cast(dict[str, object], audio)
+    audio_names = {
+        "sbin/audio_probe", "sbin/tinyplay", "sbin/tinycap", "sbin/tinymix",
+    }
+    expected_audio = (
+        expected_audio_probe_sha256,
+        expected_tinyplay_sha256,
+        expected_tinycap_sha256,
+        expected_tinymix_sha256,
+    )
+    if any(value is not None for value in expected_audio):
+        if not all(value is not None for value in expected_audio):
+            fail("audio asset identities are incomplete")
+        if not audio.get("enabled"):
+            fail("audio assets are expected but audio manifest is disabled")
+        raw_probe = audio.get("probe")
+        if not isinstance(raw_probe, dict):
+            fail("audio probe manifest record is incomplete")
+        probe_record = cast(dict[str, object], raw_probe)
+        if probe_record.get("sha256") != expected_audio_probe_sha256:
+            fail("audio probe manifest hash mismatch")
+        probe_path = probe_record.get("path")
+        if not isinstance(probe_path, str) or not Path(probe_path).is_absolute():
+            fail("audio probe manifest path is not absolute")
+        probe = require_member(entries, "sbin/audio_probe", expected_audio_probe_sha256, 0o755)
+        if elf_info(probe.data) != (1, 40, 0x05000400, None, (), False):
+            fail("audio probe is not static ARM32 hard-float")
+        if probe_record != {
+            "path": probe_path,
+            "sha256": expected_audio_probe_sha256,
+            "size": len(probe.data),
+            "mode": "0755",
+            "elf": {
+                "class": 1,
+                "machine": 40,
+                "flags": "0x05000400",
+                "interpreter": None,
+                "needed": [],
+                "dynamic": False,
+            },
+        }:
+            fail("audio probe manifest record mismatch")
+        raw_tools = audio.get("tools")
+        if not isinstance(raw_tools, dict):
+            fail("audio tool manifest record is incomplete")
+        tools = cast(dict[str, object], raw_tools)
+        for name, expected_hash in (
+            ("tinyplay", expected_tinyplay_sha256),
+            ("tinycap", expected_tinycap_sha256),
+            ("tinymix", expected_tinymix_sha256),
+        ):
+            if not isinstance(expected_hash, str):
+                fail(f"{name} identity is missing")
+            raw_tool = tools.get(name)
+            if not isinstance(raw_tool, dict):
+                fail(f"{name} manifest record is incomplete")
+            tool_record = cast(dict[str, object], raw_tool)
+            if tool_record.get("sha256") != expected_hash:
+                fail(f"{name} manifest hash mismatch")
+            tool_path = tool_record.get("path")
+            if not isinstance(tool_path, str) or not Path(tool_path).is_absolute():
+                fail(f"{name} manifest path is not absolute")
+            tool = require_member(entries, f"sbin/{name}", expected_hash, 0o755)
+            if elf_info(tool.data) != (1, 40, 0x05000400, None, (), False):
+                fail(f"{name} is not static ARM32 hard-float")
+            if tool_record != {
+                "path": tool_path,
+                "sha256": expected_hash,
+                "size": len(tool.data),
+                "mode": "0755",
+                "elf": {
+                    "class": 1,
+                    "machine": 40,
+                    "flags": "0x05000400",
+                    "interpreter": None,
+                    "needed": [],
+                    "dynamic": False,
+                },
+            }:
+                fail(f"{name} manifest record mismatch")
+    elif audio.get("enabled") or sorted(name for name in audio_names if name in entries):
+        fail("audio assets are enabled without expected identities")
     if sha256(cpio) != manifest["initramfs"]["cpio_sha256"]:
         fail("manifest cpio hash mismatch")
     if any(entry.uid or entry.gid or entry.mtime for entry in entries.values()):
@@ -773,6 +862,14 @@ def main() -> None:
     parser.add_argument("--boot-image", type=Path, required=True)
     parser.add_argument("--expected-boot-sha256", required=True)
     parser.add_argument("--expected-zimage-sha256", default=ZIMAGE_SHA256)
+    parser.add_argument("--expected-audio-probe-sha256",
+                        help="require this static ARM32 audio probe in the initramfs")
+    parser.add_argument("--expected-tinyplay-sha256",
+                        help="require this static ARM32 TinyALSA playback utility")
+    parser.add_argument("--expected-tinycap-sha256",
+                        help="require this static ARM32 TinyALSA capture utility")
+    parser.add_argument("--expected-tinymix-sha256",
+                        help="require this static ARM32 TinyALSA mixer utility")
     parser.add_argument("--expected-dtb-sha256")
     parser.add_argument(
         "--expected-connectivity-bundle",
@@ -880,7 +977,11 @@ def main() -> None:
     ):
         fail("physical boot envelope overlaps or is out of order")
 
-    connectivity_enabled = validate_initramfs(ramdisk, manifest, schema_version)
+    connectivity_enabled = validate_initramfs(
+        ramdisk, manifest, schema_version, args.expected_audio_probe_sha256,
+        args.expected_tinyplay_sha256, args.expected_tinycap_sha256,
+        args.expected_tinymix_sha256,
+    )
     expected_connectivity = args.expected_connectivity_bundle != "none"
     if connectivity_enabled != expected_connectivity:
         actual = CONNECTIVITY_BUNDLE_ID if connectivity_enabled else "none"
@@ -898,6 +999,7 @@ def main() -> None:
         "zimage=yes evt_dtb=yes initramfs_arm32=yes fastboot_marker=yes "
         "root_adb_staged=yes runme=yes memory_disjoint=yes "
         f"connectivity_bundle={'yes' if connectivity_enabled else 'no'} "
+        f"audio_tools={'yes' if args.expected_tinyplay_sha256 and args.expected_tinycap_sha256 and args.expected_tinymix_sha256 else 'no'} "
         f"network_activation={network_activation} status=PREPARED_NOT_FLASHED"
     )
 

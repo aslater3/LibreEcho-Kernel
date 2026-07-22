@@ -1,0 +1,45 @@
+diff --git a/utils/tinycap.c b/utils/tinycap.c
+index cf150f2..b945026 100644
+--- a/utils/tinycap.c
++++ b/utils/tinycap.c
+@@ -168 +168 @@ int main(int argc, char **argv)
+-        format = PCM_FORMAT_S24_LE;
++        format = PCM_FORMAT_S24_3LE;
+@@ -197,0 +198,5 @@ int main(int argc, char **argv)
++    if (frames == 0) {
++        fclose(file);
++        return EXIT_FAILURE;
++    }
++
+@@ -245,0 +251,7 @@ unsigned int capture_sample(FILE *file, unsigned int card, unsigned int device,
++    if (pcm_prepare(pcm) < 0) {
++        fprintf(stderr, "Unable to prepare PCM device (%s)\n",
++                pcm_get_error(pcm));
++        pcm_close(pcm);
++        return 0;
++    }
++
+@@ -284 +295,0 @@ unsigned int capture_sample(FILE *file, unsigned int card, unsigned int device,
+-
+diff --git a/utils/tinyplay.c b/utils/tinyplay.c
+index d617074..db876ca 100644
+--- a/utils/tinyplay.c
++++ b/utils/tinyplay.c
+@@ -232,0 +233,8 @@ static int ctx_init(struct ctx* ctx, struct cmd *cmd)
++    if (pcm_prepare(ctx->pcm) < 0) {
++        fprintf(stderr, "failed to prepare for pcm %u,%u. %s\n",
++                cmd->card, cmd->device, pcm_get_error(ctx->pcm));
++        fclose(ctx->file);
++        pcm_close(ctx->pcm);
++        return -1;
++    }
++
+@@ -454,0 +463 @@ int play_sample(struct ctx *ctx)
++    int status = 0;
+@@ -479,0 +489 @@ int play_sample(struct ctx *ctx)
++                status = -1;
+@@ -500 +510 @@ int play_sample(struct ctx *ctx)
+-    return 0;
++    return status;
+@@ -502 +511,0 @@ int play_sample(struct ctx *ctx)
+-

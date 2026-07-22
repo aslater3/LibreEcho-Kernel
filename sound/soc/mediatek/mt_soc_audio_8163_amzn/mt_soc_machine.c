@@ -81,6 +81,7 @@
 #include "mt_soc_codec_63xx.h"
 #include "mt_amzn_mclk.h"
 #include "../../codecs/tlv320aic3101.h"
+#include "../../codecs/tlv320aic32x4.h"
 
 static int mt_soc_lowjitter_control;
 static struct dentry *mt_sco_audio_debugfs;
@@ -474,8 +475,62 @@ static int tlv320aic3204_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int tlv320aic3204_startup(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dapm_context *dapm = &rtd->card->dapm;
+	int ret;
+
+	ret = mtmachine_startup(substream);
+	if (ret)
+		return ret;
+
+	/* The board's direct tweeter is fed by the right headphone DAC. */
+	ret = snd_soc_update_bits(rtd->codec, AIC32X4_HPRGAIN, 1 << 6,
+				  1 << 6);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * The Echo board has a direct HPR/tweeter path and line outputs
+	 * feeding the external bass amplifier.  They are board endpoints,
+	 * not machine-card routes, so keep them explicitly live while this
+	 * playback link is open.
+	 */
+	ret = snd_soc_dapm_force_enable_pin(dapm, "HPR");
+	if (ret)
+		return ret;
+	ret = snd_soc_dapm_force_enable_pin(dapm, "LOL");
+	if (ret)
+		goto disable_hpr;
+	ret = snd_soc_dapm_force_enable_pin(dapm, "LOR");
+	if (ret)
+		goto disable_lineout_left;
+
+	return snd_soc_dapm_sync(dapm);
+
+disable_lineout_left:
+	snd_soc_dapm_disable_pin(dapm, "LOL");
+disable_hpr:
+	snd_soc_dapm_disable_pin(dapm, "HPR");
+	snd_soc_dapm_sync(dapm);
+	return ret;
+}
+
+static void tlv320aic3204_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dapm_context *dapm = &rtd->card->dapm;
+
+	snd_soc_dapm_disable_pin(dapm, "LOR");
+	snd_soc_dapm_disable_pin(dapm, "LOL");
+	snd_soc_dapm_disable_pin(dapm, "HPR");
+	snd_soc_dapm_sync(dapm);
+}
+
 static struct snd_soc_ops tlv320aic3204_machine_ops = {
-	.startup = mtmachine_startup,
+	.startup = tlv320aic3204_startup,
+	.shutdown = tlv320aic3204_shutdown,
 	.prepare = mtmachine_prepare,
 	.hw_params = tlv320aic3204_hw_params,
 };
