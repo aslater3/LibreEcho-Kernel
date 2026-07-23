@@ -505,7 +505,7 @@ start_ui_services()
         return 0
     }
     $BB mkdir -p /var/run /var/log /var/log/libreecho /run/libreecho
-    for service in logd networkd audiod ledd web; do
+    for service in logd networkd audiod ledd btd web; do
         script="/etc/init.d/libreecho-$service.init"
         if [ -x "$script" ]; then
             "$script" start >/tmp/libreecho-"$service".init.log 2>&1

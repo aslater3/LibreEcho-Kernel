@@ -1576,7 +1576,8 @@ static void hci_init2_req(struct hci_request *req, unsigned long opt)
 	if (lmp_inq_tx_pwr_capable(hdev))
 		hci_req_add(req, HCI_OP_READ_INQ_RSP_TX_POWER, 0, NULL);
 
-	if (lmp_ext_feat_capable(hdev)) {
+	if (lmp_ext_feat_capable(hdev) &&
+	    !test_bit(HCI_QUIRK_NO_EXT_FEATURES, &hdev->quirks)) {
 		struct hci_cp_read_local_ext_features cp;
 
 		cp.page = 0x01;
@@ -1725,6 +1726,9 @@ static void hci_init3_req(struct hci_request *req, unsigned long opt)
 	}
 
 	/* Read features beyond page 1 if available */
+	if (test_bit(HCI_QUIRK_NO_EXT_FEATURES, &hdev->quirks))
+		return;
+
 	for (p = 2; p < HCI_MAX_PAGES && p <= hdev->max_page; p++) {
 		struct hci_cp_read_local_ext_features cp;
 
@@ -2451,6 +2455,9 @@ static int hci_dev_do_open(struct hci_dev *hdev)
 			hci_dev_unlock(hdev);
 		}
 	} else {
+		BT_ERR("%s initialization failed: %d (hci_ver %u manufacturer %u features0[4] 0x%02x)\n",
+		       hdev->name, ret, hdev->hci_ver, hdev->manufacturer,
+		       hdev->features[0][4]);
 		/* Init failed, cleanup */
 		flush_work(&hdev->tx_work);
 		flush_work(&hdev->cmd_work);
@@ -2527,6 +2534,12 @@ int hci_dev_open(__u16 dev)
 		set_bit(HCI_BONDABLE, &hdev->dev_flags);
 
 	err = hci_dev_do_open(hdev);
+	/* hci_power_on() normally completes setup after hci_dev_do_open().
+	 * Legacy HCIDEVUP is synchronous and bypasses that worker, so complete
+	 * the same registration transition here for normal controllers. */
+	if (!err && test_and_clear_bit(HCI_SETUP, &hdev->dev_flags) &&
+	    !test_bit(HCI_USER_CHANNEL, &hdev->dev_flags))
+		mgmt_index_added(hdev);
 
 done:
 	hci_dev_put(hdev);
@@ -5292,6 +5305,9 @@ void hci_req_cmd_complete(struct hci_dev *hdev, u16 opcode, u8 status)
 	unsigned long flags;
 
 	BT_DBG("opcode 0x%04x status 0x%02x", opcode, status);
+	if (status && test_bit(HCI_INIT, &hdev->flags))
+		BT_ERR("%s init command 0x%04x returned HCI status 0x%02x\n",
+		       hdev->name, opcode, status);
 
 	/* If the completed command doesn't match the last one that was
 	 * sent we need to do special handling of it.

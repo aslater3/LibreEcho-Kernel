@@ -129,6 +129,10 @@ enum {
 	 * during the hdev->setup vendor callback.
 	 */
 	HCI_QUIRK_INVALID_BDADDR,
+
+	/* Some legacy controllers advertise extended LMP features but reject
+	 * Read Local Extended Features during host initialization. */
+	HCI_QUIRK_NO_EXT_FEATURES,
 };
 
 /* HCI device flags */
