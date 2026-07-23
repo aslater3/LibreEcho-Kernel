@@ -78,6 +78,7 @@ UI_FIXED_NAMES = UI_BINARY_NAMES | UI_INIT_NAMES | {
     "etc/libreecho/web-config.json",
     "usr/local/share/libreecho/ui-manifest.txt",
 }
+UI_OPTIONAL_NAMES = {"etc/libreecho/users"}
 
 CONNECTIVITY_FILES = {
     "system/bin/linker": (
@@ -702,6 +703,7 @@ def validate_ui(entries: dict[str, Entry], manifest: dict[str, object],
         name for name, entry in entries.items()
         if stat.S_ISREG(entry.mode) and (
             name in UI_FIXED_NAMES or
+            name in UI_OPTIONAL_NAMES or
             name.startswith("usr/local/share/libreecho/web/")
         )
     }
@@ -747,13 +749,15 @@ def validate_ui(entries: dict[str, Entry], manifest: dict[str, object],
                 not isinstance(source, str)):
             fail(f"UI file record is invalid: {name}")
         expected_mode = 0o755 if name in UI_BINARY_NAMES | UI_INIT_NAMES else (
-            0o600 if name == "etc/libreecho/web-config.json" else 0o644
+            0o600 if name in {"etc/libreecho/web-config.json", "etc/libreecho/users"} else 0o644
         )
         if mode != f"{expected_mode:04o}":
             fail(f"UI file mode changed: {name}")
         member = require_member(entries, name, digest, expected_mode)
         if len(member.data) != size:
             fail(f"UI file size changed: {name}")
+        if name == "etc/libreecho/users" and not member.data.strip():
+            fail("UI users file is empty")
         if name in UI_BINARY_NAMES:
             if elf_info(member.data) != (1, 40, 0x05000400, None, (), False):
                 fail(f"UI binary is not static ARM32 hard-float: {name}")

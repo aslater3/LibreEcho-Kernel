@@ -11,6 +11,7 @@ MAKE_BIN=${MAKE:-make}
 CROSS_COMPILE=${LIBREECHO_UI_CROSS_COMPILE:-/usr/bin/arm-linux-gnueabihf-}
 CC_BIN=${LIBREECHO_UI_CC:-gcc}
 GC_LDFLAGS=${LIBREECHO_UI_GC_LDFLAGS:--static -Wl,--gc-sections}
+USERS_SOURCE=${LIBREECHO_WEB_USERS_FILE:-}
 
 [[ -n "$UI_SOURCE" && -d "$UI_SOURCE" ]] || {
     echo "ERROR: LibreEcho-UI source checkout is required" >&2
@@ -32,6 +33,17 @@ command -v "$MAKE_BIN" >/dev/null 2>&1 || {
     echo "ERROR: UI ARM32 compiler not found: ${CROSS_COMPILE}gcc" >&2
     exit 1
 }
+if [[ -n "$USERS_SOURCE" ]]; then
+    [[ -f "$USERS_SOURCE" && ! -L "$USERS_SOURCE" ]] || {
+        echo "ERROR: LibreEcho web users file must be a regular file: $USERS_SOURCE" >&2
+        exit 1
+    }
+    users_mode=$(stat -c %a "$USERS_SOURCE")
+    (( 8#$users_mode & 077 )) && {
+        echo "ERROR: LibreEcho web users file is group/world accessible: $USERS_SOURCE" >&2
+        exit 1
+    }
+fi
 
 UI_SOURCE=$(cd -- "$UI_SOURCE" && pwd -P)
 ui_commit=$(git -C "$UI_SOURCE" rev-parse HEAD)
@@ -80,6 +92,9 @@ done
 cp -R "$UI_SOURCE/web/." "$OUTPUT/share/libreecho/web/"
 install -m 0600 "$UI_SOURCE/config/defaults.json" \
     "$OUTPUT/etc/libreecho/web-config.json"
+if [[ -n "$USERS_SOURCE" ]]; then
+    install -m 0600 "$USERS_SOURCE" "$OUTPUT/etc/libreecho/users"
+fi
 
 {
     printf 'schema=1\n'

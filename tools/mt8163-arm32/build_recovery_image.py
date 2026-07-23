@@ -703,6 +703,11 @@ def add_ui_bundle(stage: Path, bundle: Path, source: Path,
     ):
         copy_file(f"etc/init.d/{script}", f"etc/init.d/{script}", 0o755)
     copy_file("etc/libreecho/web-config.json", "etc/libreecho/web-config.json", 0o600)
+    if "etc/libreecho/users" in bundled_files:
+        users_file = pinned_source(bundle, "etc/libreecho/users", "UI users file")
+        if users_file.stat().st_mode & 0o077 or not read(users_file).strip():
+            raise SystemExit("ERROR: UI users file must be private and non-empty")
+        copy_file("etc/libreecho/users", "etc/libreecho/users", 0o600)
     for relative in sorted(bundled_files):
         if not relative.startswith("share/libreecho/web/"):
             continue
