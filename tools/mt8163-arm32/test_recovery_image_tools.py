@@ -257,6 +257,13 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("LibreEcho Development OS", profile)
         self.assertIn("PS1='libreecho# '", profile)
 
+    def test_startup_audio_is_disabled_by_branch_marker(self) -> None:
+        marker = TOOLS_DIR / "initramfs/no-startup-audio"
+        init_script = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
+        self.assertTrue(marker.is_file())
+        self.assertIn("/etc/libreecho/no-startup-audio", init_script)
+        self.assertIn("audio-startup-disabled", init_script)
+
     def test_device_node_setup_is_not_activation(self) -> None:
         entries = {
             "libreecho-init": self.control(

@@ -485,6 +485,40 @@ fi
 
 log init-ready-pid1-managed
 
+# The recovery image's minimal userspace does not inherit Android's loopback
+# address.  Bring up IPv4 loopback before manual services such as the web
+# daemon bind to their safe 127.0.0.1 default.
+if $BB ifconfig lo 127.0.0.1 up >/tmp/loopback-config.log 2>&1; then
+    log loopback-configured
+else
+    log loopback-config-failed
+fi
+
+# The UI control plane is part of the image contract.  Start each daemon in a
+# fixed order once loopback exists; the init scripts remain idempotent and
+# write their own PID files, so a later manual restart is safe.  Starting
+# audiod only opens the adapter and never initiates playback.
+start_ui_services()
+{
+    [ -x /usr/local/sbin/libreecho-web ] || {
+        log ui-services-not-installed
+        return 0
+    }
+    $BB mkdir -p /var/run /var/log /var/log/libreecho /run/libreecho
+    for service in logd networkd audiod ledd web; do
+        script="/etc/init.d/libreecho-$service.init"
+        if [ -x "$script" ]; then
+            "$script" start >/tmp/libreecho-"$service".init.log 2>&1
+            rc=$?
+            log "ui-service-start:$service:$rc"
+        else
+            log "ui-service-missing:$service"
+        fi
+    done
+}
+start_ui_services &
+log ui-services-autostart-started
+
 # Play the bring-up confirmation clip only after the normal control plane has
 # reached its ready point.  This is deliberately a bounded background worker:
 # a missing codec node or a failed amplifier must never hold PID 1 or prevent
@@ -541,8 +575,12 @@ startup_audio_worker()
     log "audio-startup-playback-rc:$playback_rc"
     return "$playback_rc"
 }
-startup_audio_worker &
-log audio-startup-worker-started
+if [ -e /etc/libreecho/no-startup-audio ]; then
+    log audio-startup-disabled
+else
+    startup_audio_worker &
+    log audio-startup-worker-started
+fi
 
 # Connectivity is deliberately launched only after the ADB/FunctionFS control
 # plane is ready.  A profile-bearing development image performs one bounded
