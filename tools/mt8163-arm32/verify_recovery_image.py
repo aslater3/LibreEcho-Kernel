@@ -714,8 +714,8 @@ def validate_ui(entries: dict[str, Entry], manifest: dict[str, object],
         fail("UI source identities are incomplete")
     expected_policy = {
         "enabled": True,
-        "activation": "manual-only",
-        "autostart": False,
+        "activation": "automatic-after-loopback",
+        "autostart": True,
         "hardware_ownership": "existing-control-plane",
         "commit": expected_commit,
         "diff_sha256": expected_diff_sha256,

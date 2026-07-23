@@ -715,8 +715,8 @@ def add_ui_bundle(stage: Path, bundle: Path, source: Path,
 
     manifest["ui"] = {
         "enabled": True,
-        "activation": "manual-only",
-        "autostart": False,
+        "activation": "automatic-after-loopback",
+        "autostart": True,
         "hardware_ownership": "existing-control-plane",
         "source": str(source.resolve()),
         "commit": expected_commit,
