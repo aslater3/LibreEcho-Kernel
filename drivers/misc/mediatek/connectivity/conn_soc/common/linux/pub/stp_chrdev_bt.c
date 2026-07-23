@@ -34,6 +34,11 @@
 #include <linux/printk.h>
 #include <linux/uio.h>
 
+#ifdef CONFIG_BT
+#include <net/bluetooth/bluetooth.h>
+#include <net/bluetooth/hci_core.h>
+#endif
+
 #include "osal_typedef.h"
 #include "stp_exp.h"
 #include "wmt_exp.h"
@@ -111,6 +116,184 @@ static INT32 flag = 0;
 static UINT32 rstflag;
 static UINT8 HCI_EVT_HW_ERROR[] = {0x04, 0x10, 0x01, 0x00};
 static loff_t rd_offset;
+
+#ifdef CONFIG_BT
+/*
+ * The MT8163 vendor path already removes the STP envelope before invoking
+ * mtk_wcn_sys_if_rx().  Register the Bluetooth core directly on that hook so
+ * Linux sees a real HCI controller while the legacy /dev/stpbt interface is
+ * retained for diagnostics.
+ */
+struct mtk_hci {
+	struct hci_dev *hdev;
+	struct delayed_work work;
+	struct sk_buff_head txq;
+};
+
+static struct mtk_hci mtk_hci;
+
+static void mtk_bt_hci_receive(PUINT8 data, INT32 size);
+
+static int mtk_bt_hci_open(struct hci_dev *hdev)
+{
+	int result;
+
+	if (mtk_wcn_wmt_func_on(WMTDRV_TYPE_BT) != MTK_WCN_BOOL_TRUE)
+		return -ENODEV;
+	if (mtk_wcn_stp_is_ready() == MTK_WCN_BOOL_FALSE) {
+		mtk_wcn_wmt_func_off(WMTDRV_TYPE_BT);
+		return -ENODEV;
+	}
+
+	/* WMT installs the STP export callback after this driver is initialized.
+	 * Register the HCI RX sink here, after the transport is ready; registering
+	 * from BT_init() is too early and leaves stp_if_rx NULL. */
+	result = mtk_wcn_stp_register_if_rx(mtk_bt_hci_receive);
+	if (result) {
+		BT_ERR_FUNC("HCI RX callback registration failed: %d\n", result);
+		mtk_wcn_wmt_func_off(WMTDRV_TYPE_BT);
+		return -ENODEV;
+	}
+
+	set_bit(HCI_RUNNING, &hdev->flags);
+	mtk_wcn_stp_set_bluez(1);
+	return 0;
+}
+
+static int mtk_bt_hci_close(struct hci_dev *hdev)
+{
+	mtk_wcn_stp_set_bluez(0);
+	clear_bit(HCI_RUNNING, &hdev->flags);
+	if (mtk_wcn_wmt_func_off(WMTDRV_TYPE_BT) != MTK_WCN_BOOL_TRUE)
+		return -EIO;
+	return 0;
+}
+
+static void mtk_bt_hci_work(struct work_struct *work)
+{
+	struct mtk_hci *hci = container_of(to_delayed_work(work),
+					   struct mtk_hci, work);
+	struct sk_buff *skb;
+
+	while ((skb = skb_dequeue(&hci->txq))) {
+		int result;
+
+		skb_push(skb, 1);
+		skb->data[0] = bt_cb(skb)->pkt_type;
+		result = mtk_wcn_stp_send_data(skb->data, skb->len,
+					       BT_TASK_INDX);
+		if (result <= 0) {
+			hci->hdev->stat.err_tx++;
+			skb_pull(skb, 1);
+			skb_queue_head(&hci->txq, skb);
+			schedule_delayed_work(&hci->work, msecs_to_jiffies(10));
+			break;
+		}
+		hci->hdev->stat.byte_tx += result;
+		kfree_skb(skb);
+	}
+}
+
+static int mtk_bt_hci_send(struct hci_dev *hdev, struct sk_buff *skb)
+{
+	if (!test_bit(HCI_RUNNING, &hdev->flags))
+		return -EBUSY;
+
+	switch (bt_cb(skb)->pkt_type) {
+	case HCI_COMMAND_PKT:
+		hdev->stat.cmd_tx++;
+		break;
+	case HCI_ACLDATA_PKT:
+		hdev->stat.acl_tx++;
+		break;
+	case HCI_SCODATA_PKT:
+		hdev->stat.sco_tx++;
+		break;
+	default:
+		return -EILSEQ;
+	}
+
+	skb_queue_tail(&mtk_hci.txq, skb);
+	schedule_delayed_work(&mtk_hci.work, 0);
+	return 0;
+}
+
+static int mtk_bt_hci_flush(struct hci_dev *hdev)
+{
+	skb_queue_purge(&mtk_hci.txq);
+	return 0;
+}
+
+static void mtk_bt_hci_receive(PUINT8 data, INT32 size)
+{
+	int result;
+
+	if (!mtk_hci.hdev || size <= 0)
+		return;
+
+	result = hci_recv_stream_fragment(mtk_hci.hdev, (void *)data, size);
+	if (result < 0)
+		BT_ERR_FUNC("hci receive failed: %d\n", result);
+	mtk_hci.hdev->stat.byte_rx += size;
+}
+
+static int mtk_bt_hci_init(void)
+{
+	int result;
+
+	mtk_hci.hdev = hci_alloc_dev();
+	if (!mtk_hci.hdev)
+		return -ENOMEM;
+
+	mtk_hci.hdev->bus = HCI_VIRTUAL;
+	mtk_hci.hdev->dev_type = HCI_BREDR;
+	/* The MT8163 BTIF firmware advertises extended LMP features but returns
+	 * a non-success status for Read Local Extended Features.  Those optional
+	 * pages are not needed for the BR/EDR transport used by this board. */
+	set_bit(HCI_QUIRK_NO_EXT_FEATURES, &mtk_hci.hdev->quirks);
+	mtk_hci.hdev->open = mtk_bt_hci_open;
+	mtk_hci.hdev->close = mtk_bt_hci_close;
+	mtk_hci.hdev->send = mtk_bt_hci_send;
+	mtk_hci.hdev->flush = mtk_bt_hci_flush;
+#if WMT_CREATE_NODE_DYNAMIC
+	SET_HCIDEV_DEV(mtk_hci.hdev, stpbt_dev);
+#endif
+	hci_set_drvdata(mtk_hci.hdev, &mtk_hci);
+	skb_queue_head_init(&mtk_hci.txq);
+	INIT_DELAYED_WORK(&mtk_hci.work, mtk_bt_hci_work);
+	result = hci_register_dev(mtk_hci.hdev);
+	if (result) {
+		mtk_wcn_stp_register_if_rx(NULL);
+		cancel_delayed_work_sync(&mtk_hci.work);
+		skb_queue_purge(&mtk_hci.txq);
+		hci_free_dev(mtk_hci.hdev);
+		mtk_hci.hdev = NULL;
+	} else {
+		/* hci_register_dev() queues an immediate setup power-on.  The
+		 * MT8163 WMT callback is registered later in boot, so that
+		 * implicit open always races WMT and leaves HCI_SETUP pending
+		 * after failing.  Keep the controller registered but defer its
+		 * first open to the explicit management enable request, after
+		 * wmt_configure has installed the BTIF transport. */
+		cancel_work_sync(&mtk_hci.hdev->power_on);
+		clear_bit(HCI_AUTO_OFF, &mtk_hci.hdev->dev_flags);
+	}
+	return result;
+}
+
+static void mtk_bt_hci_exit(void)
+{
+	if (!mtk_hci.hdev)
+		return;
+
+	mtk_wcn_stp_register_if_rx(NULL);
+	cancel_delayed_work_sync(&mtk_hci.work);
+	skb_queue_purge(&mtk_hci.txq);
+	hci_unregister_dev(mtk_hci.hdev);
+	hci_free_dev(mtk_hci.hdev);
+	mtk_hci.hdev = NULL;
+}
+#endif
 
 static size_t bt_report_hw_error(char *buf, size_t count, loff_t *f_pos)
 {
@@ -593,6 +776,11 @@ static int BT_init(void)
 	/* Initialize wake lock */
 	wake_lock_init(&bt_wakelock, WAKE_LOCK_SUSPEND, "bt_drv");
 
+#ifdef CONFIG_BT
+	if (mtk_bt_hci_init())
+		BT_WARN_FUNC("Linux Bluetooth HCI registration failed\n");
+#endif
+
 	return 0;
 
 error:
@@ -618,6 +806,11 @@ error:
 static void BT_exit(void)
 {
 	dev_t dev = MKDEV(BT_major, 0);
+
+#ifdef CONFIG_BT
+	mtk_bt_hci_exit();
+#endif
+
 	/* Destroy wake lock*/
 	wake_lock_destroy(&bt_wakelock);
 
@@ -658,4 +851,3 @@ EXPORT_SYMBOL(mtk_wcn_stpbt_drv_exit);
 
 module_init(BT_init);
 module_exit(BT_exit);
-
