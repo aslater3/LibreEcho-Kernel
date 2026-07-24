@@ -26,6 +26,8 @@
 #include <tinyalsa/mixer.h>
 #include <tinyalsa/pcm.h>
 
+#include "audio_visualizer.h"
+#include "playback_status.h"
 #include "puffin_downmix.h"
 
 #define DEFAULT_ROOT "/run/libreecho-audio"
@@ -40,6 +42,9 @@
 #define SOURCE_COUNT 4U
 #define SOURCE_IDLE_PERIODS 8U
 #define MEDIA_DUCK_Q15 8231
+#define VISUALIZER_FRAME_PERIODS 2U
+#define VISUALIZER_SILENT_PERIODS 24U
+#define VISUALIZER_BRIGHTNESS 70U
 
 enum source_role {
 	SOURCE_MEDIA,
@@ -57,6 +62,14 @@ struct source_bus {
 	int32_t gain_q15;
 	int16_t *samples;
 	size_t received;
+};
+
+struct music_visualizer {
+	struct audio_visualizer analyzer;
+	uint8_t levels[AUDIO_VISUALIZER_BANDS];
+	unsigned int frame_periods;
+	unsigned int silent_periods;
+	int active;
 };
 
 static volatile sig_atomic_t stopping;
@@ -201,22 +214,16 @@ static int ensure_fifo(const char *path)
     return 0;
 }
 
-/* LED indication is deliberately best-effort: an unavailable or wedged LED
- * daemon must never block or interrupt an announcement.  The owner field lets
- * ledd restore a pairing or user pattern after this temporary override. */
-static void set_announcement_led(int active)
+/*
+ * One zero-wait attempt is the entire LED transport budget.  AF_UNIX connect
+ * and send are both nonblocking; poll(2) only samples readiness and can never
+ * delay the PCM owner.  A missing, full or restarting LED daemon drops a
+ * visual frame rather than perturbing audio.
+ */
+static int send_led_request(const char *request)
 {
 	struct sockaddr_un address;
 	struct pollfd pollfd;
-	const char *request_on =
-		"{\"v\":1,\"id\":1,\"cmd\":\"pattern\",\"args\":"
-		"{\"name\":\"pulse\",\"r\":0,\"g\":255,\"b\":0,"
-		"\"brightness\":55,\"repeats\":0,"
-		"\"owner\":\"announcement\"}}\n";
-	const char *request_off =
-		"{\"v\":1,\"id\":1,\"cmd\":\"pattern\",\"args\":"
-		"{\"name\":\"stop\",\"owner\":\"announcement\"}}\n";
-	const char *request = active ? request_on : request_off;
 	size_t length = strlen(request);
 	socklen_t error_length;
 	int socket_error = 0;
@@ -225,25 +232,25 @@ static void set_announcement_led(int active)
 
 	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 	if (fd < 0)
-		return;
+		return -1;
 	memset(&address, 0, sizeof(address));
 	address.sun_family = AF_UNIX;
 	if (strlen(LED_SOCKET) >= sizeof(address.sun_path)) {
 		close(fd);
-		return;
+		return -1;
 	}
 	strcpy(address.sun_path, LED_SOCKET);
 	result = connect(fd, (struct sockaddr *)&address, sizeof(address));
 	if (result < 0 && errno != EINPROGRESS && errno != EAGAIN) {
 		close(fd);
-		return;
+		return -1;
 	}
 	if (result < 0) {
 		pollfd.fd = fd;
 		pollfd.events = POLLOUT;
 		pollfd.revents = 0;
 		do {
-			result = poll(&pollfd, 1, 20);
+			result = poll(&pollfd, 1, 0);
 		} while (result < 0 && errno == EINTR);
 		error_length = sizeof(socket_error);
 		if (result <= 0 ||
@@ -251,11 +258,116 @@ static void set_announcement_led(int active)
 			       &error_length) < 0 ||
 		    socket_error != 0) {
 			close(fd);
-			return;
+			return -1;
 		}
 	}
-	(void)send(fd, request, length, MSG_DONTWAIT | MSG_NOSIGNAL);
+	result = send(fd, request, length, MSG_DONTWAIT | MSG_NOSIGNAL);
 	close(fd);
+	return result == (int)length ? 0 : -1;
+}
+
+/* Announcement indication retains the existing owner-scoped green pulse. */
+static void set_announcement_led(int active)
+{
+	const char *request_on =
+		"{\"v\":1,\"id\":1,\"cmd\":\"pattern\",\"args\":"
+		"{\"name\":\"pulse\",\"r\":0,\"g\":255,\"b\":0,"
+		"\"brightness\":55,\"repeats\":0,"
+		"\"owner\":\"announcement\"}}\n";
+	const char *request_off =
+		"{\"v\":1,\"id\":1,\"cmd\":\"pattern\",\"args\":"
+		"{\"name\":\"stop\",\"owner\":\"announcement\"}}\n";
+
+	(void)send_led_request(active ? request_on : request_off);
+}
+
+static void release_music_visualizer(struct music_visualizer *visualizer)
+{
+	const char *request =
+		"{\"v\":1,\"id\":2,\"cmd\":\"visualizer\",\"args\":"
+		"{\"action\":\"stop\",\"owner\":\"music\"}}\n";
+
+	if (visualizer->active)
+		(void)send_led_request(request);
+	visualizer->active = 0;
+	visualizer->frame_periods = 0;
+}
+
+static void stop_music_visualizer(struct music_visualizer *visualizer)
+{
+	release_music_visualizer(visualizer);
+	visualizer->silent_periods = 0;
+	memset(visualizer->levels, 0, sizeof(visualizer->levels));
+	audio_visualizer_reset(&visualizer->analyzer);
+}
+
+static int send_music_visualizer_frame(struct music_visualizer *visualizer)
+{
+	static const char hexadecimal[] = "0123456789abcdef";
+	char levels_hex[AUDIO_VISUALIZER_BANDS * 2U + 1U];
+	char request[192];
+	unsigned int band;
+	int length;
+
+	for (band = 0; band < AUDIO_VISUALIZER_BANDS; ++band) {
+		levels_hex[band * 2U] =
+			hexadecimal[visualizer->levels[band] >> 4];
+		levels_hex[band * 2U + 1U] =
+			hexadecimal[visualizer->levels[band] & 0x0f];
+	}
+	levels_hex[AUDIO_VISUALIZER_BANDS * 2U] = '\0';
+	length = snprintf(request, sizeof(request),
+		"{\"v\":1,\"id\":2,\"cmd\":\"visualizer\",\"args\":"
+		"{\"action\":\"frame\",\"levels\":\"%s\","
+		"\"brightness\":%u,\"owner\":\"music\"}}\n",
+		levels_hex, VISUALIZER_BRIGHTNESS);
+	if (length < 0 || (size_t)length >= sizeof(request))
+		return -1;
+	return send_led_request(request);
+}
+
+static int higher_priority_active(const struct source_bus *sources)
+{
+	return sources[SOURCE_SYSTEM].idle_periods > 0 ||
+		sources[SOURCE_ANNOUNCEMENT].idle_periods > 0 ||
+		sources[SOURCE_ALARM].idle_periods > 0;
+}
+
+static void process_music_visualizer(struct music_visualizer *visualizer,
+				     const struct source_bus *sources,
+				     const int16_t *rendered)
+{
+	unsigned int band;
+	int audible = 0;
+
+	if (higher_priority_active(sources) ||
+	    sources[SOURCE_MEDIA].received == 0) {
+		stop_music_visualizer(visualizer);
+		return;
+	}
+
+	audio_visualizer_process(&visualizer->analyzer, rendered, PERIOD_SIZE,
+				 DEFAULT_CHANNELS, visualizer->levels);
+	for (band = 0; band < AUDIO_VISUALIZER_BANDS; ++band)
+		if (visualizer->levels[band] != 0) {
+			audible = 1;
+			break;
+		}
+	if (audible) {
+		visualizer->silent_periods = 0;
+	} else if (visualizer->silent_periods < VISUALIZER_SILENT_PERIODS) {
+		++visualizer->silent_periods;
+	}
+	if (visualizer->silent_periods >= VISUALIZER_SILENT_PERIODS) {
+		release_music_visualizer(visualizer);
+		return;
+	}
+
+	if (++visualizer->frame_periods < VISUALIZER_FRAME_PERIODS)
+		return;
+	visualizer->frame_periods = 0;
+	if (send_music_visualizer_frame(visualizer) == 0)
+		visualizer->active = 1;
 }
 
 static void sync_announcement_led(const struct source_bus *sources,
@@ -269,14 +381,41 @@ static void sync_announcement_led(const struct source_bus *sources,
 	*active = wanted;
 }
 
+static unsigned int source_activity_mask(const struct source_bus *sources)
+{
+	unsigned int mask = 0;
+
+	if (sources[SOURCE_MEDIA].idle_periods > 0)
+		mask |= PLAYBACK_BUS_MEDIA;
+	if (sources[SOURCE_SYSTEM].idle_periods > 0)
+		mask |= PLAYBACK_BUS_SYSTEM;
+	if (sources[SOURCE_ANNOUNCEMENT].idle_periods > 0)
+		mask |= PLAYBACK_BUS_ANNOUNCEMENT;
+	if (sources[SOURCE_ALARM].idle_periods > 0)
+		mask |= PLAYBACK_BUS_ALARM;
+	return mask;
+}
+
+static void sync_playback_status(const struct source_bus *sources,
+				 struct playback_status *status)
+{
+	unsigned int mask = source_activity_mask(sources);
+
+	(void)playback_status_publish(status, mask);
+}
+
 static void clear_source_activity(struct source_bus *sources,
-				  int *announcement_led_active)
+				  int *announcement_led_active,
+				  struct music_visualizer *visualizer,
+				  struct playback_status *status)
 {
 	unsigned int i;
 
 	for (i = 0; i < SOURCE_COUNT; ++i)
 		sources[i].idle_periods = 0;
 	sync_announcement_led(sources, announcement_led_active);
+	stop_music_visualizer(visualizer);
+	sync_playback_status(sources, status);
 }
 
 static int32_t db_to_q15(double db)
@@ -483,6 +622,8 @@ static int run_engine(const char *root, unsigned int card, unsigned int device)
 	const size_t bytes = PERIOD_SIZE * DEFAULT_CHANNELS * sizeof(int16_t);
 	struct source_bus sources[SOURCE_COUNT];
 	struct puffin_dynamics dynamics;
+	struct music_visualizer visualizer;
+	struct playback_status status;
 	int16_t *output = NULL;
 	int16_t *second = NULL;
 	int result = -1;
@@ -490,6 +631,12 @@ static int run_engine(const char *root, unsigned int card, unsigned int device)
 	unsigned int i;
 
 	memset(sources, 0, sizeof(sources));
+	memset(&status, 0, sizeof(status));
+	audio_visualizer_init(&visualizer.analyzer);
+	memset(visualizer.levels, 0, sizeof(visualizer.levels));
+	visualizer.frame_periods = 0;
+	visualizer.silent_periods = 0;
+	visualizer.active = 0;
 	for (i = 0; i < SOURCE_COUNT; ++i)
 		sources[i].fd = -1;
 	if (setup_sources(sources, root) < 0) {
@@ -497,6 +644,11 @@ static int run_engine(const char *root, unsigned int card, unsigned int device)
 			strerror(errno));
 		goto out;
 	}
+	if (playback_status_init(&status, root) < 0) {
+		fprintf(stderr, "audio-engine: status path is too long\n");
+		goto out;
+	}
+	sync_playback_status(sources, &status);
 	output = malloc(bytes * 2);
 	if (!output)
 		goto out;
@@ -515,17 +667,20 @@ static int run_engine(const char *root, unsigned int card, unsigned int device)
 		if (read_sources(sources, root) <= 0)
 			continue;
 		sync_announcement_led(sources, &announcement_led_active);
+		sync_playback_status(sources, &status);
 		puffin_dynamics_init(&dynamics);
 		render_period(sources, output, &dynamics);
 		(void)poll_sources(sources, 20);
 		if (read_sources(sources, root) < 0)
 			break;
 		sync_announcement_led(sources, &announcement_led_active);
+		sync_playback_status(sources, &status);
 		render_period(sources, second, &dynamics);
 
 		if (arm_output_controls(card, -1) < 0) {
 			fprintf(stderr, "audio-engine: output arm failed\n");
-			clear_source_activity(sources, &announcement_led_active);
+			clear_source_activity(sources, &announcement_led_active,
+					      &visualizer, &status);
 			continue;
 		}
 		pcm = pcm_open(card, device, PCM_OUT, &config);
@@ -536,7 +691,8 @@ static int run_engine(const char *root, unsigned int card, unsigned int device)
 			if (pcm)
 				pcm_close(pcm);
 			(void)disable_output_controls(card);
-			clear_source_activity(sources, &announcement_led_active);
+			clear_source_activity(sources, &announcement_led_active,
+					      &visualizer, &status);
 			usleep(250000);
 			continue;
 		}
@@ -548,9 +704,11 @@ static int run_engine(const char *root, unsigned int card, unsigned int device)
 				pcm_get_error(pcm));
 			(void)disable_output_controls(card);
 			pcm_close(pcm);
-			clear_source_activity(sources, &announcement_led_active);
+			clear_source_activity(sources, &announcement_led_active,
+					      &visualizer, &status);
 			continue;
 		}
+		process_music_visualizer(&visualizer, sources, second);
 
 		while (!stopping && sources_active(sources)) {
 			(void)poll_sources(sources, 20);
@@ -559,6 +717,7 @@ static int run_engine(const char *root, unsigned int card, unsigned int device)
 				break;
 			}
 			sync_announcement_led(sources, &announcement_led_active);
+			sync_playback_status(sources, &status);
 			render_period(sources, output, &dynamics);
 			if (pcm_writei(pcm, output, PERIOD_SIZE) !=
 			    (int)PERIOD_SIZE) {
@@ -567,15 +726,23 @@ static int run_engine(const char *root, unsigned int card, unsigned int device)
 					pcm_get_error(pcm));
 				break;
 			}
+			process_music_visualizer(&visualizer, sources, output);
 		}
-		clear_source_activity(sources, &announcement_led_active);
+		clear_source_activity(sources, &announcement_led_active,
+				      &visualizer, &status);
 		(void)disable_output_controls(card);
 		pcm_close(pcm);
 	}
 	result = stopping ? 0 : -1;
 out:
+	stop_music_visualizer(&visualizer);
 	if (announcement_led_active)
 		set_announcement_led(0);
+	if (status.path[0] != '\0') {
+		for (i = 0; i < SOURCE_COUNT; ++i)
+			sources[i].idle_periods = 0;
+		sync_playback_status(sources, &status);
+	}
 	free(output);
 	close_sources(sources);
 	return result;

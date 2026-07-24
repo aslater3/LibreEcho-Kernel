@@ -28,12 +28,29 @@ for path in \
     "$ROOT/etc/dbus-1/system.conf" \
     "$ROOT/dev/shm/nqptp" \
     "$ROOT/run/dbus/system_bus_socket" \
-    "$ROOT/run/avahi-daemon/socket"; do
+    "$ROOT/run/avahi-daemon/socket" \
+    "$ROOT/run/libreecho/led.sock"; do
     [ -e "$path" ] || { echo "AIRPLAY_RUNTIME_MISSING:$path"; exit 1; }
 done
 for bus in media system announcement alarm; do
     [ -p "/run/libreecho-audio/$bus.pcm" ] || {
         echo "AIRPLAY_RUNTIME_AUDIO_BUS_MISSING:$bus"; exit 1;
+    }
+done
+[ -S "$ROOT/run/libreecho/led.sock" ] || {
+    echo AIRPLAY_RUNTIME_LED_SOCKET_NOT_BOUND; exit 1;
+}
+STATUS=/run/libreecho-audio/status.json
+[ -f "$STATUS" ] || { echo AIRPLAY_RUNTIME_AUDIO_STATUS_MISSING; exit 1; }
+[ "$(/bin/busybox stat -c '%a' "$STATUS")" = 644 ] || {
+    echo AIRPLAY_RUNTIME_AUDIO_STATUS_NOT_HOST_READABLE; exit 1;
+}
+/bin/busybox grep -Eq '"state":"(idle|playing|system|announcing|alarm)"' "$STATUS" || {
+    echo AIRPLAY_RUNTIME_AUDIO_STATUS_STATE_INVALID; exit 1;
+}
+for bus in media system announcement alarm; do
+    /bin/busybox grep -Eq "\"$bus\":(true|false)" "$STATUS" || {
+        echo "AIRPLAY_RUNTIME_AUDIO_STATUS_BUS_MISSING:$bus"; exit 1;
     }
 done
 /bin/busybox ps | /bin/busybox grep -q '[l]ibreecho-audio-engine' || {
@@ -53,6 +70,15 @@ done
 }
 /bin/busybox grep -q 'output_channels = 2' "$ROOT/etc/libreecho/airplay2.conf" || {
     echo AIRPLAY_RUNTIME_CHANNELS_NOT_STEREO; exit 1;
+}
+/bin/busybox grep -q 'enabled = "yes"' "$ROOT/etc/libreecho/airplay2.conf" || {
+    echo AIRPLAY_RUNTIME_METADATA_NOT_ENABLED; exit 1;
+}
+/bin/busybox grep -q 'include_cover_art = "no"' "$ROOT/etc/libreecho/airplay2.conf" || {
+    echo AIRPLAY_RUNTIME_COVER_ART_ENABLED; exit 1;
+}
+/bin/busybox grep -q 'pipe_name = "/run/libreecho-audio/airplay.metadata"' "$ROOT/etc/libreecho/airplay2.conf" || {
+    echo AIRPLAY_RUNTIME_METADATA_PIPE_INVALID; exit 1;
 }
 /bin/busybox grep -q ':1B58 ' /proc/net/tcp || { echo AIRPLAY_RUNTIME_RTSP_PORT_MISSING; exit 1; }
 echo AIRPLAY_RUNTIME_CHECK_PASS
