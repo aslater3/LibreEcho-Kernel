@@ -161,21 +161,22 @@ static int disable_output_controls(unsigned int card)
 
 static int airplay_volume_to_mixer(double db)
 {
-    double fraction;
     int value;
 
     if (db <= -143.0)
         return 0;
-    if (db < -30.0)
-        db = -30.0;
+    /* PCM Playback Volume is -63.5 dB .. +24 dB in 0.5 dB steps.
+     * AirPlay supplies attenuation in dB.  Map it directly and never
+     * request positive codec gain: mixer value 127 is 0 dB/unity. */
+    if (db <= -63.5)
+        return 0;
     if (db > 0.0)
         db = 0.0;
-    fraction = (db + 30.0) / 30.0;
-    value = (int)lround(fraction * 175.0);
+    value = (int)lround(127.0 + (db * 2.0));
     if (value < 0)
         return 0;
-    if (value > 175)
-        return 175;
+    if (value > 127)
+        return 127;
     return value;
 }
 
