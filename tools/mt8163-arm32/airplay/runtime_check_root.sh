@@ -33,5 +33,14 @@ done
 /bin/busybox grep -q 'output_backend = "pipe"' "$ROOT/etc/libreecho/airplay2.conf" || {
     echo AIRPLAY_RUNTIME_NOT_USING_TINYALSA_PIPE; exit 1;
 }
+/bin/busybox grep -q 'output_format = "S16_LE"' "$ROOT/etc/libreecho/airplay2.conf" || {
+    echo AIRPLAY_RUNTIME_FORMAT_NOT_S16_LE; exit 1;
+}
+/bin/busybox grep -q 'output_rate = 48000' "$ROOT/etc/libreecho/airplay2.conf" || {
+    echo AIRPLAY_RUNTIME_RATE_NOT_48000; exit 1;
+}
+/bin/busybox grep -q 'output_channels = 2' "$ROOT/etc/libreecho/airplay2.conf" || {
+    echo AIRPLAY_RUNTIME_CHANNELS_NOT_STEREO; exit 1;
+}
 /bin/busybox grep -q ':1B58 ' /proc/net/tcp || { echo AIRPLAY_RUNTIME_RTSP_PORT_MISSING; exit 1; }
 echo AIRPLAY_RUNTIME_CHECK_PASS
