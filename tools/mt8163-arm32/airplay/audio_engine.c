@@ -207,6 +207,7 @@ static int ensure_fifo(const char *path)
 static void set_announcement_led(int active)
 {
 	struct sockaddr_un address;
+	struct pollfd pollfd;
 	const char *request_on =
 		"{\"v\":1,\"id\":1,\"cmd\":\"pattern\",\"args\":"
 		"{\"name\":\"pulse\",\"r\":0,\"g\":255,\"b\":0,"
@@ -217,7 +218,10 @@ static void set_announcement_led(int active)
 		"{\"name\":\"stop\",\"owner\":\"announcement\"}}\n";
 	const char *request = active ? request_on : request_off;
 	size_t length = strlen(request);
+	socklen_t error_length;
+	int socket_error = 0;
 	int fd;
+	int result;
 
 	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 	if (fd < 0)
@@ -229,9 +233,26 @@ static void set_announcement_led(int active)
 		return;
 	}
 	strcpy(address.sun_path, LED_SOCKET);
-	if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+	result = connect(fd, (struct sockaddr *)&address, sizeof(address));
+	if (result < 0 && errno != EINPROGRESS && errno != EAGAIN) {
 		close(fd);
 		return;
+	}
+	if (result < 0) {
+		pollfd.fd = fd;
+		pollfd.events = POLLOUT;
+		pollfd.revents = 0;
+		do {
+			result = poll(&pollfd, 1, 20);
+		} while (result < 0 && errno == EINTR);
+		error_length = sizeof(socket_error);
+		if (result <= 0 ||
+		    getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error,
+			       &error_length) < 0 ||
+		    socket_error != 0) {
+			close(fd);
+			return;
+		}
 	}
 	(void)send(fd, request, length, MSG_DONTWAIT | MSG_NOSIGNAL);
 	close(fd);
