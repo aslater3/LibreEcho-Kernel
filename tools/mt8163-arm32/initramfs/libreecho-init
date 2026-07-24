@@ -117,6 +117,60 @@ create_input_nodes()
 
 log init-started
 
+# Give every device a stable, human-readable network identity before Wi-Fi,
+# DHCP, mDNS, and the control-plane daemons start. A user-selected hostname on
+# userdata wins; IDME supplies only the immutable first-boot default.
+set_boot_hostname()
+{
+    hostname=
+    hostname_source=default
+    config=/data/libreecho/config/web-config.json
+    hostname_persisted=
+    if [ -r "$config" ]; then
+        hostname_persisted=$($BB sed -n \
+            's/^[[:space:]]*"hostname_persisted"[[:space:]]*:[[:space:]]*true[[:space:]]*,*[[:space:]]*$/yes/p' \
+            "$config" 2>/dev/null | $BB head -n 1)
+    fi
+    if [ "$hostname_persisted" = yes ]; then
+        saved_hostname=$($BB sed -n \
+            's/^[[:space:]]*"hostname"[[:space:]]*:[[:space:]]*"\([^"]*\)"[[:space:]]*,*[[:space:]]*$/\1/p' \
+            "$config" 2>/dev/null | $BB head -n 1)
+        case "$saved_hostname" in
+            ''|-*|*-|*[!A-Za-z0-9-]*)
+                log hostname-persisted-invalid
+                ;;
+            *)
+                if [ "${#saved_hostname}" -le 63 ]; then
+                    hostname=$saved_hostname
+                    hostname_source=persisted
+                else
+                    log hostname-persisted-invalid
+                fi
+                ;;
+        esac
+    fi
+
+    if [ -n "$hostname" ]; then
+        :
+    else
+    serial=$($BB dd if=/proc/idme/serial bs=1 count=32 2>/dev/null |
+        $BB tr -cd 'A-Za-z0-9')
+    if [ "${#serial}" -lt 4 ]; then
+        log hostname-idme-serial-unavailable
+        return 1
+    fi
+    serial_prefix=${serial%????}
+    serial_suffix=${serial#"$serial_prefix"}
+    hostname="LibreEcho-$serial_suffix"
+    fi
+    if printf '%s\n' "$hostname" > /proc/sys/kernel/hostname 2>/dev/null; then
+        log "hostname-set:$hostname:$hostname_source"
+        return 0
+    fi
+    log hostname-set-failed
+    return 1
+}
+
 # Android's reduced ramdisk does not mount devtmpfs over /dev: doing so hides
 # the property area needed by adbd.  Materialize only the ALSA character
 # devices advertised by sysfs instead, with a bounded retry for late probes.
@@ -219,6 +273,7 @@ userdata_mount()
     return 1
 }
 userdata_mount || true
+set_boot_hostname || true
 
 expdb_devno=$($BB cat "$EXPDB_SYS/dev" 2>/dev/null)
 expdb_major=${expdb_devno%:*}
@@ -316,6 +371,29 @@ start_wifi_network()
 {
     [ -r /etc/wifi/wpa_supplicant.conf ] || { log wifi-profile-absent; return 0; }
     log wifi-profile-present
+    wifi_profile=/etc/wifi/wpa_supplicant.conf
+    persistent_wifi=/data/libreecho/config/wpa_supplicant.conf
+    if $BB grep -q ' /data ' /proc/mounts 2>/dev/null; then
+        $BB mkdir -p /data/libreecho/config
+        $BB chmod 0700 /data/libreecho /data/libreecho/config 2>/dev/null
+        if [ ! -r "$persistent_wifi" ]; then
+            persistent_wifi_tmp=$persistent_wifi.tmp
+            if $BB sed 's/^update_config=.*/update_config=1/' \
+                /etc/wifi/wpa_supplicant.conf > "$persistent_wifi_tmp" &&
+               $BB chmod 0600 "$persistent_wifi_tmp" &&
+               $BB mv "$persistent_wifi_tmp" "$persistent_wifi"; then
+                log wifi-persistent-profile-created
+            else
+                $BB rm -f "$persistent_wifi_tmp"
+                log wifi-persistent-profile-create-failed
+            fi
+        fi
+        if [ -r "$persistent_wifi" ]; then
+            $BB chmod 0600 "$persistent_wifi" 2>/dev/null
+            wifi_profile=$persistent_wifi
+            log wifi-persistent-profile-selected
+        fi
+    fi
     # This is the proven manual choreography from session e8c21eb3bbae:
     # stock-compatible configure-only init, stale-launcher cleanup, exactly one
     # one-shot command responder, then one timed Wi-Fi function-on write.  Do
@@ -355,7 +433,8 @@ start_wifi_network()
         i=$((i + 1))
     done
     [ -e /sys/class/net/wlan0 ] || { log wlan0-registration-timeout; return 1; }
-    /sbin/libreecho-wifi start >/tmp/wifi-client.log 2>&1
+    WIFI_CONF="$wifi_profile" /sbin/libreecho-wifi start \
+        >/tmp/wifi-client.log 2>&1
     client_rc=$?
     log "wifi-client-rc:$client_rc"
     return "$client_rc"

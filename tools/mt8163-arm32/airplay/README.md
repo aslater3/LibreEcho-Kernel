@@ -8,8 +8,10 @@ Pinned upstream source inputs for the ARMHF build are:
 - Shairport Sync 5.1, commit `d6ac53bf4c6a1ebc55a03177537765ff42dec919`
 - NQPTP 1.2.8, commit `c925f27c1fd12e4033ac477e5a405969b0b0260b`
 
-Shairport Sync must be configured with `--with-airplay-2`, the raw pipe backend, OpenSSL,
-FFmpeg, libplist, libsodium, libgcrypt, UUID and Avahi. The Avahi runtime
+Shairport Sync must be configured with `--with-airplay-2`, the raw pipe and
+metadata-pipe backends, OpenSSL, FFmpeg, libplist, libsodium, libgcrypt, UUID
+and Avahi. Track metadata is streamed through a bounded runtime FIFO; cover
+art is disabled and no media metadata is written to persistent storage. The Avahi runtime
 closure also includes D-Bus and its glibc/systemd support libraries. NQPTP
 must run before Shairport Sync when the integration is enabled. The pipeline
 keeps the ARMHF dependency sysroot pinned and separate from the target's small
@@ -34,6 +36,21 @@ codec gain. Active announcement audio also requests a slow green pulse from
 the LED daemon. The request is best-effort and owner-scoped, so audio continues
 if LED control is unavailable and the previous LED pattern is restored when
 the announcement bus becomes idle.
+
+For media-only playback, the engine analyzes the final post-limiter mono
+programme actually sent to the Puffin speaker profile. A fixed-point,
+12-band filter bank covers 63 Hz through 11 kHz and publishes owner-scoped
+visualizer frames to the LED daemon at about 11.7 frames/second. System,
+announcement, or alarm activity immediately releases the `music` LED owner so
+the higher-priority indication wins; media visualization resumes only after
+those buses become idle. LED socket work is zero-wait and best-effort, so a
+missing or busy LED daemon cannot delay PCM.
+
+The engine also atomically publishes `/run/libreecho-audio/status.json` with
+mode `0644`. It records only playback state (`idle`, `playing`, `system`,
+`announcing`, or `alarm`), the highest-priority active bus, and booleans for
+all four buses. The file is replaced only when that state changes and carries
+no track metadata.
 
 Shairport's pipe must use `ignore_volume_control = "yes"` because the external
 volume hook owns codec attenuation. Otherwise Shairport attenuates the PCM in

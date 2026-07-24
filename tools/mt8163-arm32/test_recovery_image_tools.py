@@ -198,8 +198,40 @@ class SourceTests(unittest.TestCase):
         self.assertIn('\\"owner\\":\\"announcement\\"', engine)
         self.assertIn("sync_announcement_led(sources", engine)
         self.assertIn("errno != EINPROGRESS && errno != EAGAIN", engine)
-        self.assertIn("poll(&pollfd, 1, 20)", engine)
+        self.assertIn("poll(&pollfd, 1, 0)", engine)
         self.assertIn("getsockopt(fd, SOL_SOCKET, SO_ERROR", engine)
+        self.assertIn("#define VISUALIZER_FRAME_PERIODS 2U", engine)
+        self.assertIn('\\"cmd\\":\\"visualizer\\"', engine)
+        self.assertIn('\\"action\\":\\"frame\\"', engine)
+        self.assertIn('\\"action\\":\\"stop\\"', engine)
+        self.assertIn('\\"owner\\":\\"music\\"', engine)
+        self.assertIn("process_music_visualizer(&visualizer, sources", engine)
+        self.assertIn("higher_priority_active(sources)", engine)
+        self.assertIn("sources[SOURCE_MEDIA].received == 0", engine)
+        analyzer = (TOOLS_DIR / "airplay/audio_visualizer.c").read_text()
+        analyzer_header = (
+            TOOLS_DIR / "airplay/audio_visualizer.h"
+        ).read_text()
+        self.assertIn("#define AUDIO_VISUALIZER_BANDS 12U", analyzer_header)
+        self.assertIn("static const struct band_coefficients", analyzer)
+        self.assertIn("FILTER_INPUT_SHIFT 8", analyzer)
+        self.assertNotIn("sin(", analyzer)
+        status = (TOOLS_DIR / "airplay/playback_status.c").read_text()
+        self.assertIn('"%s/status.json"', status)
+        self.assertIn("rename(status->temporary_path, status->path)", status)
+        self.assertIn("status->last_mask == bus_mask", status)
+        self.assertIn("fchmod(fd, 0644)", status)
+        self.assertNotIn("metadata", status.lower())
+        airplay_builder = (
+            TOOLS_DIR / "airplay/build_airplay.sh"
+        ).read_text()
+        self.assertIn('"$AUDIO_VISUALIZER_SOURCE"', airplay_builder)
+        self.assertIn('"$PLAYBACK_STATUS_SOURCE"', airplay_builder)
+        runtime_check = (
+            TOOLS_DIR / "airplay/runtime_check_root.sh"
+        ).read_text()
+        self.assertIn("AIRPLAY_RUNTIME_AUDIO_STATUS_MISSING", runtime_check)
+        self.assertIn("AIRPLAY_RUNTIME_LED_SOCKET_NOT_BOUND", runtime_check)
         self.assertIn('DEFAULT_MEDIA_FIFO "/run/libreecho-audio/media.pcm"', producer)
         self.assertNotIn("pcm_open(", producer)
         self.assertIn("#define PUFFIN_OUTPUT_TRIM_Q15 46341", downmix)
@@ -333,6 +365,25 @@ class PolicyTests(unittest.TestCase):
         init_script = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
         self.assertNotIn("startup_audio_worker", init_script)
         self.assertIn("log audio-startup-disabled", init_script)
+
+    def test_hostname_is_derived_from_audited_idme_serial(self) -> None:
+        init_script = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
+        self.assertIn("/data/libreecho/config/web-config.json", init_script)
+        self.assertIn('"hostname_persisted"', init_script)
+        self.assertIn("hostname_source=persisted", init_script)
+        self.assertIn("if=/proc/idme/serial", init_script)
+        self.assertIn("serial_suffix=${serial#\"$serial_prefix\"}", init_script)
+        self.assertIn('hostname="LibreEcho-$serial_suffix"', init_script)
+        self.assertIn("/proc/sys/kernel/hostname", init_script)
+        self.assertIn('log "hostname-set:$hostname:$hostname_source"', init_script)
+
+    def test_wifi_configuration_uses_persistent_secret_store(self) -> None:
+        init_script = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
+        self.assertIn(
+            "/data/libreecho/config/wpa_supplicant.conf", init_script
+        )
+        self.assertIn("update_config=1", init_script)
+        self.assertIn('WIFI_CONF="$wifi_profile"', init_script)
 
     def test_device_node_setup_is_not_activation(self) -> None:
         entries = {
