@@ -479,6 +479,7 @@ static int tlv320aic3204_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dapm_context *dapm = &rtd->card->dapm;
+	const unsigned int dac_route = 1 << 3;
 	int ret;
 
 	ret = mtmachine_startup(substream);
@@ -488,6 +489,32 @@ static int tlv320aic3204_startup(struct snd_pcm_substream *substream)
 	/* The board's direct tweeter is fed by the right headphone DAC. */
 	ret = snd_soc_update_bits(rtd->codec, AIC32X4_HPRGAIN, 1 << 6,
 				  1 << 6);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * The codec output mixers default to disconnected after probe and
+	 * after a stream shutdown.  The board playback stream is PCM DAC data,
+	 * not the AIC32X4 analog input path: explicitly select the DAC routes
+	 * before DAPM powers the physical endpoints.  Without this, HPR can be
+	 * powered while R_DAC remains off, leaving the tweeter with only the
+	 * floating input path and producing clicks instead of audio.
+	 */
+	ret = snd_soc_update_bits(rtd->codec, AIC32X4_HPRROUTE,
+				  dac_route, dac_route);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_update_bits(rtd->codec, AIC32X4_LOLROUTE,
+				  dac_route, dac_route);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_update_bits(rtd->codec, AIC32X4_LORROUTE,
+				  dac_route, dac_route);
+	if (ret < 0)
+		return ret;
+	/* Keep both analog input mixer legs disconnected during playback. */
+	ret = snd_soc_update_bits(rtd->codec, AIC32X4_HPRROUTE,
+				  1 << 2, 0);
 	if (ret < 0)
 		return ret;
 

@@ -197,6 +197,35 @@ Use `--wrapper` only when the wrapper changed and has been separately reviewed.
 If any verification or fastboot write fails, the script stops and leaves the
 device in fastboot. Do not manually reboot a partially written sequence.
 
+### Fast userdata initialization
+
+Do not use a complete sparse userdata image for routine asset installation: it
+causes fastboot to stream roughly 1 GiB of zero/fill chunks. For a vanilla
+device whose userdata filesystem is intentionally disposable, use the
+bootloader-side formatter instead:
+
+```sh
+cd /home/andy/workspace/mt8163-arm32-wifi-candidate/pipeline
+./format_userdata.sh             # format only; remain in fastboot
+./format_userdata.sh --reboot   # format only, then boot the existing image
+```
+
+The helper checks the exact fastboot serial and the expected 1,094,189,056-byte
+`userdata` partition, then runs `fastboot format:ext4 userdata`. This avoids
+transferring a host-created 1 GiB image. It still writes filesystem metadata,
+and the exact device-side format behavior is bootloader dependent; it is not a
+promise that every physical block is untouched.
+
+This operation destroys only `userdata`. Never aim it at `persist`, `misc`,
+`expdb`, or IDME, which contain recovery state, calibration, board identity,
+and MAC-address data. After reboot, copy optional payloads into
+`/data/libreecho` through the reviewed `adb-run-root.sh` path. Later OTA/update
+work should replace those files in place and must not format userdata.
+
+The full-image `build_userdata_image.sh` plus `flash_userdata.sh` path remains
+available only as the slow fallback for bootloaders that do not implement
+`format:ext4`.
+
 ## Entering fastboot from the running development OS
 
 Use the validated helper:

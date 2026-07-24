@@ -168,6 +168,14 @@ class SourceTests(unittest.TestCase):
         self.assertIn("dma_dev->coherent_dma_mask = DMA_BIT_MASK(64)", spi_pcm)
         self.assertIn("SNDRV_DMA_TYPE_DEV, dma_dev", spi_pcm)
 
+    def test_airplay_bridge_starts_dma_before_releasing_amp(self) -> None:
+        bridge = TOOLS_DIR / "airplay/airplay_audio.c"
+        source = bridge.read_text()
+        self.assertIn(".start_threshold = 1U", source)
+        first_write = source.index("pcm_writei(pcm, buffer, PERIOD_SIZE)")
+        amp_enable = source.index("enable_output_controls(card)")
+        self.assertLess(first_write, amp_enable)
+
     def test_network_tools_are_pinned_and_manual_only(self) -> None:
         builder_script = TOOLS_DIR / "network-tools/build_wireless_tools.sh"
         self.assertTrue(builder_script.is_file())
@@ -257,12 +265,10 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("LibreEcho Development OS", profile)
         self.assertIn("PS1='libreecho# '", profile)
 
-    def test_startup_audio_is_disabled_by_branch_marker(self) -> None:
-        marker = TOOLS_DIR / "initramfs/no-startup-audio"
+    def test_startup_audio_is_disabled_by_default(self) -> None:
         init_script = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
-        self.assertTrue(marker.is_file())
-        self.assertIn("/etc/libreecho/no-startup-audio", init_script)
-        self.assertIn("audio-startup-disabled", init_script)
+        self.assertNotIn("startup_audio_worker", init_script)
+        self.assertIn("log audio-startup-disabled", init_script)
 
     def test_device_node_setup_is_not_activation(self) -> None:
         entries = {
@@ -296,6 +302,16 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("/sbin/libreecho-wifi", source)
         self.assertIn("/etc/udhcpc.script", (TOOLS_DIR / "initramfs/libreecho-wifi").read_text())
         self.assertNotIn("/system/vendor/bin/wmt_loader >/tmp/wifi-wmt-loader.log", source)
+
+    def test_userdata_mount_is_identity_checked_and_non_destructive(self) -> None:
+        source = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
+        self.assertIn("USERDATA=/dev/mmcblk0p16", source)
+        self.assertIn("PARTNAME=userdata", source)
+        self.assertIn("2137088", source)
+        self.assertIn("mount -t ext4 -o rw,nosuid,nodev,noatime", source)
+        self.assertIn("userdata-mount-failed", source)
+        self.assertNotIn("mkfs", source)
+        self.assertLess(source.index("userdata-mounted"), source.index("start_ui_services"))
 
     def test_schema2_disabled_record_is_exact(self) -> None:
         record = {
