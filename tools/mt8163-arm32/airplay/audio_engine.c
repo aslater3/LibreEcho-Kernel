@@ -106,7 +106,7 @@ static int arm_output_controls(unsigned int card, int volume)
 
     mixer = mixer_open(card);
     if (!mixer) {
-        fprintf(stderr, "airplay-audio: mixer %u unavailable\n", card);
+        fprintf(stderr, "audio-engine: mixer %u unavailable\n", card);
         return -1;
     }
     if (set_enum_control(mixer, "MFP Gpio Mute", "On") < 0)
@@ -144,7 +144,7 @@ static int enable_output_controls(unsigned int card)
 
     mixer = mixer_open(card);
     if (!mixer) {
-        fprintf(stderr, "airplay-audio: mixer %u unavailable\n", card);
+        fprintf(stderr, "audio-engine: mixer %u unavailable\n", card);
         return -1;
     }
     if (set_enum_control(mixer, "MFP Gpio Mute", "On") < 0)
@@ -161,7 +161,7 @@ static int enable_output_controls(unsigned int card)
         result = -1;
     mixer_close(mixer);
     if (result < 0)
-        fprintf(stderr, "airplay-audio: output enable controls unavailable\n");
+        fprintf(stderr, "audio-engine: output enable controls unavailable\n");
     return result;
 }
 
@@ -172,7 +172,7 @@ static int disable_output_controls(unsigned int card)
 
     mixer = mixer_open(card);
     if (!mixer) {
-        fprintf(stderr, "airplay-audio: mixer %u unavailable\n", card);
+        fprintf(stderr, "audio-engine: mixer %u unavailable\n", card);
         return -1;
     }
     /* Mute before removing amplifier power to avoid a shutdown pop. */
@@ -182,7 +182,7 @@ static int disable_output_controls(unsigned int card)
         result = -1;
     mixer_close(mixer);
     if (result < 0)
-        fprintf(stderr, "airplay-audio: output disable controls unavailable\n");
+        fprintf(stderr, "audio-engine: output disable controls unavailable\n");
     return result;
 }
 
