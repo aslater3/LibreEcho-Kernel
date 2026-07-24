@@ -170,31 +170,35 @@ class SourceTests(unittest.TestCase):
         self.assertIn("dma_dev->coherent_dma_mask = DMA_BIT_MASK(64)", spi_pcm)
         self.assertIn("SNDRV_DMA_TYPE_DEV, dma_dev", spi_pcm)
 
-    def test_airplay_bridge_starts_dma_before_releasing_amp(self) -> None:
-        bridge = TOOLS_DIR / "airplay/airplay_audio.c"
-        source = bridge.read_text()
+    def test_shared_audio_engine_starts_dma_before_releasing_amp(self) -> None:
+        engine = TOOLS_DIR / "airplay/audio_engine.c"
+        source = engine.read_text()
         self.assertIn("#define PERIOD_SIZE 2048U", source)
         self.assertIn(".start_threshold = 1U", source)
-        first_write = source.index("pcm_writei(pcm, buffer, PERIOD_SIZE)")
+        first_write = source.index("pcm_writei(pcm, output, PERIOD_SIZE)")
         second_write = source.index(
-            "pcm_writei(pcm, second_buffer, PERIOD_SIZE)"
+            "pcm_writei(pcm, second, PERIOD_SIZE)"
         )
         amp_enable = source.index("enable_output_controls(card)")
         self.assertLess(first_write, amp_enable)
         self.assertLess(second_write, amp_enable)
         self.assertIn("(void)disable_output_controls(card)", source)
 
-    def test_airplay_bridge_builds_puffin_mono_speaker_bus(self) -> None:
-        bridge = (TOOLS_DIR / "airplay/airplay_audio.c").read_text()
+    def test_shared_audio_engine_builds_puffin_priority_bus(self) -> None:
+        engine = (TOOLS_DIR / "airplay/audio_engine.c").read_text()
+        producer = (TOOLS_DIR / "airplay/airplay_audio.c").read_text()
         downmix = (TOOLS_DIR / "airplay/puffin_downmix.h").read_text()
-        first_mix = bridge.index(
-            "puffin_downmix_stereo(&dynamics, (int16_t *)buffer, PERIOD_SIZE)"
-        )
-        first_write = bridge.index("pcm_writei(pcm, buffer, PERIOD_SIZE)")
 
-        self.assertLess(first_mix, first_write)
-        self.assertGreaterEqual(bridge.count("puffin_downmix_stereo("), 2)
-        self.assertIn("channels != 2", bridge)
+        self.assertIn('"media", "system", "announcement", "alarm"', engine)
+        self.assertIn("#define MEDIA_DUCK_Q15 8231", engine)
+        self.assertIn("source == SOURCE_MEDIA && alarm_active", engine)
+        self.assertIn("source == SOURCE_MEDIA && higher_priority", engine)
+        self.assertIn("puffin_render_mono(dynamics, mixed)", engine)
+        self.assertIn('#define LED_SOCKET "/run/libreecho/led.sock"', engine)
+        self.assertIn('\\"owner\\":\\"announcement\\"', engine)
+        self.assertIn("sync_announcement_led(sources", engine)
+        self.assertIn('DEFAULT_MEDIA_FIFO "/run/libreecho-audio/media.pcm"', producer)
+        self.assertNotIn("pcm_open(", producer)
         self.assertIn("#define PUFFIN_OUTPUT_TRIM_Q15 46341", downmix)
         self.assertIn("#define PUFFIN_OUTPUT_CEILING 32767", downmix)
         self.assertIn("struct puffin_dynamics", downmix)
@@ -202,8 +206,8 @@ class SourceTests(unittest.TestCase):
         self.assertIn("(int32_t)samples[frame * 2 + 1]", downmix)
         self.assertIn("mixed /= 2", downmix)
         self.assertIn("PUFFIN_OUTPUT_CEILING << 15", downmix)
-        self.assertIn("samples[frame * 2] = (int16_t)mono", downmix)
-        self.assertIn("samples[frame * 2 + 1] = (int16_t)mono", downmix)
+        self.assertIn("samples[frame * 2] = mono", downmix)
+        self.assertIn("samples[frame * 2 + 1] = mono", downmix)
 
     def test_puffin_speaker_profile_matches_stock_dump(self) -> None:
         kernel = TOOLS_DIR.parent.parent

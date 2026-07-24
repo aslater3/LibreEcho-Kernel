@@ -828,7 +828,7 @@ def add_airplay_bundle(stage: Path, nqptp: Path, shairport_sync: Path,
         "autostart": False,
         "protocol": "airplay2",
         "mdns": "avahi",
-        "audio_transport": "shairport-pipe-to-tinyalsa",
+        "audio_transport": "shairport-pipe-to-shared-priority-engine",
         "tinyalsa_pcm": "hw:0,23",
         "nqptp": {
             "path": str(nqptp.resolve()),
@@ -896,6 +896,13 @@ def add_airplay_external_payload(payload: Path, payload_manifest: Path,
     feature_files = feature.get("files")
     if not isinstance(feature_payload, dict) or not isinstance(feature_files, dict):
         raise SystemExit("ERROR: AirPlay feature manifest lacks payload/files records")
+    for required in (
+            "usr/local/sbin/libreecho-airplay-audio",
+            "usr/local/sbin/libreecho-audio-engine",
+            "usr/local/sbin/shairport-sync",
+            "etc/libreecho/airplay2.conf"):
+        if required not in feature_files:
+            raise SystemExit(f"ERROR: AirPlay feature member missing: {required}")
     payload_hash = sha256(read(payload))
     payload_size = payload.stat().st_size
     if (feature_payload.get("filename") != payload.name or
@@ -914,7 +921,7 @@ def add_airplay_external_payload(payload: Path, payload_manifest: Path,
         "autostart": False,
         "protocol": "airplay2",
         "mdns": "avahi",
-        "audio_transport": "shairport-pipe-to-tinyalsa",
+        "audio_transport": "shairport-pipe-to-shared-priority-engine",
         "tinyalsa_pcm": "hw:0,23",
         "external_payload": True,
         "payload": {
@@ -1660,7 +1667,7 @@ def main() -> None:
             "activation": "manual-only",
             "autostart": False,
             "protocol": "airplay2",
-            "audio_transport": "shairport-pipe-to-tinyalsa",
+            "audio_transport": "shairport-pipe-to-shared-priority-engine",
             "tinyalsa_pcm": "hw:0,23",
             "runtime": {},
         },

@@ -85,6 +85,8 @@ UI_OPTIONAL_NAMES = {"etc/libreecho/users"}
 AIRPLAY_BINARY_NAMES = {
     "usr/local/sbin/nqptp", "usr/local/sbin/shairport-sync",
     "usr/local/sbin/avahi-daemon", "usr/local/sbin/dbus-daemon",
+    "usr/local/sbin/libreecho-airplay-audio",
+    "usr/local/sbin/libreecho-audio-engine",
 }
 
 CONNECTIVITY_FILES = {
@@ -1024,6 +1026,14 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         files = payload.get("files")
         if not isinstance(files, dict) or not files:
             fail("external AirPlay payload file manifest is missing")
+        for required in (
+            "usr/local/sbin/libreecho-airplay-audio",
+            "usr/local/sbin/libreecho-audio-engine",
+            "usr/local/sbin/shairport-sync",
+            "etc/libreecho/airplay2.conf",
+        ):
+            if required not in files:
+                fail(f"external AirPlay payload member missing: {required}")
         for relative, record in files.items():
             if (not isinstance(relative, str) or not relative or relative.startswith("/") or
                     "//" in relative or "/../" in f"/{relative}/" or

@@ -17,6 +17,36 @@ static inline void puffin_dynamics_init(struct puffin_dynamics *dynamics)
 	dynamics->gain_q15 = PUFFIN_OUTPUT_TRIM_Q15;
 }
 
+static inline int16_t puffin_render_mono(struct puffin_dynamics *dynamics,
+					int32_t mixed)
+{
+	int64_t magnitude = mixed < 0 ? -(int64_t)mixed : mixed;
+	int32_t target_gain = PUFFIN_OUTPUT_TRIM_Q15;
+	int32_t mono;
+
+	if (magnitude > 0) {
+		int32_t limited_gain = (int32_t)(
+			((int64_t)PUFFIN_OUTPUT_CEILING << 15) / magnitude);
+
+		if (limited_gain < target_gain)
+			target_gain = limited_gain;
+	}
+	if (target_gain < dynamics->gain_q15) {
+		dynamics->gain_q15 = target_gain;
+	} else if (dynamics->gain_q15 < target_gain) {
+		dynamics->gain_q15 +=
+			(target_gain - dynamics->gain_q15 +
+			 ((1 << PUFFIN_LIMITER_RELEASE_SHIFT) - 1)) >>
+			PUFFIN_LIMITER_RELEASE_SHIFT;
+	}
+	mono = (int32_t)(((int64_t)mixed * dynamics->gain_q15) >> 15);
+	if (mono > PUFFIN_OUTPUT_CEILING)
+		mono = PUFFIN_OUTPUT_CEILING;
+	if (mono < -PUFFIN_OUTPUT_CEILING)
+		mono = -PUFFIN_OUTPUT_CEILING;
+	return (int16_t)mono;
+}
+
 /*
  * Puffin's codec profile treats the two PCM channels as physical speaker
  * bands: left/HPL is the tweeter high-pass and right/HPR is the woofer
@@ -38,33 +68,13 @@ static inline void puffin_downmix_stereo(struct puffin_dynamics *dynamics,
 	for (frame = 0; frame < frames; ++frame) {
 		int32_t mixed = (int32_t)samples[frame * 2] +
 				(int32_t)samples[frame * 2 + 1];
-		int32_t magnitude;
-		int32_t target_gain = PUFFIN_OUTPUT_TRIM_Q15;
-		int32_t mono;
+		int16_t mono;
 
 		mixed /= 2;
-		magnitude = mixed < 0 ? -mixed : mixed;
-		if (magnitude > 0) {
-			int32_t limited_gain = (int32_t)(
-				((int64_t)PUFFIN_OUTPUT_CEILING << 15) /
-				magnitude);
+		mono = puffin_render_mono(dynamics, mixed);
 
-			if (limited_gain < target_gain)
-				target_gain = limited_gain;
-		}
-		if (target_gain < dynamics->gain_q15) {
-			dynamics->gain_q15 = target_gain;
-		} else if (dynamics->gain_q15 < target_gain) {
-			dynamics->gain_q15 +=
-				(target_gain - dynamics->gain_q15 +
-				 ((1 << PUFFIN_LIMITER_RELEASE_SHIFT) - 1)) >>
-				PUFFIN_LIMITER_RELEASE_SHIFT;
-		}
-		mono = (int32_t)(((int64_t)mixed * dynamics->gain_q15) >>
-				15);
-
-		samples[frame * 2] = (int16_t)mono;
-		samples[frame * 2 + 1] = (int16_t)mono;
+		samples[frame * 2] = mono;
+		samples[frame * 2 + 1] = mono;
 	}
 }
 

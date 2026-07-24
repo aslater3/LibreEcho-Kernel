@@ -20,21 +20,28 @@ full codec dependency tree.
 
 The device's 3.18 ASoC driver is usable through TinyALSA but returns
 `ENOTTY` for the libasound probing ioctls used by Shairport's ALSA backend.
-The payload therefore uses Shairport's raw named-pipe backend and starts the
-`libreecho-airplay-audio` TinyALSA bridge alongside it. The bridge accepts
-S16_LE/48 kHz stereo, averages it to a mono speaker bus with clipping-safe
-32-bit arithmetic, duplicates that bus to both PCM channels, and writes PCM
-`0,23`. The stock Puffin codec profile then sends the left/HPL high-pass band
-to the tweeter and the right/HPR low-pass band to the woofer. A linked peak
-limiter restores the stock pipeline's +3 dB output trim without allowing PCM
-clipping or positive codec gain.
+The payload therefore uses Shairport's raw named-pipe backend. The
+`libreecho-airplay-audio` process is now only a producer: it forwards decoded
+S16_LE/48 kHz/stereo PCM to the shared media bus and never opens ALSA.
+`libreecho-audio-engine` is the sole TinyALSA/codec/amplifier owner. It mixes
+media, system, announcement, and alarm buses; ducks media by 12 dB under
+higher-priority audio; averages the result to a mono speaker bus with
+clipping-safe 32-bit arithmetic; and writes PCM `0,23`. The stock Puffin codec
+profile then sends the left/HPL high-pass band to the tweeter and the
+right/HPR low-pass band to the woofer. A linked peak limiter restores the
+stock pipeline's +3 dB output trim without allowing PCM clipping or positive
+codec gain. Active announcement audio also requests a slow green pulse from
+the LED daemon. The request is best-effort and owner-scoped, so audio continues
+if LED control is unavailable and the previous LED pattern is restored when
+the announcement bus becomes idle.
 
 Shairport's pipe must use `ignore_volume_control = "yes"` because the external
 volume hook owns codec attenuation. Otherwise Shairport attenuates the PCM in
 software and the hook applies the same AirPlay attenuation again.
-The bridge reapplies the physical amplifier controls after the codec starts
-DMA, and maps Shairport's AirPlay dB volume callbacks to the board's
-`PCM Playback Volume` mixer control.
+The engine reapplies the physical amplifier controls after the codec starts
+DMA. AirPlay dB callbacks update only the media-bus software gain, so an
+announcement can remain audible above quiet media without changing the
+device-wide codec volume.
 
 The Avahi/D-Bus payload remains inside the fixed 16 MiB boot envelope by using
 the free range below the DT-reserved RAM console at `0x44400000`.

@@ -22,6 +22,7 @@ for path in \
     "$ROOT/usr/local/sbin/avahi-daemon" \
     "$ROOT/usr/local/sbin/nqptp" \
     "$ROOT/usr/local/sbin/libreecho-airplay-audio" \
+    "$ROOT/usr/local/sbin/libreecho-audio-engine" \
     "$ROOT/usr/local/sbin/shairport-sync" \
     "$ROOT/etc/libreecho/airplay2.conf" \
     "$ROOT/etc/dbus-1/system.conf" \
@@ -30,6 +31,14 @@ for path in \
     "$ROOT/run/avahi-daemon/socket"; do
     [ -e "$path" ] || { echo "AIRPLAY_RUNTIME_MISSING:$path"; exit 1; }
 done
+for bus in media system announcement alarm; do
+    [ -p "/run/libreecho-audio/$bus.pcm" ] || {
+        echo "AIRPLAY_RUNTIME_AUDIO_BUS_MISSING:$bus"; exit 1;
+    }
+done
+/bin/busybox ps | /bin/busybox grep -q '[l]ibreecho-audio-engine' || {
+    echo AIRPLAY_RUNTIME_SHARED_AUDIO_ENGINE_MISSING; exit 1;
+}
 /bin/busybox grep -q 'output_backend = "pipe"' "$ROOT/etc/libreecho/airplay2.conf" || {
     echo AIRPLAY_RUNTIME_NOT_USING_TINYALSA_PIPE; exit 1;
 }

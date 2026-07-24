@@ -14,6 +14,7 @@ JOBS=${JOBS:-$(nproc)}
 KERNEL_HEADERS=${LIBREECHO_AIRPLAY_KERNEL_HEADERS:-}
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd -P)
 AIRPLAY_AUDIO_SOURCE=${LIBREECHO_AIRPLAY_AUDIO_SOURCE:-$SCRIPT_DIR/airplay_audio.c}
+AUDIO_ENGINE_SOURCE=${LIBREECHO_AUDIO_ENGINE_SOURCE:-$SCRIPT_DIR/audio_engine.c}
 
 for archive in "$NQPTP_ARCHIVE" "$SHAIRPORT_ARCHIVE" "$FFMPEG_ARCHIVE" "$TINYALSA_ARCHIVE"; do
     [[ -f "$archive" ]] || { echo "ERROR: AirPlay source archive is missing: $archive" >&2; exit 1; }
@@ -44,7 +45,11 @@ command -v readelf >/dev/null 2>&1 || { echo "ERROR: readelf is required" >&2; e
     exit 1
 }
 [[ -f "$AIRPLAY_AUDIO_SOURCE" ]] || {
-    echo "ERROR: TinyALSA AirPlay bridge source is missing: $AIRPLAY_AUDIO_SOURCE" >&2
+    echo "ERROR: AirPlay producer source is missing: $AIRPLAY_AUDIO_SOURCE" >&2
+    exit 1
+}
+[[ -f "$AUDIO_ENGINE_SOURCE" ]] || {
+    echo "ERROR: shared audio engine source is missing: $AUDIO_ENGINE_SOURCE" >&2
     exit 1
 }
 
@@ -152,7 +157,7 @@ build_tinyalsa() {
     popd >/dev/null
 }
 
-build_airplay_audio_bridge() {
+build_audio_components() {
     local bridge_cflags="-O2 -std=c99 -Wall -Wextra -Wpedantic"
     bridge_cflags+=" -I$tinyalsa_source/include"
     if [[ -n "$KERNEL_HEADERS" ]]; then
@@ -160,8 +165,11 @@ build_airplay_audio_bridge() {
     fi
     bridge_cflags+=" -I$SYSROOT/usr/include/arm-linux-gnueabihf -I$SYSROOT/usr/include"
     mkdir -p "$OUTPUT"
-    "$CC" $bridge_cflags "$AIRPLAY_AUDIO_SOURCE" \
-        "$tinyalsa_source/src/libtinyalsa.a" -ldl -lm -o "$OUTPUT/libreecho-airplay-audio"
+    "$CC" $bridge_cflags "$AIRPLAY_AUDIO_SOURCE" -lm \
+        -o "$OUTPUT/libreecho-airplay-audio"
+    "$CC" $bridge_cflags "$AUDIO_ENGINE_SOURCE" \
+        "$tinyalsa_source/src/libtinyalsa.a" -ldl -lm \
+        -o "$OUTPUT/libreecho-audio-engine"
 }
 
 build_shairport() {
@@ -183,6 +191,7 @@ copy_runtime_closure() {
     mkdir -p "$libdir" "$runtime/lib" "$pending" "$seen"
 
     for executable in "$shairport_source/shairport-sync" "$OUTPUT/libreecho-airplay-audio" \
+        "$OUTPUT/libreecho-audio-engine" \
         "$OUTPUT/avahi-daemon" "$OUTPUT/dbus-daemon"; do
         interpreter=$(readelf -l "$executable" |
             awk '/Requesting program interpreter:/{gsub(/[\[\]]/, "", $NF); print $NF}')
@@ -192,6 +201,7 @@ copy_runtime_closure() {
     done
     {
         for executable in "$shairport_source/shairport-sync" "$OUTPUT/libreecho-airplay-audio" \
+            "$OUTPUT/libreecho-audio-engine" \
             "$OUTPUT/avahi-daemon" "$OUTPUT/dbus-daemon"; do
             readelf -d "$executable" |
                 sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p'
@@ -235,7 +245,7 @@ build_ffmpeg
 make_ffmpeg_pkgconfig
 build_nqptp
 build_tinyalsa
-build_airplay_audio_bridge
+build_audio_components
 build_shairport
 mkdir -p "$OUTPUT"
 install -m 0755 "$nqptp_source/nqptp" "$OUTPUT/nqptp"
@@ -243,7 +253,8 @@ install -m 0755 "$shairport_source/shairport-sync" "$OUTPUT/shairport-sync"
 install -m 0755 "$SYSROOT/usr/sbin/avahi-daemon" "$OUTPUT/avahi-daemon"
 install -m 0755 "$SYSROOT/usr/bin/dbus-daemon" "$OUTPUT/dbus-daemon"
 "$STRIP" --strip-unneeded "$OUTPUT/nqptp" "$OUTPUT/shairport-sync" \
-    "$OUTPUT/libreecho-airplay-audio" "$OUTPUT/avahi-daemon" "$OUTPUT/dbus-daemon"
+    "$OUTPUT/libreecho-airplay-audio" "$OUTPUT/libreecho-audio-engine" \
+    "$OUTPUT/avahi-daemon" "$OUTPUT/dbus-daemon"
 copy_runtime_closure
 find "$OUTPUT/runtime/usr/lib" -type f -name '*.so.*' -exec "$STRIP" --strip-unneeded {} +
 mkdir -p "$OUTPUT/runtime/etc/avahi" "$OUTPUT/runtime/etc/dbus-1"

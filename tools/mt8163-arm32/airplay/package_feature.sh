@@ -24,7 +24,9 @@ cp -a "$AIRPLAY_OUTPUT/runtime/." "$root/"
 mkdir -p "$root/usr/local/sbin" "$root/etc/libreecho" \
   "$root/dev/shm" "$root/proc" "$root/sys" "$root/run" "$root/var" \
   "$root/etc/avahi" "$root/etc/dbus-1/system.d"
-for binary in nqptp shairport-sync libreecho-airplay-audio avahi-daemon dbus-daemon; do
+for binary in nqptp shairport-sync libreecho-airplay-audio \
+  libreecho-audio-engine avahi-daemon dbus-daemon
+do
   install -m 0755 "$AIRPLAY_OUTPUT/$binary" "$root/usr/local/sbin/$binary"
 done
 install -m 0644 "$UI_BUNDLE/etc/libreecho/airplay2.conf" \
