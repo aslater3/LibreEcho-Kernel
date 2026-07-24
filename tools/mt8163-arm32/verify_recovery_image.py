@@ -39,7 +39,7 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "cfdc9ca3a6026ae43ee4d080159f1ce73d59c601355fead0ff01976fb61c5ea2"
+INIT_SHA256 = "74943829c95f200b40a1dd845a962570f6bf3bc186863ecc93957380a40c8162"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
@@ -62,7 +62,9 @@ UI_BINARY_NAMES = {
     "usr/local/sbin/libreecho-web",
     "usr/local/sbin/libreecho-logd",
     "usr/local/sbin/libreecho-networkd",
+    "usr/local/sbin/libreecho-timed",
     "usr/local/sbin/libreecho-audiod",
+    "usr/local/sbin/libreecho-micd",
     "usr/local/sbin/libreecho-ledd",
     "usr/local/sbin/libreecho-btd",
     "usr/local/sbin/libreecho-airplayd",
@@ -71,7 +73,9 @@ UI_INIT_NAMES = {
     "etc/init.d/libreecho-web.init",
     "etc/init.d/libreecho-logd.init",
     "etc/init.d/libreecho-networkd.init",
+    "etc/init.d/libreecho-timed.init",
     "etc/init.d/libreecho-audiod.init",
+    "etc/init.d/libreecho-micd.init",
     "etc/init.d/libreecho-ledd.init",
     "etc/init.d/libreecho-btd.init",
     "etc/init.d/libreecho-airplayd.init",
@@ -79,6 +83,7 @@ UI_INIT_NAMES = {
 UI_FIXED_NAMES = UI_BINARY_NAMES | UI_INIT_NAMES | {
     "etc/libreecho/web-config.json",
     "etc/libreecho/airplay2.conf",
+    "etc/libreecho/ntp.conf",
     "usr/local/share/libreecho/ui-manifest.txt",
 }
 UI_OPTIONAL_NAMES = {"etc/libreecho/users"}

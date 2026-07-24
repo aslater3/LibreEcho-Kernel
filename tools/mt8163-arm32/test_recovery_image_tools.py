@@ -182,7 +182,7 @@ class SourceTests(unittest.TestCase):
         amp_enable = source.index("enable_output_controls(card)")
         self.assertLess(first_write, amp_enable)
         self.assertLess(second_write, amp_enable)
-        self.assertIn("(void)disable_output_controls(card)", source)
+        self.assertIn("(void)disable_output_controls(card,", source)
 
     def test_shared_audio_engine_builds_puffin_priority_bus(self) -> None:
         engine = (TOOLS_DIR / "airplay/audio_engine.c").read_text()
@@ -243,6 +243,41 @@ class SourceTests(unittest.TestCase):
         self.assertIn("PUFFIN_OUTPUT_CEILING << 15", downmix)
         self.assertIn("samples[frame * 2] = mono", downmix)
         self.assertIn("samples[frame * 2 + 1] = mono", downmix)
+
+    def test_airplay_volume_owns_codec_master_only_while_active(self) -> None:
+        engine = (TOOLS_DIR / "airplay/audio_engine.c").read_text()
+        producer = (TOOLS_DIR / "airplay/airplay_audio.c").read_text()
+
+        self.assertIn('#define AIRPLAY_ACTIVE_FILE "airplay.active"', engine)
+        self.assertIn('#define AIRPLAY_VOLUME_FILE "airplay.volume"', engine)
+        self.assertIn("airplay_is_active(root)", engine)
+        self.assertIn("airplay_volume_to_mixer(root)", engine)
+        self.assertIn("saved_volume", engine)
+        self.assertIn("set_pcm_volume(card, requested)", engine)
+        self.assertIn("disable_output_controls(card,", engine)
+        self.assertIn("DEFAULT_AIRPLAY_ACTIVE_FILE", producer)
+        self.assertIn("set_active(DEFAULT_AIRPLAY_ACTIVE_FILE, active)", producer)
+        self.assertIn("DEFAULT_AIRPLAY_VOLUME_FILE", producer)
+        self.assertIn("set_volume(DEFAULT_AIRPLAY_VOLUME_FILE, argv[2])", producer)
+        self.assertIn("set_active(DEFAULT_AIRPLAY_ACTIVE_FILE, 1)", producer)
+        self.assertIn("set_active(DEFAULT_AIRPLAY_ACTIVE_FILE, 0)", producer)
+
+    def test_ui_bundle_packages_microphone_and_time_services(self) -> None:
+        builder = (TOOLS_DIR / "ui/build_ui_bundle.sh").read_text()
+        image = (TOOLS_DIR / "build_recovery_image.py").read_text()
+        verifier_source = (TOOLS_DIR / "verify_recovery_image.py").read_text()
+        init = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
+
+        for required in (
+            "libreecho-micd", "libreecho-timed", "libreecho-timed.init",
+            "etc/libreecho/ntp.conf",
+        ):
+            self.assertIn(required, builder + image + verifier_source)
+        self.assertIn(
+            "for service in logd networkd timed audiod micd ledd btd airplayd web",
+            init,
+        )
+        self.assertIn("persists", init)
 
     def test_puffin_speaker_profile_matches_stock_dump(self) -> None:
         kernel = TOOLS_DIR.parent.parent

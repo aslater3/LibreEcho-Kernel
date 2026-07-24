@@ -37,7 +37,7 @@ SOURCE_BOOT_SHA256 = "c0f52a3b079d214495cd3dd22f92fd85695d1b868c58b491a2edb933bc
 STOCK_EVT_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57dee1"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 MUSL_LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-RECOVERY_INIT_SHA256 = "cfdc9ca3a6026ae43ee4d080159f1ce73d59c601355fead0ff01976fb61c5ea2"
+RECOVERY_INIT_SHA256 = "74943829c95f200b40a1dd845a962570f6bf3bc186863ecc93957380a40c8162"
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
@@ -693,18 +693,21 @@ def add_ui_bundle(stage: Path, bundle: Path, source: Path,
 
     for binary in (
         "libreecho-web", "libreecho-logd", "libreecho-networkd",
-        "libreecho-audiod", "libreecho-ledd", "libreecho-btd",
+        "libreecho-timed", "libreecho-audiod", "libreecho-micd",
+        "libreecho-ledd", "libreecho-btd",
         "libreecho-airplayd",
     ):
         copy_file(f"sbin/{binary}", f"usr/local/sbin/{binary}", 0o755, True)
     for script in (
         "libreecho-web.init", "libreecho-logd.init", "libreecho-networkd.init",
-        "libreecho-audiod.init", "libreecho-ledd.init", "libreecho-btd.init",
+        "libreecho-timed.init", "libreecho-audiod.init",
+        "libreecho-micd.init", "libreecho-ledd.init", "libreecho-btd.init",
         "libreecho-airplayd.init",
     ):
         copy_file(f"etc/init.d/{script}", f"etc/init.d/{script}", 0o755)
     copy_file("etc/libreecho/web-config.json", "etc/libreecho/web-config.json", 0o600)
     copy_file("etc/libreecho/airplay2.conf", "etc/libreecho/airplay2.conf", 0o644)
+    copy_file("etc/libreecho/ntp.conf", "etc/libreecho/ntp.conf", 0o644)
     if "etc/libreecho/users" in bundled_files:
         users_file = pinned_source(bundle, "etc/libreecho/users", "UI users file")
         if users_file.stat().st_mode & 0o077 or not read(users_file).strip():
