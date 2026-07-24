@@ -33,6 +33,9 @@ done
 /bin/busybox grep -q 'output_backend = "pipe"' "$ROOT/etc/libreecho/airplay2.conf" || {
     echo AIRPLAY_RUNTIME_NOT_USING_TINYALSA_PIPE; exit 1;
 }
+/bin/busybox grep -q 'ignore_volume_control = "yes"' "$ROOT/etc/libreecho/airplay2.conf" || {
+    echo AIRPLAY_RUNTIME_DOUBLE_VOLUME_ATTENUATION_ENABLED; exit 1;
+}
 /bin/busybox grep -q 'output_format = "S16_LE"' "$ROOT/etc/libreecho/airplay2.conf" || {
     echo AIRPLAY_RUNTIME_FORMAT_NOT_S16_LE; exit 1;
 }

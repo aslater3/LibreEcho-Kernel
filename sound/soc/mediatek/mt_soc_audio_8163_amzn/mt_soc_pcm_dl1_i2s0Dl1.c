@@ -70,7 +70,6 @@ static unsigned long copy_count;
 static void mtk_I2S0dl1_board_safe(void)
 {
     (void)AudDrv_GPIO_EXTAMP_Select(0);
-    (void)AudDrv_GPIO_LineOut_Select(0);
     (void)AudDrv_GPIO_DACMUX_Select(0);
     (void)AudDrv_GPIO_I2S_Select(0);
 }
@@ -79,9 +78,12 @@ static void mtk_I2S0dl1_board_prepare(void)
 {
     (void)AudDrv_GPIO_I2S_Select(1);
     (void)AudDrv_GPIO_MCLK_Select();
-    (void)AudDrv_GPIO_DACMUX_Select(1);
-    /* The external woofer is behind the board-level line-out gate. */
-    (void)AudDrv_GPIO_LineOut_Select(1);
+    /*
+     * Puffin's stock ext_speaker_output route explicitly selects DacMux Off.
+     * The On state is reserved for the alternate line/headphone path and
+     * feeding it into the speaker amplifier produces invalid/noisy output.
+     */
+    (void)AudDrv_GPIO_DACMUX_Select(0);
 }
 
 static void mtk_I2S0dl1_board_start(void)

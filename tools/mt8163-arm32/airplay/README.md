@@ -21,8 +21,17 @@ full codec dependency tree.
 The device's 3.18 ASoC driver is usable through TinyALSA but returns
 `ENOTTY` for the libasound probing ioctls used by Shairport's ALSA backend.
 The payload therefore uses Shairport's raw named-pipe backend and starts the
-`libreecho-airplay-audio` TinyALSA bridge alongside it. The bridge writes
-S16_LE/48 kHz stereo to PCM `0,23`, the same path validated by `tinyplay`.
+`libreecho-airplay-audio` TinyALSA bridge alongside it. The bridge accepts
+S16_LE/48 kHz stereo, averages it to a mono speaker bus with clipping-safe
+32-bit arithmetic, duplicates that bus to both PCM channels, and writes PCM
+`0,23`. The stock Puffin codec profile then sends the left/HPL high-pass band
+to the tweeter and the right/HPR low-pass band to the woofer. A linked peak
+limiter restores the stock pipeline's +3 dB output trim without allowing PCM
+clipping or positive codec gain.
+
+Shairport's pipe must use `ignore_volume_control = "yes"` because the external
+volume hook owns codec attenuation. Otherwise Shairport attenuates the PCM in
+software and the hook applies the same AirPlay attenuation again.
 The bridge reapplies the physical amplifier controls after the codec starts
 DMA, and maps Shairport's AirPlay dB volume callbacks to the board's
 `PCM Playback Volume` mixer control.

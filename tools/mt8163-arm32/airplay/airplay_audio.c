@@ -23,12 +23,14 @@
 #include <tinyalsa/mixer.h>
 #include <tinyalsa/pcm.h>
 
+#include "puffin_downmix.h"
+
 #define DEFAULT_FIFO "/run/libreecho/airplay.pcm"
 #define DEFAULT_CARD 0U
 #define DEFAULT_DEVICE 23U
 #define DEFAULT_RATE 48000U
 #define DEFAULT_CHANNELS 2U
-#define PERIOD_SIZE 1024U
+#define PERIOD_SIZE 2048U
 #define PERIOD_COUNT 2U
 #define DEFAULT_MIXER_VOLUME 127
 #define AMP_SETTLE_US 30000U
@@ -60,6 +62,15 @@ static int set_stereo_control(struct mixer *mixer, const char *name, int value)
     if (mixer_ctl_set_value(control, 0, value) < 0)
         return -1;
     return mixer_ctl_set_value(control, 1, value);
+}
+
+static int set_single_control(struct mixer *mixer, const char *name, int value)
+{
+    struct mixer_ctl *control = mixer_get_ctl_by_name(mixer, name);
+
+    if (!control || mixer_ctl_get_num_values(control) < 1)
+        return -1;
+    return mixer_ctl_set_value(control, 0, value);
 }
 
 static int set_pcm_volume(unsigned int card, int volume)
@@ -98,7 +109,19 @@ static int arm_output_controls(unsigned int card, int volume)
         result = -1;
     if (set_enum_control(mixer, "Ext_Speaker_Amp_Switch", "Off") < 0)
         result = -1;
+    if (set_enum_control(mixer, "Audio_DacMux_Setting", "Off") < 0)
+        result = -1;
+    if (set_enum_control(mixer, "Right Channel Only", "Off") < 0)
+        result = -1;
     if (set_stereo_control(mixer, "HP DAC Playback Switch", 1) < 0)
+        result = -1;
+    if (set_single_control(mixer, "HPL Output Mixer L_DAC Switch", 1) < 0)
+        result = -1;
+    if (set_single_control(mixer, "HPR Output Mixer R_DAC Switch", 1) < 0)
+        result = -1;
+    if (set_single_control(mixer, "HPR Output Mixer IN1_R Switch", 0) < 0)
+        result = -1;
+    if (set_stereo_control(mixer, "HP Driver Gain Volume", 6) < 0)
         result = -1;
     if (volume >= 0 &&
         set_stereo_control(mixer, "PCM Playback Volume", volume) < 0)
@@ -274,8 +297,11 @@ static int play_stream(const char *fifo, unsigned int card, unsigned int device,
     const size_t frame_bytes = channels * sizeof(int16_t);
     const size_t buffer_bytes = PERIOD_SIZE * frame_bytes;
     unsigned char *buffer;
+    unsigned char *second_buffer;
     struct pcm *pcm = NULL;
+    struct puffin_dynamics dynamics;
     int fifo_fd = -1;
+    int second_ended = 0;
     int result = -1;
 
     if (ensure_fifo(fifo) < 0) {
@@ -291,22 +317,45 @@ static int play_stream(const char *fifo, unsigned int card, unsigned int device,
         return -1;
     }
 
-    buffer = malloc(buffer_bytes);
+    /*
+     * Keep two periods ready before starting DMA.  A 2048-frame period is
+     * 42.7 ms at 48 kHz; two periods provide 85.3 ms for the measured codec
+     * control and 30 ms amplifier-settling sequence.  The former 1024-frame
+     * periods provided only 42.7 ms total and underflowed at amplifier release.
+     */
+    buffer = malloc(buffer_bytes * 2);
     if (!buffer) {
         fprintf(stderr, "airplay-audio: PCM buffer allocation failed\n");
         goto out;
     }
+    second_buffer = buffer + buffer_bytes;
+    puffin_dynamics_init(&dynamics);
     for (;;) {
         int ended;
         int read_result = read_period(fifo_fd, buffer, buffer_bytes, 0, &ended);
 
         if (read_result < 0)
             goto out;
-        if (read_result > 0)
+        if (read_result > 0) {
+            second_ended = ended;
             break;
+        }
         if (stopping)
             goto out;
         usleep(250000);
+    }
+    if (!second_ended) {
+        int read_result = read_period(fifo_fd, second_buffer, buffer_bytes, 0,
+                                      &second_ended);
+
+        if (read_result < 0)
+            goto out;
+        if (read_result == 0) {
+            memset(second_buffer, 0, buffer_bytes);
+            second_ended = 1;
+        }
+    } else {
+        memset(second_buffer, 0, buffer_bytes);
     }
 
     pcm = pcm_open(card, device, PCM_OUT, &config);
@@ -320,21 +369,34 @@ static int play_stream(const char *fifo, unsigned int card, unsigned int device,
                 pcm_get_error(pcm));
         goto out;
     }
-    fprintf(stderr, "airplay-audio: streaming S16_LE %u Hz, %u channels to PCM %u,%u\n",
-            rate, channels, card, device);
+    fprintf(stderr,
+            "airplay-audio: streaming S16_LE %u Hz stereo as Puffin mono speaker bus to PCM %u,%u\n",
+            rate, card, device);
 
+    puffin_downmix_stereo(&dynamics, (int16_t *)buffer, PERIOD_SIZE);
     if (pcm_writei(pcm, buffer, PERIOD_SIZE) != (int)PERIOD_SIZE) {
         fprintf(stderr, "airplay-audio: PCM write failed: %s\n",
                 pcm_get_error(pcm));
         goto out;
     }
+    puffin_downmix_stereo(&dynamics, (int16_t *)second_buffer, PERIOD_SIZE);
+    if (pcm_writei(pcm, second_buffer, PERIOD_SIZE) != (int)PERIOD_SIZE) {
+        fprintf(stderr, "airplay-audio: second PCM write failed: %s\n",
+                pcm_get_error(pcm));
+        goto out;
+    }
 
     /* The Amazon codec applies its playback mute during prepare/start.  Do
-     * this after the first write has started the DMA stream, otherwise the
-     * codec immediately puts the physical amplifier back into mute and the
-     * output has a clipped/crackling transition. */
+     * this after DMA has started and two periods are queued, otherwise the
+     * codec immediately puts the physical amplifier back into mute or the
+     * 30 ms amplifier settle exceeds the queued audio and causes an XRUN. */
     if (enable_output_controls(card) < 0)
         fprintf(stderr, "airplay-audio: playback mixer enable incomplete\n");
+
+    if (second_ended) {
+        result = 0;
+        goto out;
+    }
 
     while (!stopping) {
         int ended;
@@ -343,6 +405,7 @@ static int play_stream(const char *fifo, unsigned int card, unsigned int device,
             goto out;
         if (read_result == 0)
             break;
+        puffin_downmix_stereo(&dynamics, (int16_t *)buffer, PERIOD_SIZE);
         if (pcm_writei(pcm, buffer, PERIOD_SIZE) != (int)PERIOD_SIZE) {
             fprintf(stderr, "airplay-audio: PCM write failed: %s\n",
                     pcm_get_error(pcm));
@@ -354,8 +417,10 @@ static int play_stream(const char *fifo, unsigned int card, unsigned int device,
     result = 0;
 
 out:
-    if (pcm)
+    if (pcm) {
+        (void)disable_output_controls(card);
         pcm_close(pcm);
+    }
     free(buffer);
     close(fifo_fd);
     return result;
@@ -397,7 +462,7 @@ int main(int argc, char **argv)
     if (argc > 3) device = (unsigned int)strtoul(argv[3], NULL, 10);
     if (argc > 4) rate = (unsigned int)strtoul(argv[4], NULL, 10);
     if (argc > 5) channels = (unsigned int)strtoul(argv[5], NULL, 10);
-    if (argc > 6 || channels == 0 || channels > 2 || rate == 0) {
+    if (argc > 6 || channels != 2 || rate == 0) {
         fprintf(stderr, "Usage: %s [fifo] [card] [device] [rate] [channels]\n", argv[0]);
         return 2;
     }

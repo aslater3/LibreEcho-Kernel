@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import os
+import re
 import stat
 import sys
 import tempfile
@@ -171,10 +173,65 @@ class SourceTests(unittest.TestCase):
     def test_airplay_bridge_starts_dma_before_releasing_amp(self) -> None:
         bridge = TOOLS_DIR / "airplay/airplay_audio.c"
         source = bridge.read_text()
+        self.assertIn("#define PERIOD_SIZE 2048U", source)
         self.assertIn(".start_threshold = 1U", source)
         first_write = source.index("pcm_writei(pcm, buffer, PERIOD_SIZE)")
+        second_write = source.index(
+            "pcm_writei(pcm, second_buffer, PERIOD_SIZE)"
+        )
         amp_enable = source.index("enable_output_controls(card)")
         self.assertLess(first_write, amp_enable)
+        self.assertLess(second_write, amp_enable)
+        self.assertIn("(void)disable_output_controls(card)", source)
+
+    def test_airplay_bridge_builds_puffin_mono_speaker_bus(self) -> None:
+        bridge = (TOOLS_DIR / "airplay/airplay_audio.c").read_text()
+        downmix = (TOOLS_DIR / "airplay/puffin_downmix.h").read_text()
+        first_mix = bridge.index(
+            "puffin_downmix_stereo(&dynamics, (int16_t *)buffer, PERIOD_SIZE)"
+        )
+        first_write = bridge.index("pcm_writei(pcm, buffer, PERIOD_SIZE)")
+
+        self.assertLess(first_mix, first_write)
+        self.assertGreaterEqual(bridge.count("puffin_downmix_stereo("), 2)
+        self.assertIn("channels != 2", bridge)
+        self.assertIn("#define PUFFIN_OUTPUT_TRIM_Q15 46341", downmix)
+        self.assertIn("#define PUFFIN_OUTPUT_CEILING 32767", downmix)
+        self.assertIn("struct puffin_dynamics", downmix)
+        self.assertIn("(int32_t)samples[frame * 2]", downmix)
+        self.assertIn("(int32_t)samples[frame * 2 + 1]", downmix)
+        self.assertIn("mixed /= 2", downmix)
+        self.assertIn("PUFFIN_OUTPUT_CEILING << 15", downmix)
+        self.assertIn("samples[frame * 2] = (int16_t)mono", downmix)
+        self.assertIn("samples[frame * 2 + 1] = (int16_t)mono", downmix)
+
+    def test_puffin_speaker_profile_matches_stock_dump(self) -> None:
+        kernel = TOOLS_DIR.parent.parent
+        codec = (kernel / "sound/soc/codecs/tlv320aic32x4.c").read_text()
+        match = re.search(
+            r"static const u8 puffin_ext_speaker_biquad\[\] = \{(.*?)\};",
+            codec,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        profile = bytes(int(value) for value in re.findall(r"\d+", match.group(1)))
+        self.assertEqual(len(profile), 117)
+        self.assertEqual(
+            hashlib.sha256(profile).hexdigest(),
+            "cd2d86f0ab713efa842420d08bf92149e4d610ce2090847e2308eb088ba84610",
+        )
+        self.assertIn("pConfigRegs = biquad_settings_regs", codec)
+
+        platform = (
+            kernel
+            / "sound/soc/mediatek/mt_soc_audio_8163_amzn"
+            / "mt_soc_pcm_dl1_i2s0Dl1.c"
+        ).read_text()
+        prepare = platform.split(
+            "static void mtk_I2S0dl1_board_prepare(void)", 1
+        )[1].split("static void mtk_I2S0dl1_board_start(void)", 1)[0]
+        self.assertIn("AudDrv_GPIO_DACMUX_Select(0)", prepare)
+        self.assertNotIn("AudDrv_GPIO_DACMUX_Select(1)", prepare)
 
     def test_network_tools_are_pinned_and_manual_only(self) -> None:
         builder_script = TOOLS_DIR / "network-tools/build_wireless_tools.sh"

@@ -269,6 +269,24 @@ static struct aic32x4_configs biquad_settings_regs[] = {
 #endif
 };
 
+/*
+ * Stock radar_puffin ext_speaker_output profile from
+ * /system/etc/audio_device.xml in dump_20260101_205819.  Userspace may replace
+ * this mutable profile later (for example for the 3.5 mm output), but every
+ * speaker stream must start from calibrated coefficients rather than the
+ * codec's all-zero coefficient bank.
+ */
+static const u8 puffin_ext_speaker_biquad[] = {
+	122, 248, 206, 133, 7, 50, 122, 248, 206, 83, 31, 201, 202, 4, 191,
+	87, 14, 180, 168, 241, 76, 87, 14, 180, 83, 31, 201, 202, 4, 191,
+	127, 255, 255, 128, 49, 110, 127, 162, 193, 127, 206, 146, 128,
+	93, 63, 127, 116, 152, 128, 139, 104, 127, 116, 152, 127, 116, 1,
+	129, 21, 161, 3, 238, 235, 3, 238, 235, 3, 238, 235, 83, 31, 201,
+	202, 4, 191, 3, 238, 235, 3, 238, 235, 3, 238, 235, 83, 31, 201,
+	202, 4, 191, 127, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	127, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 198
+};
+
 #define BIQUAD_SETTINGS_REGS_SIZE \
 	(sizeof(biquad_settings_regs)/sizeof(struct aic32x4_configs))
 #endif
@@ -776,7 +794,7 @@ static const struct snd_kcontrol_new right_input_mixer_controls[] = {
 };
 
 static const struct snd_soc_dapm_widget aic32x4_dapm_widgets[] = {
-	SND_SOC_DAPM_DAC("Left DAC", "Left Playback", AIC32X4_DACSETUP, 7, 0),
+	SND_SOC_DAPM_DAC("Left DAC", "Playback", AIC32X4_DACSETUP, 7, 0),
 	SND_SOC_DAPM_MIXER("HPL Output Mixer", SND_SOC_NOPM, 0, 0,
 			   &hpl_output_mixer_controls[0],
 			   ARRAY_SIZE(hpl_output_mixer_controls)),
@@ -787,7 +805,7 @@ static const struct snd_soc_dapm_widget aic32x4_dapm_widgets[] = {
 			   ARRAY_SIZE(lol_output_mixer_controls)),
 	SND_SOC_DAPM_PGA("LOL Power", AIC32X4_OUTPWRCTL, 3, 0, NULL, 0),
 
-	SND_SOC_DAPM_DAC("Right DAC", "Right Playback", AIC32X4_DACSETUP, 6, 0),
+	SND_SOC_DAPM_DAC("Right DAC", "Playback", AIC32X4_DACSETUP, 6, 0),
 	SND_SOC_DAPM_MIXER("HPR Output Mixer", SND_SOC_NOPM, 0, 0,
 			   &hpr_output_mixer_controls[0],
 			   ARRAY_SIZE(hpr_output_mixer_controls)),
@@ -1237,14 +1255,19 @@ static int aic32x4_hw_params(struct snd_pcm_substream *substream,
 	/* Set the signal processing block (PRB) modes */
 	snd_soc_write(codec, AIC32X4_DACSPB, 0x2);
 
-	/* Program the biquads and DRC */
-	pConfigRegs = biquad_Play_abh123;
-	size = ARRAY_SIZE(biquad_Play_abh123);
+	/* Program the active board profile, followed by its DRC mode. */
+	pConfigRegs = biquad_settings_regs;
+	size = ARRAY_SIZE(biquad_settings_regs);
 	for (j = 0; j < size; j++) {
 		/* Get the register offset and value */
 		snd_soc_write(codec,
 			pConfigRegs[j].reg_offset, pConfigRegs[j].reg_val);
 	}
+	pConfigRegs = biquad_Play_abh123;
+	size = ARRAY_SIZE(biquad_Play_abh123);
+	for (j = 0; j < size; j++)
+		snd_soc_write(codec,
+			pConfigRegs[j].reg_offset, pConfigRegs[j].reg_val);
 
 	/* Headphone Driver Startup Control if output ramping is enabled */
 	if (aic32x4->ignore_ramp)
@@ -1452,6 +1475,7 @@ static int aic32x4_probe(struct snd_soc_codec *codec)
 {
 	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
 	unsigned int tmp_reg;
+	int i;
 	int ret;
 
 	pr_info("aic32x4: %s\n", __func__);
@@ -1476,6 +1500,28 @@ static int aic32x4_probe(struct snd_soc_codec *codec)
 	aic32x4->unmuted = false;
 
 #ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	BUILD_BUG_ON(ARRAY_SIZE(puffin_ext_speaker_biquad) !=
+		     ARRAY_SIZE(biquad_settings_regs));
+	for (i = 0; i < ARRAY_SIZE(biquad_settings_regs); i++)
+		biquad_settings_regs[i].reg_val = puffin_ext_speaker_biquad[i];
+
+	/*
+	 * Match Puffin's stock mixer bootstrap: speaker audio is sourced only
+	 * from the left/right DACs through HPL/HPR.  Keep the analogue-input and
+	 * codec line-output routes disconnected.
+	 */
+	ret = snd_soc_component_update_bits(&codec->component,
+					    AIC32X4_HPLROUTE,
+					    1U << 3, 1U << 3);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_component_update_bits(&codec->component,
+					    AIC32X4_HPRROUTE,
+					    (1U << 3) | (1U << 2),
+					    1U << 3);
+	if (ret < 0)
+		return ret;
+
 	if (aic32x4->power_cfg & AIC32X4_PWR_MICBIAS_2075_LDOIN) {
 		ret = snd_soc_component_write(&codec->component, AIC32X4_MICBIAS,
 					      AIC32X4_MICBIAS_LDOIN |
