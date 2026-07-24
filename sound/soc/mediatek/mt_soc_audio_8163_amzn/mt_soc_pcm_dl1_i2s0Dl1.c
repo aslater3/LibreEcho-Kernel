@@ -22,6 +22,7 @@
 
 #include <linux/dma-mapping.h>
 #include "AudDrv_Common.h"
+#include "AudDrv_Gpio.h"
 #include "AudDrv_Def.h"
 #include "AudDrv_Afe.h"
 #include "AudDrv_Ana.h"
@@ -58,6 +59,38 @@ static bool mCopyFlag;
 static struct device *mDev;
 static struct snd_pcm_substream *I2S0dl1_substream;
 static unsigned long copy_count;
+
+/*
+ * radar_puffin routes the external speaker through the I2S1 pins and a
+ * board-level DAC mux.  AudDrv_Gpio already owns the pinctrl handle for the
+ * parent DL1 PCM device; use its selectors here rather than looking up
+ * states from this child I2S0DL1 platform device, which has no pinctrl
+ * state list of its own.
+ */
+static void mtk_I2S0dl1_board_safe(void)
+{
+    (void)AudDrv_GPIO_EXTAMP_Select(0);
+    (void)AudDrv_GPIO_DACMUX_Select(0);
+    (void)AudDrv_GPIO_I2S_Select(0);
+}
+
+static void mtk_I2S0dl1_board_prepare(void)
+{
+    (void)AudDrv_GPIO_I2S_Select(1);
+    (void)AudDrv_GPIO_MCLK_Select();
+    /*
+     * Puffin's stock ext_speaker_output route explicitly selects DacMux Off.
+     * The On state is reserved for the alternate line/headphone path and
+     * feeding it into the speaker amplifier produces invalid/noisy output.
+     */
+    (void)AudDrv_GPIO_DACMUX_Select(0);
+}
+
+static void mtk_I2S0dl1_board_start(void)
+{
+    (void)AudDrv_GPIO_EXTAMP_Select(1);
+}
+
 #define GPT6_CLOCK_COUNT_PER_SEC (13000000LL) /* 13MHz for GPT6 */
 #define BYTES_OF_INT64 (8)
 
@@ -302,6 +335,7 @@ static int mtk_pcm_I2S0dl1_stop(struct snd_pcm_substream *substream)
 		      Soc_Aud_InterConnectionOutput_O04);
 
 	ClearMemBlock(Soc_Aud_Digital_Block_MEM_DL1);
+	mtk_I2S0dl1_board_safe();
 	mCopyFlag = false;
 	return 0;
 }
@@ -505,6 +539,12 @@ static int mtk_pcm_I2S0dl1_close(struct snd_pcm_substream *substream)
 	I2S0dl1_substream = NULL;
 
 	pr_info("+%s() Playback_Audio I2S1 close\n", __func__);
+	/*
+	 * close() is also used when hw_params/prepare fails, so it cannot rely
+	 * on trigger(STOP) having run.  Always leave the external amplifier,
+	 * DAC mux, and I2S pins in their board-safe state here as well.
+	 */
+	mtk_I2S0dl1_board_safe();
 
 	if (mPrepareDone == true) {
 		/* stop DAC output */
@@ -562,6 +602,8 @@ static int mtk_pcm_I2S0dl1_prepare(struct snd_pcm_substream *substream)
 	pr_info("+%s() Playback_Audio I2S1 prepare\n", __func__);
 
 	if (mPrepareDone == false) {
+		/* Select Puffin's physical I2S/MCLK/DAC-mux path before clocks run. */
+		mtk_I2S0dl1_board_prepare();
 		pr_debug("%s format = %d SNDRV_PCM_FORMAT_S32_LE = %d SNDRV_PCM_FORMAT_U32_LE = %d\n",
 		       __func__, runtime->format, SNDRV_PCM_FORMAT_S32_LE, SNDRV_PCM_FORMAT_U32_LE);
 		SetMemifSubStream(Soc_Aud_Digital_Block_MEM_DL1, substream);
@@ -709,6 +751,7 @@ static int mtk_pcm_I2S0dl1_start(struct snd_pcm_substream *substream)
 	SetSampleRate(Soc_Aud_Digital_Block_MEM_DL1, runtime->rate);
 	SetChannels(Soc_Aud_Digital_Block_MEM_DL1, runtime->channels);
 	SetMemoryPathEnable(Soc_Aud_Digital_Block_MEM_DL1, true);
+	mtk_I2S0dl1_board_start();
 
 	EnableAfe(true);
 

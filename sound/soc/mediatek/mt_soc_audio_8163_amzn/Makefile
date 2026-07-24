@@ -13,6 +13,9 @@ ccflags-y += -DAUDIO_USING_WRAP_DRIVER
 ccflags-y += -D_MT_IDLE_HEADER
 
 EXTRA_CFLAGS := -I$(src)/../common
+obj-$(CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER) += mt_soc_speaker_afe.o mt_soc_speaker_clock.o mt_soc_speaker_gpio.o
+obj-$(CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER) += mt_soc_pcm_speaker.o mt_soc_dai_stub_speaker.o
+obj-$(CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER) += mt_amzn_mclk_speaker.o mt_soc_machine_speaker.o
 obj-$(CONFIG_MT_SND_SOC_8163_AMZN) += amzn-spi-pcm/
 obj-$(CONFIG_MT_SND_SOC_8163_AMZN) += AudDrv_Afe.o AudDrv_Ana.o AudDrv_Clk.o AudDrv_Gpio.o
 obj-$(CONFIG_MT_SND_SOC_8163_AMZN) += mt_soc_afe_control.o mt_soc_afe_connection.o mt_soc_pcm_common.o

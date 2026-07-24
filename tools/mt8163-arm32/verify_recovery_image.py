@@ -23,7 +23,7 @@ MKIMG_SIZE = 0x200
 IMAGE_SIZE = 0x1000000
 KERNEL_ADDR = 0x40008000
 RAMDISK_ADDR = 0x43478000
-RAMDISK_END_LIMIT = 0x44000000
+RAMDISK_END_LIMIT = 0x44400000
 TAGS_ADDR = 0x48000000
 ATF_START = 0x43000000
 ATF_END = 0x43030000
@@ -39,19 +39,17 @@ STOCK_DTB_SHA256 = "f44630ba28f503dd7503bc7cffa2ee96a319acf2f58f1456bb6f5ff23d57
 PADDED_STOCK_DTB_SHA256 = "08b16ec39554d644d8cbdf8f5816559f85414ab45bc1901de46a7cd43dc286ed"
 BUSYBOX_SHA256 = "d4c8fd2aea01abd851c703f39b29c0de748b2751e4e1a85cae570fa53ad8f4fb"
 LOADER_SHA256 = "1063871174f1bd4f08f4d330e20b07aeb0820327ee739a4d8d1b644df842cb6b"
-INIT_SHA256 = "8b0da857496801a9f40e813307e5ac34f18087425759bf685e070266cfb4a657"
+INIT_SHA256 = "f0e3e6f8c5400e793396aba07ee0ba49c9a4d3fbad93059d2f138b8c3cdd3a35"
 ADBD_SHA256 = "1c0d14afb1ce19494ee1da935e1076f49ff57e359d348262a28bb3d56abeb930"
 OVERLAY_FILES = {
     "default.prop": 0o644,
     "profile": 0o644,
-    "no-startup-audio": 0o644,
     "init.rc": 0o644,
     "init.recovery.mt8163.rc": 0o644,
     "libreecho-init": 0o755,
 }
 OVERLAY_TARGETS = {
     "profile": "etc/profile",
-    "no-startup-audio": "etc/libreecho/no-startup-audio",
 }
 SSH_PASSWORD_HASH_RE = re.compile(
     rb"\$(?:1|5|6|2[abxy]?|y|gy)\$[^$:\r\n]{1,64}\$[^:\r\n]{1,512}\Z"
@@ -67,6 +65,7 @@ UI_BINARY_NAMES = {
     "usr/local/sbin/libreecho-audiod",
     "usr/local/sbin/libreecho-ledd",
     "usr/local/sbin/libreecho-btd",
+    "usr/local/sbin/libreecho-airplayd",
 }
 UI_INIT_NAMES = {
     "etc/init.d/libreecho-web.init",
@@ -75,12 +74,20 @@ UI_INIT_NAMES = {
     "etc/init.d/libreecho-audiod.init",
     "etc/init.d/libreecho-ledd.init",
     "etc/init.d/libreecho-btd.init",
+    "etc/init.d/libreecho-airplayd.init",
 }
 UI_FIXED_NAMES = UI_BINARY_NAMES | UI_INIT_NAMES | {
     "etc/libreecho/web-config.json",
+    "etc/libreecho/airplay2.conf",
     "usr/local/share/libreecho/ui-manifest.txt",
 }
 UI_OPTIONAL_NAMES = {"etc/libreecho/users"}
+AIRPLAY_BINARY_NAMES = {
+    "usr/local/sbin/nqptp", "usr/local/sbin/shairport-sync",
+    "usr/local/sbin/avahi-daemon", "usr/local/sbin/dbus-daemon",
+    "usr/local/sbin/libreecho-airplay-audio",
+    "usr/local/sbin/libreecho-audio-engine",
+}
 
 CONNECTIVITY_FILES = {
     "system/bin/linker": (
@@ -934,7 +941,13 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
                        expected_dropbearkey_sha256: str | None,
                        expected_ui_manifest_sha256: str | None,
                        expected_ui_commit: str | None,
-                       expected_ui_diff_sha256: str | None) -> bool:
+                       expected_ui_diff_sha256: str | None,
+                       expected_airplay_payload_sha256: str | None,
+                       expected_airplay_payload_size: int | None,
+                       expected_nqptp_sha256: str | None,
+                       expected_shairport_sync_sha256: str | None,
+                       expected_avahi_daemon_sha256: str | None,
+                       expected_dbus_daemon_sha256: str | None) -> bool:
     if ramdisk[:4] != b"\x1f\x8b\x08\x00":
         fail("ramdisk gzip header is not deterministic")
     try:
@@ -987,6 +1000,142 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         entries, manifest, expected_ui_manifest_sha256,
         expected_ui_commit, expected_ui_diff_sha256,
     )
+    airplay = manifest.get("airplay", {"enabled": False})
+    if not isinstance(airplay, dict) or not isinstance(airplay.get("enabled"), bool):
+        fail("AirPlay manifest record is malformed")
+    airplay = cast(dict[str, object], airplay)
+    airplay_names = set(AIRPLAY_BINARY_NAMES)
+    runtime = airplay.get("runtime", {})
+    if isinstance(runtime, dict):
+        airplay_names.update(str(name) for name in runtime)
+    expected_airplay = (
+        expected_nqptp_sha256, expected_shairport_sync_sha256,
+        expected_avahi_daemon_sha256, expected_dbus_daemon_sha256,
+    )
+    if airplay.get("external_payload"):
+        payload = airplay.get("payload")
+        if (not isinstance(payload, dict) or payload.get("format") != "squashfs-lz4" or
+                payload.get("filename") != "airplay2.squashfs" or
+                not isinstance(payload.get("sha256"), str) or
+                not isinstance(payload.get("size"), int) or
+                expected_airplay_payload_sha256 is None or
+                expected_airplay_payload_size is None or
+                payload.get("sha256") != expected_airplay_payload_sha256 or
+                payload.get("size") != expected_airplay_payload_size):
+            fail("external AirPlay payload manifest is incomplete or mismatched")
+        files = payload.get("files")
+        if not isinstance(files, dict) or not files:
+            fail("external AirPlay payload file manifest is missing")
+        for required in (
+            "usr/local/sbin/libreecho-airplay-audio",
+            "usr/local/sbin/libreecho-audio-engine",
+            "usr/local/sbin/shairport-sync",
+            "etc/libreecho/airplay2.conf",
+        ):
+            if required not in files:
+                fail(f"external AirPlay payload member missing: {required}")
+        for relative, record in files.items():
+            if (not isinstance(relative, str) or not relative or relative.startswith("/") or
+                    "//" in relative or "/../" in f"/{relative}/" or
+                    not isinstance(record, dict) or
+                    not re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256", "")))):
+                fail(f"external AirPlay payload contains an unsafe file record: {relative!r}")
+        unexpected_external = sorted(
+            name for name in entries
+            if name in AIRPLAY_BINARY_NAMES or name.startswith("usr/lib/") and ".so." in name or
+               name == "lib/ld-linux-armhf.so.3" or name.startswith("etc/avahi/") or
+               name.startswith("etc/dbus-1/")
+        )
+        if unexpected_external:
+            fail(f"external AirPlay runtime leaked into boot ramdisk: {unexpected_external}")
+    elif any(value is not None for value in expected_airplay):
+        if not all(value is not None for value in expected_airplay):
+            fail("AirPlay asset identities are incomplete")
+        if not airplay.get("enabled"):
+            fail("AirPlay assets are expected but the AirPlay manifest is disabled")
+        nqptp = require_member(entries, "usr/local/sbin/nqptp", expected_nqptp_sha256, 0o755)
+        if elf_info(nqptp.data) != (1, 40, 0x05000400, None, (), False):
+            fail("NQPTP is not static ARM32 hard-float")
+        dynamic_members = {
+            "usr/local/sbin/shairport-sync": expected_shairport_sync_sha256,
+            "usr/local/sbin/avahi-daemon": expected_avahi_daemon_sha256,
+            "usr/local/sbin/dbus-daemon": expected_dbus_daemon_sha256,
+        }
+        dynamic_infos: dict[str, tuple[int, int, int, str | None, tuple[str, ...], bool]] = {}
+        for name, expected_hash in dynamic_members.items():
+            member = require_member(entries, name, expected_hash, 0o755)
+            info = elf_info(member.data)
+            if (info is None or info[:2] != (1, 40) or info[2] != 0x05000400 or
+                    info[3] != "/lib/ld-linux-armhf.so.3" or not info[5]):
+                fail(f"AirPlay daemon is not a dynamic ARMHF executable: {name}")
+            dynamic_infos[name] = info
+        shairport_info = dynamic_infos["usr/local/sbin/shairport-sync"]
+        nqptp_record = airplay.get("nqptp")
+        shairport_record = airplay.get("shairport_sync")
+        if not isinstance(nqptp_record, dict) or not isinstance(shairport_record, dict):
+            fail("AirPlay binary manifest records are incomplete")
+        if nqptp_record.get("sha256") != expected_nqptp_sha256:
+            fail("NQPTP manifest hash mismatch")
+        if shairport_record.get("sha256") != expected_shairport_sync_sha256:
+            fail("Shairport Sync manifest hash mismatch")
+        if nqptp_record.get("elf", {}).get("dynamic") is not False:
+            fail("NQPTP manifest incorrectly marks the binary as dynamic")
+        if shairport_record.get("elf", {}).get("needed") != list(shairport_info[4]):
+            fail("Shairport Sync dependency manifest mismatch")
+        for key, info in dynamic_infos.items():
+            manifest_key = {
+                "usr/local/sbin/shairport-sync": "shairport_sync",
+                "usr/local/sbin/avahi-daemon": "avahi_daemon",
+                "usr/local/sbin/dbus-daemon": "dbus_daemon",
+            }[key]
+            record = airplay.get(manifest_key)
+            if not isinstance(record, dict) or record.get("elf", {}).get("needed") != list(info[4]):
+                fail(f"AirPlay daemon dependency manifest mismatch: {key}")
+        if not isinstance(runtime, dict) or "lib/ld-linux-armhf.so.3" not in runtime:
+            fail("AirPlay runtime manifest lacks the glibc loader")
+        runtime_names = set(runtime)
+        for relative, raw_record in runtime.items():
+            if (not isinstance(relative, str) or
+                    (relative != "lib/ld-linux-armhf.so.3" and
+                     (not relative.startswith("usr/lib/") or ".so." not in relative))):
+                fail("AirPlay runtime manifest contains an unsafe path")
+            if not isinstance(raw_record, dict):
+                fail(f"AirPlay runtime manifest record is malformed: {relative}")
+            record = cast(dict[str, object], raw_record)
+            config = relative.startswith("etc/")
+            runtime_member = require_member(entries, relative, record.get("sha256"), 0o644 if config else 0o755)
+            if config:
+                if set(record) != {"sha256", "size", "mode"} or record.get("mode") != "0644":
+                    fail(f"AirPlay runtime configuration record is malformed: {relative}")
+                continue
+            info = elf_info(runtime_member.data)
+            if info is None or info[:2] != (1, 40) or info[2] != 0x05000400:
+                fail(f"AirPlay runtime is not ARMHF: {relative}")
+            if record.get("needed") is not None:
+                fail("AirPlay runtime records must contain an ELF sub-record")
+            raw_elf = record.get("elf")
+            if not isinstance(raw_elf, dict):
+                fail(f"AirPlay runtime ELF record is missing: {relative}")
+            if (raw_elf.get("interpreter"), raw_elf.get("needed"), raw_elf.get("dynamic")) != (
+                    info[3], list(info[4]), info[5]):
+                fail(f"AirPlay runtime ELF record mismatch: {relative}")
+        available_names = {PurePosixPath(name).name for name in runtime_names}
+        needed = set().union(*(set(info[4]) for info in dynamic_infos.values()))
+        if not needed.issubset(available_names):
+            fail("AirPlay runtime closure does not cover Shairport Sync dependencies")
+        unexpected_airplay = sorted(
+            name for name in entries
+            if name in AIRPLAY_BINARY_NAMES or name.startswith("usr/lib/") and ".so." in name or
+               name == "lib/ld-linux-armhf.so.3" or name.startswith("etc/avahi/") or
+               name.startswith("etc/dbus-1/")
+        )
+        if set(unexpected_airplay) != airplay_names:
+            fail("AirPlay runtime members do not match the manifest")
+    else:
+        if airplay.get("enabled") or any(
+            name in entries for name in AIRPLAY_BINARY_NAMES
+        ):
+            fail("AirPlay assets are present without expected identities")
     audio = manifest.get("audio", {"enabled": False})
     if not isinstance(audio, dict) or not isinstance(audio.get("enabled"), bool):
         fail("audio manifest record is malformed")
@@ -1262,6 +1411,18 @@ def main() -> None:
                         help="require this LibreEcho-UI source commit")
     parser.add_argument("--expected-ui-diff-sha256",
                         help="require this LibreEcho-UI source diff identity")
+    parser.add_argument("--expected-nqptp-sha256",
+                        help="require this static ARM32 NQPTP AirPlay 2 daemon")
+    parser.add_argument("--expected-shairport-sync-sha256",
+                        help="require this ARMHF Shairport Sync AirPlay 2 receiver")
+    parser.add_argument("--expected-avahi-daemon-sha256",
+                        help="require this ARMHF Avahi discovery daemon")
+    parser.add_argument("--expected-dbus-daemon-sha256",
+                        help="require this ARMHF D-Bus system daemon")
+    parser.add_argument("--expected-airplay-payload-sha256",
+                        help="require this external AirPlay 2 SquashFS payload")
+    parser.add_argument("--expected-airplay-payload-size", type=int,
+                        help="require this external AirPlay 2 payload size")
     parser.add_argument("--expected-dtb-sha256")
     parser.add_argument(
         "--expected-connectivity-bundle",
@@ -1377,6 +1538,9 @@ def main() -> None:
         args.expected_dropbear_sha256, args.expected_dropbearkey_sha256,
         args.expected_ui_manifest_sha256, args.expected_ui_commit,
         args.expected_ui_diff_sha256,
+        args.expected_airplay_payload_sha256, args.expected_airplay_payload_size,
+        args.expected_nqptp_sha256, args.expected_shairport_sync_sha256,
+        args.expected_avahi_daemon_sha256, args.expected_dbus_daemon_sha256,
     )
     expected_connectivity = args.expected_connectivity_bundle != "none"
     if connectivity_enabled != expected_connectivity:
@@ -1396,6 +1560,7 @@ def main() -> None:
         "root_adb_staged=yes runme=yes memory_disjoint=yes "
         f"connectivity_bundle={'yes' if connectivity_enabled else 'no'} "
         f"audio_tools={'yes' if args.expected_tinyplay_sha256 and args.expected_tinycap_sha256 and args.expected_tinymix_sha256 else 'no'} "
+        f"airplay={'yes' if args.expected_airplay_payload_sha256 or (args.expected_nqptp_sha256 and args.expected_shairport_sync_sha256 and args.expected_avahi_daemon_sha256 and args.expected_dbus_daemon_sha256) else 'no'} "
         f"network_activation={network_activation} status=PREPARED_NOT_FLASHED"
     )
 

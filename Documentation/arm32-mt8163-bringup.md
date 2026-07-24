@@ -106,11 +106,12 @@ Reference artifacts are identified by SHA-256:
 These hashes identify reference inputs; they do not make the AArch64 ramdisks
 suitable for the ARM32 image.
 
-The larger recovery ramdisk must not be loaded at `0x44000000`: that range
-would overlap the DT-reserved RAM console beginning at `0x44400000`.  The v97
-ramdisk address `0x43478000` leaves the audited ARM32 recovery archives below
-`0x44000000` and above the ATF reservation ending at `0x4302ffff`.  Recheck
-this bound from the final compressed size for every packaged image.
+The larger recovery ramdisk must not be loaded at `0x44000000`: the DT-reserved
+RAM console begins at `0x44400000`. The v97 ramdisk address `0x43478000` leaves
+the audited ARM32 recovery archive above the ATF reservation ending at
+`0x4302ffff`; it may use the free range through (but not including)
+`0x44400000`. Recheck this bound from the final compressed size for every
+packaged image.
 
 ## Device-tree contract for CONSYS/WLAN
 

@@ -38,6 +38,15 @@ config MT_SND_SOC_8163_AMZN
 	help
         If you say Y, enable MT_SND_SOC_8163_AMZN driver.
 
+config MT_SND_SOC_8163_AMZN_SPEAKER
+	bool "Amazon MT8163 Puffin speaker playback"
+	depends on I2C
+	select SND_SOC_TLV320AIC32X4
+	default n
+	help
+	  Build the fixed 48 kHz mono DL1/I2S speaker path for radar_puffin.
+	  This is an alternate playback-only machine driver.
+
 config SND_I2S_MCLK
     bool "Enable I2S_MCLK for DAC3203 and AIC3101"
 

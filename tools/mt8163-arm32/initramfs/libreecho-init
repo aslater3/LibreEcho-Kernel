@@ -180,6 +180,46 @@ for sys_block in /sys/class/block/mmcblk0 /sys/class/block/mmcblk0p*; do
     fi
     [ -b "/dev/$name" ] || $BB mknod "/dev/$name" b "$major" "$minor" 2>/dev/null
 done
+
+# Mount only the verified userdata partition.  The AirPlay payload and other
+# optional assets live here, while persist/IDME remains untouched because it
+# carries board identity, MAC addresses, and calibration data.  Do not
+# auto-format or repair this partition from the initramfs: a failed mount is
+# recoverable through ADB and must not turn boot into a destructive operation.
+USERDATA=/dev/mmcblk0p16
+USERDATA_SYS=/sys/class/block/mmcblk0p16
+USERDATA_MOUNT=/data
+userdata_mount()
+{
+    i=0
+    while [ "$i" -lt 15 ] && [ ! -r "$USERDATA_SYS/dev" ]; do
+        $BB sleep 1
+        i=$((i + 1))
+    done
+
+    if [ ! -b "$USERDATA" ] ||
+       ! $BB grep -qx 'PARTNAME=userdata' "$USERDATA_SYS/uevent" 2>/dev/null ||
+       [ "$($BB cat "$USERDATA_SYS/size" 2>/dev/null)" != 2137088 ]; then
+        log userdata-identity-rejected
+        return 1
+    fi
+
+    $BB mkdir -p "$USERDATA_MOUNT"
+    if $BB grep -q " $USERDATA_MOUNT " /proc/mounts 2>/dev/null; then
+        log userdata-already-mounted
+        return 0
+    fi
+
+    if $BB mount -t ext4 -o rw,nosuid,nodev,noatime "$USERDATA" "$USERDATA_MOUNT" \
+       >/tmp/userdata-mount.log 2>&1; then
+        log userdata-mounted
+        return 0
+    fi
+    log userdata-mount-failed
+    return 1
+}
+userdata_mount || true
+
 expdb_devno=$($BB cat "$EXPDB_SYS/dev" 2>/dev/null)
 expdb_major=${expdb_devno%:*}
 expdb_minor=${expdb_devno#*:}
@@ -505,7 +545,7 @@ start_ui_services()
         return 0
     }
     $BB mkdir -p /var/run /var/log /var/log/libreecho /run/libreecho
-    for service in logd networkd audiod ledd btd web; do
+    for service in logd networkd audiod ledd btd airplayd web; do
         script="/etc/init.d/libreecho-$service.init"
         if [ -x "$script" ]; then
             "$script" start >/tmp/libreecho-"$service".init.log 2>&1
@@ -519,68 +559,11 @@ start_ui_services()
 start_ui_services &
 log ui-services-autostart-started
 
-# Play the bring-up confirmation clip only after the normal control plane has
-# reached its ready point.  This is deliberately a bounded background worker:
-# a missing codec node or a failed amplifier must never hold PID 1 or prevent
-# ADB/fastboot recovery.  The numeric controls are the verified IDs from the
-# fixed Amazon AIC32x4 HPR route in this image.
-startup_audio_worker()
-{
-    i=0
-    while [ "$i" -lt 30 ]; do
-        if [ -r /etc/audio/windows95-startup.wav ] &&
-           [ -x /sbin/tinyplay ] && [ -x /sbin/tinymix ] &&
-           [ -c /dev/snd/controlC0 ]; then
-            break
-        fi
-        $BB sleep 1
-        i=$((i + 1))
-    done
-    if [ ! -r /etc/audio/windows95-startup.wav ] ||
-       [ ! -x /sbin/tinyplay ] || [ ! -x /sbin/tinymix ] ||
-       [ ! -c /dev/snd/controlC0 ]; then
-        log audio-startup-skipped
-        return 0
-    fi
-
-    controls_ok=1
-    /sbin/tinymix -D 0 set 61 103 103 || controls_ok=0
-    /sbin/tinymix -D 0 set 62 6 6 || controls_ok=0
-    /sbin/tinymix -D 0 set 63 6 6 || controls_ok=0
-    /sbin/tinymix -D 0 set 64 1 1 || controls_ok=0
-    /sbin/tinymix -D 0 set 65 0 0 || controls_ok=0
-    /sbin/tinymix -D 0 set 233 0 || controls_ok=0
-    /sbin/tinymix -D 0 set 234 0 || controls_ok=0
-    /sbin/tinymix -D 0 set 88 Off || controls_ok=0
-    /sbin/tinymix -D 0 set 5 On || controls_ok=0
-    if [ "$controls_ok" -ne 1 ]; then
-        log audio-startup-controls-failed
-        return 1
-    fi
-    log audio-startup-playback-started
-    /sbin/tinyplay /etc/audio/windows95-startup.wav -D 0 -d 23 -p 1024 -n 2 \
-        >/tmp/audio-startup.log 2>&1
-    playback_rc=$?
-
-    # Return to the safe idle state after the one-shot confirmation sound.
-    /sbin/tinymix -D 0 set 233 0 || true
-    /sbin/tinymix -D 0 set 234 0 || true
-    /sbin/tinymix -D 0 set 65 0 0 || true
-    /sbin/tinymix -D 0 set 64 0 0 || true
-    /sbin/tinymix -D 0 set 61 127 127 || true
-    /sbin/tinymix -D 0 set 62 6 6 || true
-    /sbin/tinymix -D 0 set 63 6 6 || true
-    /sbin/tinymix -D 0 set 5 Off || true
-    /sbin/tinymix -D 0 set 88 On || true
-    log "audio-startup-playback-rc:$playback_rc"
-    return "$playback_rc"
-}
-if [ -e /etc/libreecho/no-startup-audio ]; then
-    log audio-startup-disabled
-else
-    startup_audio_worker &
-    log audio-startup-worker-started
-fi
+# Audio playback is always user-initiated.  In particular, boot must never
+# touch the codec, amplifier, or TinyALSA playback device.  This is a hard
+# policy rather than an optional marker so future images remain silent even if
+# an old audio asset is accidentally present in an overlay or persistent store.
+log audio-startup-disabled
 
 # Connectivity is deliberately launched only after the ADB/FunctionFS control
 # plane is ready.  A profile-bearing development image performs one bounded

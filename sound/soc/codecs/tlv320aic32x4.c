@@ -58,6 +58,19 @@ static const struct aic32x4_configs biquad_Play_abh123[] = {
 	{AIC32X4_DRCCTRLREG1, 0x0F},
 };
 
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+struct aic32x4_speaker_rate_divs {
+	u32 mclk;
+	u32 rate;
+	u8 p_val;
+	u8 pll_j;
+	u16 pll_d;
+	u16 dosr;
+	u8 ndac;
+	u8 mdac;
+	u8 blck_N;
+};
+#else
 struct aic32x4_rate_divs {
 	u32 mclk;
 	u32 rate;
@@ -72,31 +85,36 @@ struct aic32x4_rate_divs {
 	u8 madc;
 	u8 blck_N;
 };
+#endif
 
 struct aic32x4_priv {
 	struct regmap *regmap;
 	u32 sysclk;
 	u32 power_cfg;
-	u32 micpga_routing;
-	bool swapdacs;
 	int rstn_gpio;
-	struct clk *mclk;
 	int channels;
 	u16 unmuted;
-	bool ignore_ramp;
 	bool mfp_amp_muted;
 	u32 rate_divs_index;
 
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	u32 micpga_routing;
+	bool swapdacs;
+	struct clk *mclk;
+	bool ignore_ramp;
 	struct regulator *supply_ldo;
 	struct regulator *supply_iov;
 	struct regulator *supply_dv;
 	struct regulator *supply_av;
+#endif
 };
 
-/* 0dB min, 0.5dB steps */
-static DECLARE_TLV_DB_SCALE(tlv_step_0_5, 0, 50, 0);
 /* -63.5dB min, 0.5dB steps */
 static DECLARE_TLV_DB_SCALE(tlv_pcm, -6350, 50, 0);
+
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+/* 0dB min, 0.5dB steps */
+static DECLARE_TLV_DB_SCALE(tlv_step_0_5, 0, 50, 0);
 /* -6dB min, 1dB steps */
 static DECLARE_TLV_DB_SCALE(tlv_driver_gain, -600, 100, 0);
 /* -12dB min, 0.5dB steps */
@@ -121,7 +139,9 @@ static const struct soc_enum aic32x4_mfp_mute_enable_enum =
 		SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(control_enable), control_enable);
 
 static u8 dac_soft_stepping = AIC32X4_DAC_DEFAULT_SOFT_STEPPING;
+#endif
 
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 static struct aic32x4_configs biquad_settings_regs[] = {
 	/* Playback Filters */
 	{AIC32X4_PAGE44 + 12, 0},
@@ -249,8 +269,27 @@ static struct aic32x4_configs biquad_settings_regs[] = {
 #endif
 };
 
+/*
+ * Stock radar_puffin ext_speaker_output profile from
+ * /system/etc/audio_device.xml in dump_20260101_205819.  Userspace may replace
+ * this mutable profile later (for example for the 3.5 mm output), but every
+ * speaker stream must start from calibrated coefficients rather than the
+ * codec's all-zero coefficient bank.
+ */
+static const u8 puffin_ext_speaker_biquad[] = {
+	122, 248, 206, 133, 7, 50, 122, 248, 206, 83, 31, 201, 202, 4, 191,
+	87, 14, 180, 168, 241, 76, 87, 14, 180, 83, 31, 201, 202, 4, 191,
+	127, 255, 255, 128, 49, 110, 127, 162, 193, 127, 206, 146, 128,
+	93, 63, 127, 116, 152, 128, 139, 104, 127, 116, 152, 127, 116, 1,
+	129, 21, 161, 3, 238, 235, 3, 238, 235, 3, 238, 235, 83, 31, 201,
+	202, 4, 191, 3, 238, 235, 3, 238, 235, 3, 238, 235, 83, 31, 201,
+	202, 4, 191, 127, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	127, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 198
+};
+
 #define BIQUAD_SETTINGS_REGS_SIZE \
 	(sizeof(biquad_settings_regs)/sizeof(struct aic32x4_configs))
+#endif
 
 static bool aic32x4_volatile(struct device *dev, unsigned int reg)
 {
@@ -263,6 +302,7 @@ static bool aic32x4_volatile(struct device *dev, unsigned int reg)
 	return false;
 }
 
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 static int aic32x4_biquad_coeff_get(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
@@ -316,65 +356,129 @@ static int snd_soc_put_enum_double_wrapper(struct snd_kcontrol *kcontrol,
 
 	return snd_soc_put_enum_double(kcontrol, ucontrol);
 }
+#endif
+
+static int aic32x4_fail_closed(struct snd_soc_codec *codec,
+				       int original_error)
+{
+	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
+	int cleanup_ret;
+
+	cleanup_ret = snd_soc_component_write(&codec->component,
+					      AIC32X4_DOUTCTL,
+					      MFP2_GPIO_ENABLE |
+					      MFP2_GPIO_HI);
+	if (cleanup_ret < 0)
+		dev_err(codec->dev, "failed to reassert MFP2 mute: %d\n",
+			cleanup_ret);
+	else
+		aic32x4->mfp_amp_muted = true;
+
+	cleanup_ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_DACMUTE,
+						    AIC32X4_MUTEON,
+						    AIC32X4_MUTEON);
+	if (cleanup_ret < 0)
+		dev_err(codec->dev, "failed to reassert DAC mute: %d\n",
+			cleanup_ret);
+	else
+		aic32x4->unmuted = false;
+
+	return original_error;
+}
 
 static int aic32x4_apply_mute(struct snd_soc_codec *codec, int mute)
 {
 	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
-	u8 unmute_state, prog_gain, ref_gain;
+	unsigned int unmute_state;
+	unsigned int prog_gain = 0;
+	unsigned int gain_ready_mask;
+	int ret;
 	int i = 0;
 
 	dev_dbg(codec->dev, "%s:+ mute=%d\n", __func__, mute);
 
-	unmute_state = snd_soc_read(codec, AIC32X4_DACMUTE) & ~AIC32X4_MUTEON;
-	prog_gain = snd_soc_read(codec, AIC32X4_GAIN_APPLIED);
+	/* Assert the physical amplifier mute before every fallible read. */
+	ret = snd_soc_component_write(&codec->component, AIC32X4_DOUTCTL,
+				      MFP2_GPIO_ENABLE | MFP2_GPIO_HI);
+	if (ret < 0)
+		return aic32x4_fail_closed(codec, ret);
+	aic32x4->mfp_amp_muted = true;
+
+	ret = snd_soc_component_read(&codec->component, AIC32X4_DACMUTE,
+				     &unmute_state);
+	if (ret < 0)
+		return aic32x4_fail_closed(codec, ret);
+	unmute_state &= ~AIC32X4_MUTEON;
 
 	if (mute) {
-		if (aic32x4->mfp_amp_muted == false) {
-			/* DEE-43236: Device reboots if Amp is unmute */
-			/* Need to Mute AMP connected to MFP2 first */
-			snd_soc_write(codec, AIC32X4_DOUTCTL,
-				MFP2_GPIO_ENABLE|MFP2_GPIO_HI);
-			aic32x4->mfp_amp_muted = true;
-		}
-		snd_soc_write(codec, AIC32X4_DACMUTE,
-			unmute_state | AIC32X4_MUTEON);
-	} else {
-		if (aic32x4->channels == 1) {
-			/* For mono, check HP Driver only for one channel
-			 * and unmute one channel too
-			 */
-			unmute_state |= AIC32X4_UNMUTE_MONO;
-			ref_gain = DAC_GAIN_MONO_APPLIED;
-		} else {
-			ref_gain = DAC_GAIN_STEREO_APPLIED;
-		}
-
-		if (aic32x4->ignore_ramp == false) {
-			/* Before unmuting wait for DAC gain to reach applied
-			 * level. Not doing so will cause a pop. It can take
-			 * upto 2sec. Limit the wait by a counter.
-			 */
-			while (prog_gain < ref_gain && i < 22) {
-				/* wait for applied gain to reduce Pop */
-				prog_gain = snd_soc_read(codec,
-						AIC32X4_GAIN_APPLIED);
-				mdelay(100);
-				i++;
-			}
-		}
-
-		/* Unnmute required number of channels */
-		snd_soc_write(codec, AIC32X4_DACMUTE, unmute_state);
+		ret = snd_soc_component_write(&codec->component, AIC32X4_DACMUTE,
+					      unmute_state | AIC32X4_MUTEON);
+		if (ret < 0)
+			return aic32x4_fail_closed(codec, ret);
+		aic32x4->unmuted = false;
+		return 0;
 	}
-	/* Store device current status */
-	aic32x4->unmuted = !mute;
 
-	dev_info(codec->dev, "%s: Playback_Audio amp_mute=%d codec_unmute=%d prog_gain=%x i=%d\n",
-		__func__, aic32x4->mfp_amp_muted, aic32x4->unmuted, prog_gain, i);
+	ret = snd_soc_component_read(&codec->component, AIC32X4_GAIN_APPLIED,
+				     &prog_gain);
+	if (ret < 0)
+		return aic32x4_fail_closed(codec, ret);
 
+	if (aic32x4->channels == 1) {
+		unmute_state |= AIC32X4_UNMUTE_MONO;
+		gain_ready_mask = DAC_GAIN_MONO_APPLIED;
+	} else {
+		gain_ready_mask = DAC_GAIN_STEREO_APPLIED;
+	}
+
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	if (aic32x4->ignore_ramp)
+		prog_gain = gain_ready_mask;
+#endif
+	while ((prog_gain & gain_ready_mask) != gain_ready_mask && i < 22) {
+		msleep(100);
+		ret = snd_soc_component_read(&codec->component,
+					     AIC32X4_GAIN_APPLIED,
+					     &prog_gain);
+		if (ret < 0)
+			return aic32x4_fail_closed(codec, ret);
+		i++;
+	}
+	if ((prog_gain & gain_ready_mask) != gain_ready_mask)
+		/*
+		 * Some Echo firmware/codec revisions do not expose the applied
+		 * gain bits reliably.  The physical amplifier is still muted at
+		 * this point, so preserve the original bounded-wait behaviour and
+		 * unmute the DAC rather than fail closed permanently.  Failing here
+		 * leaves every normal PCM stream silent even though the ASoC
+		 * transfer itself is healthy.
+		 */
+		dev_warn(codec->dev,
+			 "DAC gain-applied timeout (state=%x mask=%x); continuing unmute\n",
+			 prog_gain, gain_ready_mask);
+
+	ret = snd_soc_component_write(&codec->component, AIC32X4_DACMUTE,
+				      unmute_state);
+	if (ret < 0)
+		return aic32x4_fail_closed(codec, ret);
+
+	/* Release MFP2 only after the DAC is successfully unmuted. */
+	ret = snd_soc_component_write(&codec->component, AIC32X4_DOUTCTL,
+				      MFP2_GPIO_ENABLE);
+	if (ret < 0)
+		return aic32x4_fail_closed(codec, ret);
+	aic32x4->mfp_amp_muted = false;
+	aic32x4->unmuted = true;
+
+	dev_info(codec->dev,
+		 "%s: Playback_Audio amp_mute=%d codec_unmute=%d prog_gain=%x i=%d\n",
+		 __func__, aic32x4->mfp_amp_muted, aic32x4->unmuted,
+		 prog_gain, i);
 	return 0;
 }
 
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 static int put_right_ch_enab_only(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
@@ -386,7 +490,7 @@ static int put_right_ch_enab_only(struct snd_kcontrol *kcontrol,
 		__func__, ucontrol->value.enumerated.item[0], aic32x4->channels,
 		aic32x4->unmuted);
 
-	if (ucontrol->value.enumerated.item[0] >
+	if (ucontrol->value.enumerated.item[0] >=
 		ARRAY_SIZE(control_enable)) {
 		pr_err("%s: Mono Channel Settings Invalid value=%d\n", __func__,
 			ucontrol->value.enumerated.item[0]);
@@ -402,7 +506,7 @@ static int put_right_ch_enab_only(struct snd_kcontrol *kcontrol,
 	 * apply unmute to correct number of channels
 	 */
 	if (prev_channels != aic32x4->channels && aic32x4->unmuted)
-		aic32x4_apply_mute(codec, 0);
+		return aic32x4_apply_mute(codec, 0);
 
 	return 0;
 }
@@ -429,11 +533,12 @@ static int set_ignore_ramp(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
 	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
+	int ret;
 
 	dev_info(codec->dev, "%s ignore_set=%d previous_value=%d\n", __func__,
 		ucontrol->value.enumerated.item[0], aic32x4->ignore_ramp);
 
-	if (ucontrol->value.enumerated.item[0] >
+	if (ucontrol->value.enumerated.item[0] >=
 		ARRAY_SIZE(control_enable)) {
 		pr_err("%s: Ignore Ramp value Invalid. Value=%d\n", __func__,
 			ucontrol->value.enumerated.item[0]);
@@ -442,12 +547,16 @@ static int set_ignore_ramp(struct snd_kcontrol *kcontrol,
 
 	if (ucontrol->value.enumerated.item[0]) {
 		/* Headphone Driver Startup Control */
-		snd_soc_write(codec, AIC32X4_HEADSTART,
+		ret = snd_soc_write(codec, AIC32X4_HEADSTART,
 			HP_AMP_STARTUP_DELAY_DISABLED);
+		if (ret)
+			return ret;
 		aic32x4->ignore_ramp = true;
 	} else {
-		snd_soc_write(codec, AIC32X4_HEADSTART,
+		ret = snd_soc_write(codec, AIC32X4_HEADSTART,
 			HP_AMP_SOFT_ROUTE_STARTUP_DELAY);
+		if (ret)
+			return ret;
 		aic32x4->ignore_ramp = false;
 	}
 
@@ -473,8 +582,9 @@ static int set_mfp_mute_enable(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
 	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
+	int ret;
 
-	if (ucontrol->value.enumerated.item[0] >
+	if (ucontrol->value.enumerated.item[0] >=
 		ARRAY_SIZE(control_enable)) {
 		pr_err("%s: MFP Gpio Mute. Invalid value=%d\n", __func__,
 			ucontrol->value.enumerated.item[0]);
@@ -483,12 +593,20 @@ static int set_mfp_mute_enable(struct snd_kcontrol *kcontrol,
 
 	if (ucontrol->value.enumerated.item[0]) {
 		/* Mute AMP connected to MFP2 */
-		snd_soc_write(codec, AIC32X4_DOUTCTL,
+		ret = snd_soc_write(codec, AIC32X4_DOUTCTL,
 			MFP2_GPIO_ENABLE|MFP2_GPIO_HI);
+		if (ret)
+			return ret;
 		aic32x4->mfp_amp_muted = true;
 	} else {
 		/* Unmute AMP connected to MFP2 */
-		snd_soc_write(codec, AIC32X4_DOUTCTL, MFP2_GPIO_ENABLE);
+		ret = snd_soc_write(codec, AIC32X4_DOUTCTL, MFP2_GPIO_ENABLE);
+		if (ret) {
+			snd_soc_write(codec, AIC32X4_DOUTCTL,
+				      MFP2_GPIO_ENABLE|MFP2_GPIO_HI);
+			aic32x4->mfp_amp_muted = true;
+			return ret;
+		}
 		aic32x4->mfp_amp_muted = false;
 	}
 
@@ -514,8 +632,14 @@ static int get_mfp_mute_enable(struct snd_kcontrol *kcontrol,
 
 	return 0;
 }
+#endif
 
-
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+static const struct snd_kcontrol_new aic32x4_speaker_snd_controls[] = {
+	SOC_DOUBLE_R_S_TLV("PCM Playback Volume", AIC32X4_LDACVOL,
+			AIC32X4_RDACVOL, 0, -0x7f, 0x30, 7, 0, tlv_pcm)
+};
+#else
 static const struct snd_kcontrol_new aic32x4_snd_controls[] = {
 	SOC_DOUBLE_R_S_TLV("PCM Playback Volume", AIC32X4_LDACVOL,
 			AIC32X4_RDACVOL, 0, -0x7f, 0x30, 7, 0, tlv_pcm),
@@ -583,7 +707,14 @@ static const struct snd_kcontrol_new aic32x4_snd_controls[] = {
 	SOC_ENUM_EXT("MFP Gpio Mute", aic32x4_mfp_mute_enable_enum,
 		get_mfp_mute_enable, set_mfp_mute_enable)
 };
+#endif
 
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+static const struct aic32x4_speaker_rate_divs aic32x4_speaker_divs[] = {
+	{AIC32X4_FREQ_9600000, 48000, 5, 48, 0, 128, 5, 3, 1},
+};
+#define AIC32X4_ACTIVE_DIVS aic32x4_speaker_divs
+#else
 static const struct aic32x4_rate_divs aic32x4_divs[] = {
 	/* 8k rate */
 	{AIC32X4_FREQ_12000000, 8000, 1, 7, 6800, 768, 5, 3, 128, 5, 18, 24},
@@ -614,10 +745,32 @@ static const struct aic32x4_rate_divs aic32x4_divs[] = {
 	{AIC32X4_FREQ_24576000, 48000, 0, 0,    0, 128, 1, 4, 128, 1, 4, 0},
 	{AIC32X4_FREQ_25000000, 48000, 2, 7, 8643, 128, 8, 2, 64, 8, 4, 4},
 };
+#define AIC32X4_ACTIVE_DIVS aic32x4_divs
+#endif
 
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+static const struct snd_soc_dapm_widget aic32x4_speaker_dapm_widgets[] = {
+	SND_SOC_DAPM_DAC("Right DAC", "Playback", AIC32X4_DACSETUP, 6, 0),
+	SND_SOC_DAPM_PGA("HPR DAC Route", AIC32X4_HPRROUTE, 3, 0,
+			 NULL, 0),
+	SND_SOC_DAPM_PGA("HPR Power", AIC32X4_OUTPWRCTL, 4, 0, NULL, 0),
+	SND_SOC_DAPM_OUTPUT("HPR"),
+};
+
+static const struct snd_soc_dapm_route aic32x4_speaker_dapm_routes[] = {
+	{"HPR DAC Route", NULL, "Right DAC"},
+	{"HPR Power", NULL, "HPR DAC Route"},
+	{"HPR", NULL, "HPR Power"},
+};
+#else
 static const struct snd_kcontrol_new hpl_output_mixer_controls[] = {
 	SOC_DAPM_SINGLE("L_DAC Switch", AIC32X4_HPLROUTE, 3, 1, 0),
 	SOC_DAPM_SINGLE("IN1_L Switch", AIC32X4_HPLROUTE, 2, 1, 0),
+};
+
+static const struct snd_kcontrol_new hpr_output_mixer_controls[] = {
+	SOC_DAPM_SINGLE("R_DAC Switch", AIC32X4_HPRROUTE, 3, 1, 0),
+	SOC_DAPM_SINGLE("IN1_R Switch", AIC32X4_HPRROUTE, 2, 1, 0),
 };
 
 static const struct snd_kcontrol_new lol_output_mixer_controls[] = {
@@ -653,8 +806,9 @@ static const struct snd_soc_dapm_widget aic32x4_dapm_widgets[] = {
 	SND_SOC_DAPM_PGA("LOL Power", AIC32X4_OUTPWRCTL, 3, 0, NULL, 0),
 
 	SND_SOC_DAPM_DAC("Right DAC", "Playback", AIC32X4_DACSETUP, 6, 0),
-	/* The Echo tweeter is a fixed right-DAC-to-HPR path. */
-	SND_SOC_DAPM_PGA("HPR DAC Route", AIC32X4_HPRROUTE, 3, 0, NULL, 0),
+	SND_SOC_DAPM_MIXER("HPR Output Mixer", SND_SOC_NOPM, 0, 0,
+			   &hpr_output_mixer_controls[0],
+			   ARRAY_SIZE(hpr_output_mixer_controls)),
 	SND_SOC_DAPM_PGA("HPR Power", AIC32X4_OUTPWRCTL, 4, 0, NULL, 0),
 	SND_SOC_DAPM_MIXER("LOR Output Mixer", SND_SOC_NOPM, 0, 0,
 			   &lor_output_mixer_controls[0],
@@ -696,8 +850,10 @@ static const struct snd_soc_dapm_route aic32x4_dapm_routes[] = {
 	{"LOL", NULL, "LOL Power"},
 
 	/* Right Output */
-	{"HPR DAC Route", NULL, "Right DAC"},
-	{"HPR Power", NULL, "HPR DAC Route"},
+	{"HPR Output Mixer", "R_DAC Switch", "Right DAC"},
+	{"HPR Output Mixer", "IN1_R Switch", "IN1_R"},
+
+	{"HPR Power", NULL, "HPR Output Mixer"},
 	{"HPR", NULL, "HPR Power"},
 
 	{"LOR Output Mixer", "R_DAC Switch", "Right DAC"},
@@ -719,6 +875,7 @@ static const struct snd_soc_dapm_route aic32x4_dapm_routes[] = {
 
 	{"Right ADC", NULL, "Right Input Mixer"},
 };
+#endif
 
 static const struct regmap_range_cfg aic32x4_regmap_pages[] = {
 	{
@@ -744,9 +901,9 @@ static inline int aic32x4_get_divs(int mclk, int rate)
 {
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(aic32x4_divs); i++) {
-		if ((aic32x4_divs[i].rate == rate)
-		    && (aic32x4_divs[i].mclk == mclk)) {
+	for (i = 0; i < ARRAY_SIZE(AIC32X4_ACTIVE_DIVS); i++) {
+		if ((AIC32X4_ACTIVE_DIVS[i].rate == rate)
+		    && (AIC32X4_ACTIVE_DIVS[i].mclk == mclk)) {
 			return i;
 		}
 	}
@@ -761,6 +918,15 @@ static int aic32x4_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 	struct snd_soc_codec *codec = codec_dai->codec;
 	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
 
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	if (freq != AIC32X4_FREQ_9600000) {
+		dev_err(codec->dev, "speaker MCLK must be 9.6 MHz, got %u\n",
+			freq);
+		return -EINVAL;
+	}
+	aic32x4->sysclk = freq;
+	return 0;
+#else
 	switch (freq) {
 	case AIC32X4_FREQ_9600000:
 	case AIC32X4_FREQ_12000000:
@@ -773,22 +939,29 @@ static int aic32x4_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 	pr_err("aic32x4:%s invalid frequency %u to set DAI system clock\n",
 		__func__, freq);
 	return -EINVAL;
+#endif
 }
 
 static int aic32x4_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 {
 	struct snd_soc_codec *codec = codec_dai->codec;
-	u8 iface_reg_1;
-	u8 iface_reg_2;
-	u8 iface_reg_3;
+	unsigned int iface_reg_1;
+	unsigned int iface_reg_3;
+	unsigned int iface_reg_2 = 0;
+	int ret;
 
 	dev_dbg(codec->dev, "%s: dai fmt\n", __func__);
 
-	iface_reg_1 = snd_soc_read(codec, AIC32X4_IFACE1);
-	iface_reg_1 = iface_reg_1 & ~(3 << 6 | 3 << 2);
-	iface_reg_2 = 0;
-	iface_reg_3 = snd_soc_read(codec, AIC32X4_IFACE3);
-	iface_reg_3 = iface_reg_3 & ~(1 << 3);
+	ret = snd_soc_component_read(&codec->component, AIC32X4_IFACE1,
+				     &iface_reg_1);
+	if (ret < 0)
+		return ret;
+	iface_reg_1 &= ~(3U << 6 | 3U << 2);
+	ret = snd_soc_component_read(&codec->component, AIC32X4_IFACE3,
+				     &iface_reg_3);
+	if (ret < 0)
+		return ret;
+	iface_reg_3 &= ~(1U << 3);
 
 	/* set master/slave audio interface */
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
@@ -796,7 +969,7 @@ static int aic32x4_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 		iface_reg_1 |= AIC32X4_BCLKMASTER | AIC32X4_WCLKMASTER;
 		break;
 	case SND_SOC_DAIFMT_CBS_CFS:
-			iface_reg_3 |= AIC32X4_DACMOD2BCLK;
+		iface_reg_3 |= AIC32X4_DACMOD2BCLK;
 		break;
 	default:
 		pr_err("aic32x4:%s: invalid DAI master/slave interface\n",
@@ -809,12 +982,12 @@ static int aic32x4_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
 		iface_reg_1 |= (AIC32X4_DSP_MODE << AIC32X4_PLLJ_SHIFT);
-		iface_reg_3 |= (1 << 3); /* invert bit clock */
-		iface_reg_2 = 0x01; /* add offset 1 */
+		iface_reg_3 |= (1U << 3);
+		iface_reg_2 = 0x01;
 		break;
 	case SND_SOC_DAIFMT_DSP_B:
 		iface_reg_1 |= (AIC32X4_DSP_MODE << AIC32X4_PLLJ_SHIFT);
-		iface_reg_3 |= (1 << 3); /* invert bit clock */
+		iface_reg_3 |= (1U << 3);
 		break;
 	case SND_SOC_DAIFMT_RIGHT_J:
 		iface_reg_1 |=
@@ -829,16 +1002,155 @@ static int aic32x4_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 		return -EINVAL;
 	}
 
-	snd_soc_write(codec, AIC32X4_IFACE1, iface_reg_1);
-	snd_soc_write(codec, AIC32X4_IFACE2, iface_reg_2);
-	snd_soc_write(codec, AIC32X4_IFACE3, iface_reg_3);
+	ret = snd_soc_component_write(&codec->component, AIC32X4_IFACE1,
+				      iface_reg_1);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_IFACE2,
+				      iface_reg_2);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_IFACE3,
+				      iface_reg_3);
+	if (ret < 0)
+		return ret;
 	return 0;
 }
+
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+static int aic32x4_speaker_hw_params(struct snd_pcm_substream *substream,
+					struct snd_pcm_hw_params *params,
+					struct snd_soc_dai *dai)
+{
+	struct snd_soc_codec *codec = dai->codec;
+	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
+	const struct aic32x4_speaker_rate_divs *div;
+	unsigned int iface;
+	unsigned int dac_setup;
+	int index;
+	int ret;
+	int j;
+
+	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK ||
+	    params_rate(params) != 48000 ||
+	    params_channels(params) != 1 ||
+	    params_format(params) != SNDRV_PCM_FORMAT_S16_LE)
+		return -EINVAL;
+
+	index = aic32x4_get_divs(aic32x4->sysclk, params_rate(params));
+	if (index < 0)
+		return index;
+	div = &AIC32X4_ACTIVE_DIVS[index];
+
+	/* Keep the physical amplifier muted for the whole configuration. */
+	ret = snd_soc_component_write(&codec->component, AIC32X4_DOUTCTL,
+				      MFP2_GPIO_ENABLE | MFP2_GPIO_HI);
+	if (ret < 0)
+		return aic32x4_fail_closed(codec, ret);
+	aic32x4->mfp_amp_muted = true;
+
+	ret = snd_soc_component_update_bits(&codec->component, AIC32X4_HPRGAIN,
+						    HP_DRIVER_MUTE_MUX,
+						    HP_DRIVER_MUTE);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_CLKMUX,
+				      AIC32X4_PLLCLKIN);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_PLLPR,
+				      (div->p_val << 4) | 0x01 | AIC32X4_PLLEN);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_PLLJ,
+				      div->pll_j);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_PLLDMSB,
+				      div->pll_d >> 8);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_PLLDLSB,
+				      div->pll_d & 0xff);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_NDAC,
+				      div->ndac | AIC32X4_NDACEN);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_MDAC,
+				      div->mdac | AIC32X4_MDACEN);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_DOSRMSB,
+				      div->dosr >> 8);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_DOSRLSB,
+				      div->dosr & 0xff);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_BCLKN,
+				      div->blck_N | AIC32X4_BCLKEN);
+	if (ret < 0)
+		goto fail_closed;
+
+	ret = snd_soc_component_read(&codec->component, AIC32X4_IFACE1,
+				     &iface);
+	if (ret < 0)
+		goto fail_closed;
+	iface &= ~(3U << 4);
+	ret = snd_soc_component_write(&codec->component, AIC32X4_IFACE1,
+				      iface);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_DACSPB, 0x2);
+	if (ret < 0)
+		goto fail_closed;
+	for (j = 0; j < ARRAY_SIZE(biquad_Play_abh123); j++) {
+		ret = snd_soc_component_write(&codec->component,
+					      biquad_Play_abh123[j].reg_offset,
+					      biquad_Play_abh123[j].reg_val);
+		if (ret < 0)
+			goto fail_closed;
+	}
+	ret = snd_soc_component_write(&codec->component, AIC32X4_HEADSTART,
+				      HP_AMP_SOFT_ROUTE_STARTUP_DELAY);
+	if (ret < 0)
+		goto fail_closed;
+
+	dac_setup = AIC32X4_RDAC2RCHN | AIC32X4_LDAC2RCHN |
+		    AIC32X4_DAC_DEFAULT_SOFT_STEPPING;
+	ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_DACSETUP,
+						    AIC32X4_DAC_CHAN_MASK |
+						    AIC32X4_DAC_SOFT_STEPPING_MASK,
+						    dac_setup);
+	if (ret < 0)
+		goto fail_closed;
+	ret = snd_soc_component_update_bits(&codec->component, AIC32X4_HPRGAIN,
+						    HP_DRIVER_MUTE_MUX,
+						    HP_DRIVER_UNMUTE);
+	if (ret < 0)
+		goto fail_closed;
+
+	/* Commit stream-derived state only after every register operation. */
+	aic32x4->rate_divs_index = index;
+	aic32x4->channels = 1;
+	return 0;
+
+fail_closed:
+	return aic32x4_fail_closed(codec, ret);
+}
+#endif
 
 static int aic32x4_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params,
 			     struct snd_soc_dai *dai)
 {
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	return aic32x4_speaker_hw_params(substream, params, dai);
+#else
 	struct snd_soc_codec *codec = dai->codec;
 	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
 	u8 data;
@@ -865,51 +1177,53 @@ static int aic32x4_hw_params(struct snd_pcm_substream *substream,
 	snd_soc_update_bits(codec, AIC32X4_HPRGAIN, HP_DRIVER_MUTE_MUX,
 		HP_DRIVER_MUTE);
 
-	if (aic32x4_divs[i].p_val) {
+	if (AIC32X4_ACTIVE_DIVS[i].p_val) {
 		/* Use PLL as CODEC_CLKIN */
 		snd_soc_write(codec, AIC32X4_CLKMUX, AIC32X4_PLLCLKIN);
 
 		/* We will fix R = 1 and will make P & J=K.D as varialble */
 		snd_soc_write(codec, AIC32X4_PLLPR,
-			((aic32x4_divs[i].p_val << 4) | 0x01 | AIC32X4_PLLEN));
+			((AIC32X4_ACTIVE_DIVS[i].p_val << 4) | 0x01 | AIC32X4_PLLEN));
 
-		snd_soc_write(codec, AIC32X4_PLLJ, aic32x4_divs[i].pll_j);
+		snd_soc_write(codec, AIC32X4_PLLJ, AIC32X4_ACTIVE_DIVS[i].pll_j);
 
 		snd_soc_write(codec, AIC32X4_PLLDMSB,
-			(aic32x4_divs[i].pll_d >> 8));
+			(AIC32X4_ACTIVE_DIVS[i].pll_d >> 8));
 		snd_soc_write(codec, AIC32X4_PLLDLSB,
-			(aic32x4_divs[i].pll_d & 0xff));
+			(AIC32X4_ACTIVE_DIVS[i].pll_d & 0xff));
 	}
 
 	/* NDAC divider value */
 	snd_soc_write(codec, AIC32X4_NDAC,
-		aic32x4_divs[i].ndac | AIC32X4_NDACEN);
+		AIC32X4_ACTIVE_DIVS[i].ndac | AIC32X4_NDACEN);
 
 	/* MDAC divider value */
 	snd_soc_write(codec, AIC32X4_MDAC,
-		aic32x4_divs[i].mdac | AIC32X4_MDACEN);
+		AIC32X4_ACTIVE_DIVS[i].mdac | AIC32X4_MDACEN);
 
 	/* DOSR MSB & LSB values */
-	snd_soc_write(codec, AIC32X4_DOSRMSB, aic32x4_divs[i].dosr >> 8);
-	snd_soc_write(codec, AIC32X4_DOSRLSB, (aic32x4_divs[i].dosr & 0xff));
+	snd_soc_write(codec, AIC32X4_DOSRMSB, AIC32X4_ACTIVE_DIVS[i].dosr >> 8);
+	snd_soc_write(codec, AIC32X4_DOSRLSB, (AIC32X4_ACTIVE_DIVS[i].dosr & 0xff));
 
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 	/* NADC divider value */
 	data = snd_soc_read(codec, AIC32X4_NADC);
 	data &= ~(0x7f);
-	snd_soc_write(codec, AIC32X4_NADC, data | aic32x4_divs[i].nadc);
+	snd_soc_write(codec, AIC32X4_NADC, data | AIC32X4_ACTIVE_DIVS[i].nadc);
 
 	/* MADC divider value */
 	data = snd_soc_read(codec, AIC32X4_MADC);
 	data &= ~(0x7f);
-	snd_soc_write(codec, AIC32X4_MADC, data | aic32x4_divs[i].madc);
+	snd_soc_write(codec, AIC32X4_MADC, data | AIC32X4_ACTIVE_DIVS[i].madc);
 
 	/* AOSR value */
-	snd_soc_write(codec, AIC32X4_AOSR, aic32x4_divs[i].aosr);
+	snd_soc_write(codec, AIC32X4_AOSR, AIC32X4_ACTIVE_DIVS[i].aosr);
+#endif
 
-	if (aic32x4_divs[i].blck_N) {
+	if (AIC32X4_ACTIVE_DIVS[i].blck_N) {
 		/* Set and Enable BCLK N divider */
 		snd_soc_write(codec, AIC32X4_BCLKN,
-			aic32x4_divs[i].blck_N | AIC32X4_BCLKEN);
+			AIC32X4_ACTIVE_DIVS[i].blck_N | AIC32X4_BCLKEN);
 	}
 
 	data = snd_soc_read(codec, AIC32X4_IFACE1);
@@ -941,14 +1255,19 @@ static int aic32x4_hw_params(struct snd_pcm_substream *substream,
 	/* Set the signal processing block (PRB) modes */
 	snd_soc_write(codec, AIC32X4_DACSPB, 0x2);
 
-	/* Program the biquads and DRC */
-	pConfigRegs = biquad_Play_abh123;
-	size = ARRAY_SIZE(biquad_Play_abh123);
+	/* Program the active board profile, followed by its DRC mode. */
+	pConfigRegs = biquad_settings_regs;
+	size = ARRAY_SIZE(biquad_settings_regs);
 	for (j = 0; j < size; j++) {
 		/* Get the register offset and value */
 		snd_soc_write(codec,
 			pConfigRegs[j].reg_offset, pConfigRegs[j].reg_val);
 	}
+	pConfigRegs = biquad_Play_abh123;
+	size = ARRAY_SIZE(biquad_Play_abh123);
+	for (j = 0; j < size; j++)
+		snd_soc_write(codec,
+			pConfigRegs[j].reg_offset, pConfigRegs[j].reg_val);
 
 	/* Headphone Driver Startup Control if output ramping is enabled */
 	if (aic32x4->ignore_ramp)
@@ -977,6 +1296,7 @@ static int aic32x4_hw_params(struct snd_pcm_substream *substream,
 	dev_dbg(codec->dev, "%s-\n", __func__);
 
 	return 0;
+#endif
 }
 
 static int aic32x4_mute(struct snd_soc_dai *dai, int mute)
@@ -988,79 +1308,118 @@ static int aic32x4_set_bias_level(struct snd_soc_codec *codec,
 				  enum snd_soc_bias_level level)
 {
 	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
-	int ret = 0;
+	int first = 0;
+	int ret;
 
 	dev_info(codec->dev, "%s bias=%d\n", __func__, level);
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
-		/* Switch on master clock */
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 		ret = clk_prepare_enable(aic32x4->mclk);
-		if (ret)
+		if (ret < 0) {
 			dev_err(codec->dev, "Failed to enable master clock\n");
-
-		/* Switch on PLL */
-		if (aic32x4_divs[aic32x4->rate_divs_index].p_val)
-			snd_soc_update_bits(codec, AIC32X4_PLLPR,
-				AIC32X4_PLLEN, AIC32X4_PLLEN);
-
-		/* Switch on NDAC Divider */
-		snd_soc_update_bits(codec, AIC32X4_NDAC,
-				    AIC32X4_NDACEN, AIC32X4_NDACEN);
-
-		/* Switch on MDAC Divider */
-		snd_soc_update_bits(codec, AIC32X4_MDAC,
-				    AIC32X4_MDACEN, AIC32X4_MDACEN);
-
-		/* Switch on NADC Divider */
-		snd_soc_update_bits(codec, AIC32X4_NADC,
-				    AIC32X4_NADCEN, AIC32X4_NADCEN);
-
-		/* Switch on MADC Divider */
-		snd_soc_update_bits(codec, AIC32X4_MADC,
-				    AIC32X4_MADCEN, AIC32X4_MADCEN);
-
-		/* Switch on BCLK_N Divider */
-		if (aic32x4_divs[aic32x4->rate_divs_index].blck_N)
-			snd_soc_update_bits(codec, AIC32X4_BCLKN,
-				AIC32X4_BCLKEN, AIC32X4_BCLKEN);
+			return ret;
+		}
+#endif
+		if (AIC32X4_ACTIVE_DIVS[aic32x4->rate_divs_index].p_val) {
+			ret = snd_soc_component_update_bits(&codec->component,
+							    AIC32X4_PLLPR,
+							    AIC32X4_PLLEN,
+							    AIC32X4_PLLEN);
+			if (ret < 0)
+				goto enable_error;
+		}
+		ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_NDAC,
+						    AIC32X4_NDACEN,
+						    AIC32X4_NDACEN);
+		if (ret < 0)
+			goto enable_error;
+		ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_MDAC,
+						    AIC32X4_MDACEN,
+						    AIC32X4_MDACEN);
+		if (ret < 0)
+			goto enable_error;
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+		ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_NADC,
+						    AIC32X4_NADCEN,
+						    AIC32X4_NADCEN);
+		if (ret < 0)
+			goto enable_error;
+		ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_MADC,
+						    AIC32X4_MADCEN,
+						    AIC32X4_MADCEN);
+		if (ret < 0)
+			goto enable_error;
+#endif
+		if (AIC32X4_ACTIVE_DIVS[aic32x4->rate_divs_index].blck_N) {
+			ret = snd_soc_component_update_bits(&codec->component,
+							    AIC32X4_BCLKN,
+							    AIC32X4_BCLKEN,
+							    AIC32X4_BCLKEN);
+			if (ret < 0)
+				goto enable_error;
+		}
 		break;
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		/* Switch off BCLK_N Divider */
-		if (aic32x4_divs[aic32x4->rate_divs_index].blck_N)
-			snd_soc_update_bits(codec, AIC32X4_BCLKN,
-				AIC32X4_BCLKEN, 0);
-
-		/* Switch off MADC Divider */
-		snd_soc_update_bits(codec, AIC32X4_MADC,
-				    AIC32X4_MADCEN, 0);
-
-		/* Switch off NADC Divider */
-		snd_soc_update_bits(codec, AIC32X4_NADC,
-				    AIC32X4_NADCEN, 0);
-
-		/* Switch off MDAC Divider */
-		snd_soc_update_bits(codec, AIC32X4_MDAC,
-				    AIC32X4_MDACEN, 0);
-
-		/* Switch off NDAC Divider */
-		snd_soc_update_bits(codec, AIC32X4_NDAC,
-				    AIC32X4_NDACEN, 0);
-
-		/* Switch off PLL */
-		if (aic32x4_divs[aic32x4->rate_divs_index].p_val)
-			snd_soc_update_bits(codec, AIC32X4_PLLPR,
-				AIC32X4_PLLEN, 0);
-
-		/* Switch off master clock */
+		if (AIC32X4_ACTIVE_DIVS[aic32x4->rate_divs_index].blck_N) {
+			ret = snd_soc_component_update_bits(&codec->component,
+							    AIC32X4_BCLKN,
+							    AIC32X4_BCLKEN, 0);
+			if (ret < 0)
+				first = ret;
+		}
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+		ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_MADC,
+						    AIC32X4_MADCEN, 0);
+		if (ret < 0 && !first)
+			first = ret;
+		ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_NADC,
+						    AIC32X4_NADCEN, 0);
+		if (ret < 0 && !first)
+			first = ret;
+#endif
+		ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_MDAC,
+						    AIC32X4_MDACEN, 0);
+		if (ret < 0 && !first)
+			first = ret;
+		ret = snd_soc_component_update_bits(&codec->component,
+						    AIC32X4_NDAC,
+						    AIC32X4_NDACEN, 0);
+		if (ret < 0 && !first)
+			first = ret;
+		if (AIC32X4_ACTIVE_DIVS[aic32x4->rate_divs_index].p_val) {
+			ret = snd_soc_component_update_bits(&codec->component,
+							    AIC32X4_PLLPR,
+							    AIC32X4_PLLEN, 0);
+			if (ret < 0 && !first)
+				first = ret;
+		}
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 		clk_disable_unprepare(aic32x4->mclk);
+#endif
+		if (first)
+			return first;
 		break;
 	case SND_SOC_BIAS_OFF:
 		break;
 	}
 	codec->dapm.bias_level = level;
+	return 0;
+
+enable_error:
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	clk_disable_unprepare(aic32x4->mclk);
+#endif
 	return ret;
 }
 
@@ -1076,6 +1435,15 @@ static const struct snd_soc_dai_ops aic32x4_ops = {
 };
 
 static struct snd_soc_dai_driver aic32x4_dai = {
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	.name = "tlv320aic32x4-hifi",
+	.playback = {
+		     .stream_name = "Playback",
+		     .channels_min = 1,
+		     .channels_max = 1,
+		     .rates = SNDRV_PCM_RATE_48000,
+		     .formats = SNDRV_PCM_FMTBIT_S16_LE,},
+#else
 	.name = "tlv320aic32x4-hifi",
 	.playback = {
 		     .stream_name = "Playback",
@@ -1089,100 +1457,159 @@ static struct snd_soc_dai_driver aic32x4_dai = {
 		    .channels_max = 2,
 		    .rates = AIC32X4_RATES,
 		    .formats = AIC32X4_FORMATS,},
+#endif
 	.ops = &aic32x4_ops,
 };
 
 static int aic32x4_suspend(struct snd_soc_codec *codec)
 {
-	aic32x4_set_bias_level(codec, SND_SOC_BIAS_OFF);
-	return 0;
+	return aic32x4_set_bias_level(codec, SND_SOC_BIAS_OFF);
 }
 
 static int aic32x4_resume(struct snd_soc_codec *codec)
 {
-	aic32x4_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
-	return 0;
+	return aic32x4_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 }
 
 static int aic32x4_probe(struct snd_soc_codec *codec)
 {
 	struct aic32x4_priv *aic32x4 = snd_soc_codec_get_drvdata(codec);
-	u32 tmp_reg;
+	unsigned int tmp_reg;
+	int i;
+	int ret;
 
 	pr_info("aic32x4: %s\n", __func__);
 
 	if (gpio_is_valid(aic32x4->rstn_gpio)) {
-		/* Hold reset down for at least 10nsec */
 		gpio_set_value(aic32x4->rstn_gpio, 0);
 		ndelay(10);
 		gpio_set_value(aic32x4->rstn_gpio, 1);
 	}
 
-	snd_soc_write(codec, AIC32X4_RESET, 0x01);
-	/* Required delay after reset */
+	ret = snd_soc_component_write(&codec->component, AIC32X4_RESET, 0x01);
+	if (ret < 0)
+		return ret;
 	mdelay(1);
 
-	/* Power platform configuration */
+	/* Establish the strongest physical mute before further codec I/O. */
+	ret = snd_soc_component_write(&codec->component, AIC32X4_DOUTCTL,
+				      MFP2_GPIO_ENABLE | MFP2_GPIO_HI);
+	if (ret < 0)
+		return ret;
+	aic32x4->mfp_amp_muted = true;
+	aic32x4->unmuted = false;
+
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	BUILD_BUG_ON(ARRAY_SIZE(puffin_ext_speaker_biquad) !=
+		     ARRAY_SIZE(biquad_settings_regs));
+	for (i = 0; i < ARRAY_SIZE(biquad_settings_regs); i++)
+		biquad_settings_regs[i].reg_val = puffin_ext_speaker_biquad[i];
+
+	/*
+	 * Match Puffin's stock mixer bootstrap: speaker audio is sourced only
+	 * from the left/right DACs through HPL/HPR.  Keep the analogue-input and
+	 * codec line-output routes disconnected.
+	 */
+	ret = snd_soc_component_update_bits(&codec->component,
+					    AIC32X4_HPLROUTE,
+					    1U << 3, 1U << 3);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_component_update_bits(&codec->component,
+					    AIC32X4_HPRROUTE,
+					    (1U << 3) | (1U << 2),
+					    1U << 3);
+	if (ret < 0)
+		return ret;
+
 	if (aic32x4->power_cfg & AIC32X4_PWR_MICBIAS_2075_LDOIN) {
-		snd_soc_write(codec, AIC32X4_MICBIAS, AIC32X4_MICBIAS_LDOIN |
-						      AIC32X4_MICBIAS_2075V);
+		ret = snd_soc_component_write(&codec->component, AIC32X4_MICBIAS,
+					      AIC32X4_MICBIAS_LDOIN |
+					      AIC32X4_MICBIAS_2075V);
+		if (ret < 0)
+			return ret;
 	}
-	if (aic32x4->power_cfg & AIC32X4_PWR_AVDD_DVDD_WEAK_DISABLE)
-		snd_soc_write(codec, AIC32X4_PWRCFG, AIC32X4_AVDDWEAKDISABLE);
+#endif
+	if (aic32x4->power_cfg & AIC32X4_PWR_AVDD_DVDD_WEAK_DISABLE) {
+		ret = snd_soc_component_write(&codec->component, AIC32X4_PWRCFG,
+					      AIC32X4_AVDDWEAKDISABLE);
+		if (ret < 0)
+			return ret;
+	}
 
 	tmp_reg = (aic32x4->power_cfg & AIC32X4_PWR_AIC32X4_LDO_ENABLE) ?
 			AIC32X4_LDOCTLEN : 0;
-	snd_soc_write(codec, AIC32X4_LDOCTL, tmp_reg);
+	ret = snd_soc_component_write(&codec->component, AIC32X4_LDOCTL,
+				      tmp_reg);
+	if (ret < 0)
+		return ret;
 
 	tmp_reg = AIC32X4_HP_CMMODE;
 	if (aic32x4->power_cfg & AIC32X4_PWR_CMMODE_LDOIN_RANGE_18_36)
 		tmp_reg |= AIC32X4_LDOIN_18_36;
 	if (aic32x4->power_cfg & AIC32X4_PWR_CMMODE_HP_LDOIN_POWERED)
 		tmp_reg |= AIC32X4_LDOIN2HP;
-	snd_soc_write(codec, AIC32X4_CMMODE, tmp_reg);
+	ret = snd_soc_component_write(&codec->component, AIC32X4_CMMODE,
+				      tmp_reg);
+	if (ret < 0)
+		return ret;
 
-	/* Mic PGA routing */
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 	if (aic32x4->micpga_routing & AIC32X4_MICPGA_ROUTE_LMIC_IN2R_10K)
-		snd_soc_write(codec, AIC32X4_LMICPGANIN,
-				AIC32X4_LMICPGANIN_IN2R_10K);
+		ret = snd_soc_component_write(&codec->component,
+					      AIC32X4_LMICPGANIN,
+					      AIC32X4_LMICPGANIN_IN2R_10K);
 	else
-		snd_soc_write(codec, AIC32X4_LMICPGANIN,
-				AIC32X4_LMICPGANIN_CM1L_10K);
+		ret = snd_soc_component_write(&codec->component,
+					      AIC32X4_LMICPGANIN,
+					      AIC32X4_LMICPGANIN_CM1L_10K);
+	if (ret < 0)
+		return ret;
 	if (aic32x4->micpga_routing & AIC32X4_MICPGA_ROUTE_RMIC_IN1L_10K)
-		snd_soc_write(codec, AIC32X4_RMICPGANIN,
-				AIC32X4_RMICPGANIN_IN1L_10K);
+		ret = snd_soc_component_write(&codec->component,
+					      AIC32X4_RMICPGANIN,
+					      AIC32X4_RMICPGANIN_IN1L_10K);
 	else
-		snd_soc_write(codec, AIC32X4_RMICPGANIN,
-				AIC32X4_RMICPGANIN_CM1R_10K);
+		ret = snd_soc_component_write(&codec->component,
+					      AIC32X4_RMICPGANIN,
+					      AIC32X4_RMICPGANIN_CM1R_10K);
+	if (ret < 0)
+		return ret;
+#endif
 
-	aic32x4_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	ret = aic32x4_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	if (ret < 0)
+		return ret;
 
-	/*
-	 * Workaround: for an unknown reason, the ADC needs to be powered up
-	 * and down for the first capture to work properly. It seems related to
-	 * a HW BUG or some kind of behavior not documented in the datasheet.
-	 */
-	tmp_reg = snd_soc_read(codec, AIC32X4_ADCSETUP);
-	snd_soc_write(codec, AIC32X4_ADCSETUP, tmp_reg |
-				AIC32X4_LADC_EN | AIC32X4_RADC_EN);
-	snd_soc_write(codec, AIC32X4_ADCSETUP, tmp_reg);
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	ret = snd_soc_component_read(&codec->component, AIC32X4_ADCSETUP,
+				     &tmp_reg);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_ADCSETUP,
+				      tmp_reg | AIC32X4_LADC_EN |
+				      AIC32X4_RADC_EN);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_ADCSETUP,
+				      tmp_reg);
+	if (ret < 0)
+		return ret;
+#endif
 
-	/* Turn MFP2 into GPIO mode and setout to High to mute AMP if present */
-	snd_soc_write(codec, AIC32X4_DOUTCTL, MFP2_GPIO_ENABLE|MFP2_GPIO_HI);
-	/* Store default state as muted */
-	aic32x4->mfp_amp_muted = true;
-	/* Disable SCLK/MFP3 */
-	snd_soc_write(codec, AIC32X4_SCLKMFP, 0);
-	/* Set the REF to 40ms */
-	snd_soc_write(codec, AIC32X4_REF_PWRUP, REF_POWERUP_DELAY);
-
+	ret = snd_soc_component_write(&codec->component, AIC32X4_SCLKMFP, 0);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_component_write(&codec->component, AIC32X4_REF_PWRUP,
+				      REF_POWERUP_DELAY);
+	if (ret < 0)
+		return ret;
 	return 0;
 }
 
 static int aic32x4_remove(struct snd_soc_codec *codec)
 {
-	aic32x4_set_bias_level(codec, SND_SOC_BIAS_OFF);
-	return 0;
+	return aic32x4_set_bias_level(codec, SND_SOC_BIAS_OFF);
 }
 
 static struct snd_soc_codec_driver soc_codec_dev_aic32x4 = {
@@ -1192,20 +1619,31 @@ static struct snd_soc_codec_driver soc_codec_dev_aic32x4 = {
 	.resume = aic32x4_resume,
 	.set_bias_level = aic32x4_set_bias_level,
 
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	.controls = aic32x4_speaker_snd_controls,
+	.num_controls = ARRAY_SIZE(aic32x4_speaker_snd_controls),
+	.dapm_widgets = aic32x4_speaker_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(aic32x4_speaker_dapm_widgets),
+	.dapm_routes = aic32x4_speaker_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(aic32x4_speaker_dapm_routes),
+#else
 	.controls = aic32x4_snd_controls,
 	.num_controls = ARRAY_SIZE(aic32x4_snd_controls),
 	.dapm_widgets = aic32x4_dapm_widgets,
 	.num_dapm_widgets = ARRAY_SIZE(aic32x4_dapm_widgets),
 	.dapm_routes = aic32x4_dapm_routes,
 	.num_dapm_routes = ARRAY_SIZE(aic32x4_dapm_routes),
+#endif
 };
 
 static int aic32x4_parse_dt(struct aic32x4_priv *aic32x4,
 		struct device_node *np)
 {
 	pr_info("aic32x4: %s\n", __func__);
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 	aic32x4->swapdacs = false;
 	aic32x4->micpga_routing = 0;
+#endif
 	aic32x4->rstn_gpio = of_get_named_gpio(np, "reset-gpios", 0);
 	aic32x4->power_cfg = AIC32X4_PWR_AVDD_DVDD_WEAK_DISABLE |
 				AIC32X4_PWR_AIC32X4_LDO_ENABLE |
@@ -1215,6 +1653,7 @@ static int aic32x4_parse_dt(struct aic32x4_priv *aic32x4,
 	return 0;
 }
 
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 static void aic32x4_disable_regulators(struct aic32x4_priv *aic32x4)
 {
 	regulator_disable(aic32x4->supply_iov);
@@ -1314,6 +1753,7 @@ error_ldo:
 	regulator_disable(aic32x4->supply_iov);
 	return ret;
 }
+#endif
 
 static int aic32x4_i2c_probe(struct i2c_client *i2c,
 			     const struct i2c_device_id *id)
@@ -1330,10 +1770,14 @@ static int aic32x4_i2c_probe(struct i2c_client *i2c,
 	if (aic32x4 == NULL)
 		return -ENOMEM;
 
-	/* Default to stereo */
+#ifdef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
+	/* The fixed speaker path is mono and has no mutable channel control. */
+	aic32x4->channels = 1;
+#else
+	/* Default to stereo and keep generic ramp controls available. */
 	aic32x4->channels = 2;
-	/* Default to not ignore ramp up time of DAC */
 	aic32x4->ignore_ramp = false;
+#endif
 
 	aic32x4->regmap = devm_regmap_init_i2c(i2c, &aic32x4_regmap);
 	if (IS_ERR(aic32x4->regmap))
@@ -1343,8 +1787,10 @@ static int aic32x4_i2c_probe(struct i2c_client *i2c,
 
 	if (pdata) {
 		aic32x4->power_cfg = pdata->power_cfg;
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 		aic32x4->swapdacs = pdata->swapdacs;
 		aic32x4->micpga_routing = pdata->micpga_routing;
+#endif
 		aic32x4->rstn_gpio = pdata->rstn_gpio;
 	} else if (np) {
 		ret = aic32x4_parse_dt(aic32x4, np);
@@ -1354,16 +1800,20 @@ static int aic32x4_i2c_probe(struct i2c_client *i2c,
 		}
 	} else {
 		aic32x4->power_cfg = 0;
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 		aic32x4->swapdacs = false;
 		aic32x4->micpga_routing = 0;
+#endif
 		aic32x4->rstn_gpio = -1;
 	}
 
+#ifndef CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER
 	aic32x4->mclk = devm_clk_get(&i2c->dev, "mclk");
 	if (IS_ERR(aic32x4->mclk)) {
 		dev_err(&i2c->dev, "Failed getting the mclk. The current implementation does not support the usage of this codec without mclk\n");
 		return PTR_ERR(aic32x4->mclk);
 	}
+#endif
 
 	if (gpio_is_valid(aic32x4->rstn_gpio)) {
 		ret = devm_gpio_request_one(&i2c->dev, aic32x4->rstn_gpio,

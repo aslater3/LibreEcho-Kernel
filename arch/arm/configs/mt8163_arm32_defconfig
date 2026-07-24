@@ -378,12 +378,13 @@ CONFIG_SND_PCM_XRUN_DEBUG=y
 # CONFIG_SND_SPI is not set
 CONFIG_SND_USB_AUDIO=y
 CONFIG_SND_SOC=y
-# The Echo board uses the Amazon machine driver and TLV codec topology from
-# the stock ARM32 DTB.  The generic MT8163 card registers an ALSA card but
-# leaves the physical speaker/microphone DAPM graph incomplete.
+# The Echo board uses the full Amazon Puffin codec/microphone topology from
+# the stock ARM32 DTB.  This keeps the 8-microphone capture links alongside
+# the HD/Puffin playback links for end-to-end validation.
 # CONFIG_MT_SND_SOC_8163 is not set
 CONFIG_MT_SND_SOC_8163_AMZN=y
 CONFIG_SND_SOC_8_MICS=y
+# CONFIG_MT_SND_SOC_8163_AMZN_SPEAKER is not set
 CONFIG_EXTRA_FIRMWARE="i2s_to_spi_v34.bin"
 CONFIG_MTK_AUDIO_USE_SHARED_SRAM=y
 CONFIG_SND_SIMPLE_CARD=y
