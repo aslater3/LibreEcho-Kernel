@@ -29,6 +29,7 @@ SPACE_DF_BLOCK_BYTES=1024
 PROC_ROOT=/proc
 CMDLINE_FILE=$PROC_ROOT/cmdline
 MOUNTINFO_FILE=$PROC_ROOT/self/mountinfo
+LOOP_SYS_ROOT=/sys/dev/block
 PROC_NET_UNIX=$PROC_ROOT/net/unix
 VAR_RUN_ROOT=/var/run
 ETC_ROOT=/etc
@@ -653,17 +654,34 @@ activate_mounts() {
 }
 
 mount_matches() {
-    local target=$1 source=$2
+    local target=$1 source=$2 record device mounted mount_root filesystem loop backing
     [ -r "$MOUNTINFO_FILE" ] || fail mountinfo-unavailable
-    $BB awk -v target="$target" -v source="$source" '
-        $5 == target { total++; dash=0; source_seen=0; mounted="";
-            for (i=6; i<=NF; i++) { if ($i == "-") { dash=1; continue }
-                if (dash && !source_seen) { source_seen=1; continue }
-                if (dash) { mounted=$i; break } }
-            if (mounted == source) good++
+    record=$($BB awk -v target="$target" '
+        $5 == target {
+            total++;
+            for (i=7; i<=NF; i++) if ($i == "-") {
+                row=$3 " " $4 " " $(i+1) " " $(i+2); break
+            }
         }
-        END { exit (total == 1 && good == 1) ? 0 : 1 }
-    ' "$MOUNTINFO_FILE" >/dev/null 2>&1 || fail candidate-mount-identity
+        END { if (total != 1 || row == "") exit 1; print row }
+    ' "$MOUNTINFO_FILE") || fail candidate-mount-identity
+    read -r device mount_root filesystem mounted <<EOF
+$record
+EOF
+    # Direct sources remain supported. Linux loop mounts instead report the
+    # block device; bind identity to its kernel-reported backing file, never
+    # merely accept any loop source at the expected target.
+    [ "$mounted" = "$source" ] && return 0
+    case "$device" in 7:[0-9]*) ;; *) fail candidate-mount-identity;; esac
+    case "${device#7:}" in *[!0-9]*|'') fail candidate-mount-identity;; esac
+    [ "$mounted" = "/dev/loop${device#7:}" ] &&
+        [ "$filesystem" = squashfs ] && [ "$mount_root" = / ] || fail candidate-mount-identity
+    loop=$LOOP_SYS_ROOT/$device/loop
+    backing=$($BB cat "$loop/backing_file" 2>/dev/null) || fail candidate-mount-identity
+    [ "$backing" = "$source" ] || fail candidate-mount-identity
+    regular "$source" candidate-mount-source
+    [ "$($BB cat "$loop/offset" 2>/dev/null)" = 0 ] &&
+        [ "$($BB cat "$loop/sizelimit" 2>/dev/null)" = 0 ] || fail candidate-mount-identity
 }
 
 verify_candidate_mounts() {
