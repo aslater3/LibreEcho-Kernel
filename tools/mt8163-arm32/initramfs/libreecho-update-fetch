@@ -1052,6 +1052,21 @@ download_feature_assets()
         esac
     done
 }
+candidate_matches_record()
+{
+    # Stable SemVer behavior stays unchanged. Dev revisions can share a version.
+    [ "$channel" = dev ] || return 0
+    candidate_boot=$(check_value_from_file "$ROOT/staging/manifest" boot_sha256)
+    recorded_boot=$(check_value_from_file "$1" boot_sha256)
+    printf '%s\n' "$candidate_boot" | $BB grep -Eq '^[a-f0-9]{64}$' || return 1
+    [ "$candidate_boot" = "$recorded_boot" ] || return 1
+    if [ "$(check_value_from_file "$ROOT/staging/manifest" format)" = libreecho-ota-v2 ]; then
+        candidate_manifest=$(sha256sum "$ROOT/staging/manifest" | $BB awk '{print $1}')
+        [ "$candidate_manifest" = "$(check_value_from_file "$1" manifest_sha256)" ] || return 1
+    fi
+    return 0
+}
+
 check_or_install()
 {
     requested_action=$1
@@ -1067,21 +1082,21 @@ check_or_install()
     if [ "$channel" = dev ]; then
         [ "$(sha256sum "$PACKAGE" | $BB awk '{print $1}')" = "$DEV_OTA_SHA256" ] || { quarantine_file "$PACKAGE"; die dev_control_identity; }
     fi
-    download_feature_assets
     installed=$($BB sed -n 's/^version=//p' "$ROOT/installed" 2>/dev/null)
     installed_channel=$(record_channel "$ROOT/installed")
     rolled_back=$($BB sed -n 's/^version=//p' "$ROOT/rolled-back" 2>/dev/null)
     rolled_back_channel=$(record_channel "$ROOT/rolled-back")
-    if [ "$version" = "$installed" ] && [ "$channel" = "$installed_channel" ]; then
+    if [ "$version" = "$installed" ] && [ "$channel" = "$installed_channel" ] && candidate_matches_record "$ROOT/installed"; then
         check_status_write up-to-date "$version" "" true
         echo "UPDATE_CURRENT version=$version"
         return 0
     fi
-    if [ -n "$rolled_back" ] && [ "$version" = "$rolled_back" ] && [ "$channel" = "$rolled_back_channel" ]; then
+    if [ -n "$rolled_back" ] && [ "$version" = "$rolled_back" ] && [ "$channel" = "$rolled_back_channel" ] && candidate_matches_record "$ROOT/rolled-back"; then
         check_status_write update-held-after-rollback "$version" "" true
         echo "UPDATE_HELD version=$version"
         return 0
     fi
+    download_feature_assets
     if [ "$requested_action" = check ]; then
         check_status_write update-available "$version" "" true
         echo "UPDATE_AVAILABLE version=$version"
