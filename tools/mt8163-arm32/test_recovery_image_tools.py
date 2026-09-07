@@ -3230,7 +3230,7 @@ feature_daemon_required tts
         fetcher = (TOOLS_DIR / "initramfs/libreecho-update-fetch").read_text()
         self.assertIn("version=$(download_and_inspect) || return 1", fetcher)
         self.assertIn(
-            'if [ -n "$rolled_back" ] && [ "$version" = "$rolled_back" ] && [ "$channel" = "$rolled_back_channel" ]; then',
+            'if [ -n "$rolled_back" ] && [ "$version" = "$rolled_back" ] && [ "$channel" = "$rolled_back_channel" ] && candidate_matches_record "$ROOT/rolled-back"; then',
             fetcher,
         )
         self.assertIn("check_status_write error", fetcher)
@@ -3313,7 +3313,7 @@ feature_daemon_required tts
         self.assertIn("record_channel \"$ROOT/installed\"", fetcher)
         self.assertIn(
             "install_lock\n    seed_channel\n    validate_source\n"
-            "    prepare_https_client\n    install_unlock",
+            "    prepare_https_client\n    resolve_dev_release\n    install_unlock",
             fetcher,
         )
         automatic = fetcher[fetcher.index("set_automatic_updates()"):fetcher.index("die()")]
