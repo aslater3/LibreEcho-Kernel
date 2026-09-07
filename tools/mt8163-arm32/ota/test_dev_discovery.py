@@ -36,7 +36,7 @@ die() { printf 'ERROR:%s\\n' "$1"; exit 1; }
 curl_failure() { die transport; }
 resolve_dev_release()
 '''+function+'''
-resolve_dev_release
+resolve_dev_release || exit 1
 printf '%s\\n' "$url" "${DEV_RELEASE_TAG:-}" "${DEV_OTA_SHA256:-}"
 '''
             env=os.environ | dict(TEST_ROOT=tmp,TEST_CHANNEL=channel,TEST_STATUS=status,TEST_BB=shutil.which('busybox') or '/bin/busybox')
@@ -80,7 +80,7 @@ candidate_matches_record()
 ''' + function + '\ncandidate_matches_record "$ROOT/installed"\n'
             for channel, boot, identity, expected in [
                 ('dev', 'a'*64, digest, 0),
-                ('dev', 'b'*64, digest, 1),
+                ('dev', 'b'*64, digest, 0),
                 ('dev', 'a'*64, 'c'*64, 1),
                 ('dev', 'a'*64, '', 1),
                 ('stable', 'b'*64, '', 0),

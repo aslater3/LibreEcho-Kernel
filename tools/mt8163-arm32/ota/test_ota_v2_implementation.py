@@ -995,6 +995,20 @@ esac
         return run(["/bin/busybox", "sh", str(updater), *args], env=self.env)
 
     def test_real_fetcher_downloads_control_and_assets_via_fake_https_then_installs(self) -> None:
+        self.exercise_network_install("stable")
+
+    def test_dev_fetcher_resolves_immutable_assets_and_recheck_is_current(self) -> None:
+        self.exercise_network_install("dev")
+
+    def exercise_network_install(self, channel: str) -> None:
+        from feature_manifest import build_control_tar
+        self.manifest["update_channel"] = channel
+        self.package.write_bytes(build_control_tar(self.manifest, self.boot, KEY))
+        (self.root / "packaged-channel").write_text(channel + "\n")
+        (self.data / "libreecho/automatic-updates").write_text("channel=" + channel + "\n")
+        tag = "radar-puffin-build-" + "a" * 7 + "-" + "b" * 16 + "-" + "c" * 16
+        pointer = self.root / "release-pointer.txt"
+        pointer.write_text(tag + "\n" + hashlib.sha256(self.package.read_bytes()).hexdigest() + "\n")
         curl = self.root / "fake-curl"
         curl.write_text("""#!/bin/sh
 out=; err=; headers=; url=
@@ -1007,7 +1021,9 @@ while [ "$#" -gt 0 ]; do
     *) url=$1; shift ;;
   esac
 done
+printf '%s\\n' "$url" >> "$URL_LOG"
 case "$url" in
+  */release-pointer.txt) src=$SOURCE_POINTER ;;
   *.ota.tar) src=$SOURCE_PACKAGE ;;
   *) name=${url##*/}; src=$SOURCE_FEATURES/assistant/$name ;;
 esac
@@ -1032,6 +1048,8 @@ cp "$src" "$out"
             "LIBREECHO_ASSISTANT_MANIFEST": str(self.old_manifest),
             "SOURCE_PACKAGE": str(self.package),
             "SOURCE_FEATURES": str(self.source_features),
+            "SOURCE_POINTER": str(pointer),
+            "URL_LOG": str(self.root / "urls.log"),
         }
         transaction = transaction_fixture(self.root, env)
         updater = updater_fixture(self.root, env, transaction)
@@ -1053,6 +1071,18 @@ cp "$src" "$out"
         self.assertEqual(self.old_manifest.read_bytes(), self.new_manifest)
         self.assertFalse((self.update_root / "staging").exists())
         self.assertFalse((self.update_root / "curl.stderr").exists())
+        if channel == "dev":
+            urls = (self.root / "urls.log").read_text().splitlines()
+            self.assertEqual(len(urls), 4, urls)
+            self.assertTrue(urls[0].endswith("/radar-puffin-dev-channel/release-pointer.txt"))
+            self.assertTrue(all("/download/" + tag + "/" in url for url in urls[1:]), urls)
+            fetcher = fetch_fixture(self.root, env, updater, transaction)
+            checked = run(["/bin/busybox", "sh", str(fetcher), "check"], env=env)
+            self.assertEqual(checked.returncode, 0, checked.stderr + checked.stdout)
+            self.assertIn("UPDATE_CURRENT", checked.stdout)
+            repeated = (self.root / "urls.log").read_text().splitlines()[len(urls):]
+            self.assertEqual(len(repeated), 1, repeated)
+            self.assertTrue(repeated[0].endswith('/release-pointer.txt'))
 
     def test_fetch_resume_and_existing_downloads_do_not_redownload_or_write_boot(self) -> None:
         stage = self.update_root / "staging/features/assistant"

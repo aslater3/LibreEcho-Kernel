@@ -3313,7 +3313,7 @@ feature_daemon_required tts
         self.assertIn("record_channel \"$ROOT/installed\"", fetcher)
         self.assertIn(
             "install_lock\n    seed_channel\n    validate_source\n"
-            "    prepare_https_client\n    resolve_dev_release\n    install_unlock",
+            "    prepare_https_client\n    resolve_dev_release || return 1\n    install_unlock",
             fetcher,
         )
         automatic = fetcher[fetcher.index("set_automatic_updates()"):fetcher.index("die()")]
