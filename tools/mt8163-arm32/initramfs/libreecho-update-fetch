@@ -204,6 +204,27 @@ validate_source()
     url=$expected_url
 }
 
+resolve_dev_release()
+{
+    [ "$channel" = dev ] || return 0
+    # Reuse the registered bounded-probe temporary lifecycle.
+    pointer=$ROOT/.control-range-probe.$$
+    pointer_url=https://github.com/aslater3/LibreEcho/releases/download/radar-puffin-dev-channel/release-pointer.txt
+    bounded_curl "$pointer" "$CURL_HEADERS" 257 60 "$pointer_url"
+    curl_detail=$(downloader_stderr)
+    parse_response_headers "$CURL_HEADERS" || die dev_discovery_headers
+    [ "$STREAM_CURL_RC" -eq 0 ] || curl_failure "$STREAM_CURL_RC" "$curl_detail" "$RESPONSE_HTTP_CODE"
+    [ "$RESPONSE_HTTP_CODE" = 200 ] && [ "$RESPONSE_RANGE_KIND" = none ] &&
+        [ "$STREAM_SIZE" -gt 0 ] && [ "$STREAM_SIZE" -le 256 ] || die dev_discovery_size
+    DEV_RELEASE_TAG=$($BB sed -n '1p' "$pointer")
+    DEV_OTA_SHA256=$($BB sed -n '2p' "$pointer")
+    printf '%s\n' "$DEV_RELEASE_TAG" | $BB grep -Eq '^radar-puffin-(build|nightly)-[a-f0-9]{7}-[a-f0-9]{16}-[a-f0-9]{16}$' || die dev_discovery_tag
+    printf '%s\n' "$DEV_OTA_SHA256" | $BB grep -Eq '^[a-f0-9]{64}$' || die dev_discovery_hash
+    [ "$(printf '%s\n%s\n' "$DEV_RELEASE_TAG" "$DEV_OTA_SHA256" | $BB wc -c)" -eq "$STREAM_SIZE" ] || die dev_discovery_format
+    $BB rm -f "$pointer" "$CURL_HEADERS" "$CURL_STDERR"
+    url="https://github.com/aslater3/LibreEcho/releases/download/$DEV_RELEASE_TAG/libreecho-$DEV_RELEASE_TAG.ota.tar"
+}
+
 set_channel()
 {
     channel=${1:-}
@@ -1011,7 +1032,9 @@ download_feature_assets()
                                 ;;
                         esac
                     fi
-                    asset_url="https://github.com/aslater3/LibreEcho/releases/download/radar-puffin-v$version/$asset"
+                    asset_release="radar-puffin-v$version"
+                    [ "$channel" != dev ] || asset_release=$DEV_RELEASE_TAG
+                    asset_url="https://github.com/aslater3/LibreEcho/releases/download/$asset_release/$asset"
                     http_code=$("$CURL" --fail --location --silent --show-error --proto '=https' --proto-redir '=https' \
                         --tlsv1.2 --cacert "$CA" --connect-timeout 20 --max-time 1800 --max-filesize "$expected_size" \
                         --output "$part" --stderr "$CURL_STDERR" --write-out '%{http_code}' $resume_args "$asset_url")
@@ -1038,8 +1061,12 @@ check_or_install()
     seed_channel
     validate_source
     prepare_https_client
+    resolve_dev_release
     install_unlock
     version=$(download_and_inspect) || return 1
+    if [ "$channel" = dev ]; then
+        [ "$(sha256sum "$PACKAGE" | $BB awk '{print $1}')" = "$DEV_OTA_SHA256" ] || { quarantine_file "$PACKAGE"; die dev_control_identity; }
+    fi
     download_feature_assets
     installed=$($BB sed -n 's/^version=//p' "$ROOT/installed" 2>/dev/null)
     installed_channel=$(record_channel "$ROOT/installed")
