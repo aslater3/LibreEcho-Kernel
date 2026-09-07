@@ -542,6 +542,45 @@ class AuthenticationBoundaryTests(unittest.TestCase):
                         child.unlink()
 
 
+class LoopMountIdentityTests(unittest.TestCase):
+    def test_real_linux_loop_mount_identity_and_negative_cases(self):
+        with tempfile.TemporaryDirectory(prefix="ota-loop-identity-") as temp:
+            root = Path(temp)
+            payload = root / "payload.squashfs"
+            payload.write_bytes(b"verified-payload")
+            mountinfo = root / "mountinfo"
+            sysroot = root / "sys"
+            loop = sysroot / "7:3" / "loop"
+            loop.mkdir(parents=True)
+            (loop / "backing_file").write_text(str(payload) + "\n")
+            (loop / "offset").write_text("0\n")
+            (loop / "sizelimit").write_text("0\n")
+            source = TRANSACTION.read_text().split('case "${1:-}" in', 1)[0]
+            source = source.replace('MOUNTINFO_FILE=$PROC_ROOT/self/mountinfo', 'MOUNTINFO_FILE=' + str(mountinfo))
+            source = source.replace('LOOP_SYS_ROOT=/sys/dev/block', 'LOOP_SYS_ROOT=' + str(sysroot))
+            script = root / "check.sh"
+            script.write_text(source + '\nmount_matches "$1" "$2"\n')
+            line = '20 1 7:3 / /run/feature/root ro,nosuid,nodev - squashfs /dev/loop3 ro\n'
+            def invoke():
+                return run(['busybox', 'sh', str(script), '/run/feature/root', str(payload)], timeout=10)
+            mountinfo.write_text(line)
+            result = invoke()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for field, value in [('backing_file', str(root / 'wrong')), ('offset', '4096'), ('sizelimit', '1')]:
+                path = loop / field
+                previous = path.read_text()
+                path.write_text(value + '\n')
+                self.assertNotEqual(invoke().returncode, 0, field)
+                path.write_text(previous)
+            for bad in [line + line, line.replace('7:3', '7:4'), line.replace('squashfs', 'ext4'), line.replace(' / /run/', ' /subdir /run/')]:
+                mountinfo.write_text(bad)
+                self.assertNotEqual(invoke().returncode, 0, bad)
+            mountinfo.write_text(line)
+            payload.unlink()
+            payload.symlink_to(root / 'elsewhere')
+            self.assertNotEqual(invoke().returncode, 0)
+
+
 class TransactionFixtureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory(prefix="ota-v2-transaction-")
