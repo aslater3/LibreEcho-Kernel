@@ -53,7 +53,8 @@ jobs:
             test_verify_radar_puffin_dtb.py \
             test_recovery_image_tools.py \
             test_source_offer_tools.py \
-            ota/test_ota_v2_implementation.py
+            ota/test_ota_v2_implementation.py \
+            ota/test_service_identity.py
 
       - name: Validate tracked Python and shell source
         shell: bash

@@ -749,7 +749,7 @@ feature_required() {
 }
 
 service_probe() {
-    local feature=$1 service socket pidfile pid exe expected
+    local feature=$1 service socket pidfile pid exe expected engine entry found controller
     case "$feature" in
         airplay2) service=airplayd; socket=$RUN_ROOT/libreecho/airplay.sock;;
         tts) service=ttsd; socket=$RUN_ROOT/libreecho/tts.sock;;
@@ -765,7 +765,25 @@ service_probe() {
     exe=$PROC_ROOT/$pid/exe
     [ -f "$exe" ] || fail service-exe
     expected=$(value "feature_${feature}_daemon_sha256" "$STAGING/manifest")
-    [ "$(file_hash "$exe")" = "$expected" ] || fail service-exe-hash
+    if [ "$feature" = airplay2 ]; then
+        # AirPlay's pidfile/socket belong to the boot-resident controller.
+        # The signed feature daemon identity is the separate audio engine.
+        # verify_running has already authenticated the running boot image.
+        controller=/usr/local/sbin/libreecho-airplayd
+        regular "$controller" service-controller
+        [ "$($BB readlink "$exe")" = "$controller" ] &&
+            [ "$(file_hash "$exe")" = "$(file_hash "$controller")" ] || fail service-controller-identity
+        engine=$RUN_ROOT/libreecho/features/airplay2/root/usr/local/sbin/libreecho-audio-engine
+        found=0
+        for entry in "$PROC_ROOT"/[0-9]*/exe; do
+            [ "$($BB readlink "$entry" 2>/dev/null)" = "$engine" ] || continue
+            [ "$(file_hash "$entry")" = "$expected" ] || fail service-exe-hash
+            found=1
+        done
+        [ "$found" = 1 ] || fail service-engine-missing
+    else
+        [ "$(file_hash "$exe")" = "$expected" ] || fail service-exe-hash
+    fi
     [ -S "$socket" ] || fail service-socket
     $BB awk -v socket="$socket" '$NF == socket { found=1 } END { exit found ? 0 : 1 }' "$PROC_NET_UNIX" >/dev/null 2>&1 || fail service-socket-owner
 }

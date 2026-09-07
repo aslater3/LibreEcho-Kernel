@@ -65,6 +65,7 @@ def transaction_fixture(root: Path, env: dict[str, str], source: Path = TRANSACT
         "SPACE_PHASE=prewrite": f"SPACE_PHASE={env.get('LIBREECHO_TRANSACTION_PHASE', 'prewrite')}",
         "SPACE_DF=df": f"SPACE_DF={shlex.quote(env.get('LIBREECHO_TRANSACTION_DF_BIN', 'df'))}",
         "SPACE_STAT=stat": f"SPACE_STAT={shlex.quote(env.get('LIBREECHO_TRANSACTION_STAT_BIN', 'stat'))}",
+        "controller=/usr/local/sbin/libreecho-airplayd": f"controller={shlex.quote(str(root / 'boot-airplayd'))}",
         "PROC_ROOT=/proc": f"PROC_ROOT={shlex.quote(env.get('LIBREECHO_PROC_ROOT', '/proc'))}",
         "VAR_RUN_ROOT=/var/run": f"VAR_RUN_ROOT={shlex.quote(env.get('LIBREECHO_VAR_RUN_ROOT', '/var/run'))}",
         "ETC_ROOT=/etc": f"ETC_ROOT={shlex.quote(env.get('LIBREECHO_ETC_ROOT', '/etc'))}",
@@ -1726,7 +1727,8 @@ class PreConfirmAcceptanceTests(unittest.TestCase):
         self.new_manifest = self.staging / "features/airplay2" / self.manifest_name
         self.new_payload.write_bytes(b"candidate-payload")
         self.new_manifest.write_bytes(b"candidate-manifest")
-        self.daemon = self.root / "candidate-daemon"
+        self.daemon = self.run_root / "libreecho/features/airplay2/root/usr/local/sbin/libreecho-audio-engine"
+        self.daemon.parent.mkdir(parents=True, exist_ok=True)
         self.daemon.write_bytes(b"candidate-daemon-binary")
         self.daemon_hash = hashlib.sha256(self.daemon.read_bytes()).hexdigest()
         self.boot = b"ANDROID!" + bytes(BOOT_SIZE - 8)
@@ -1745,7 +1747,11 @@ class PreConfirmAcceptanceTests(unittest.TestCase):
             f"00000000: 00000002 00000000 00010000 0001 01 123 {self.socket}\n"
         )
         (self.proc / "cmdline").write_bytes(b"console=tty0 androidboot.slot_suffix=_b\0")
-        (self.proc / "123/exe").symlink_to(self.daemon)
+        controller = self.root / "boot-airplayd"
+        controller.write_bytes(b"boot-resident controller")
+        (self.proc / "123/exe").symlink_to(controller)
+        (self.proc / "124").mkdir()
+        (self.proc / "124/exe").symlink_to(self.daemon)
         (self.var_run / "libreecho-airplayd.pid").write_text("123\n")
         (self.etc / "libreecho/service-profile").write_text("production\n")
         (self.etc / "libreecho/feature-policy").write_text("redistributable\n")
