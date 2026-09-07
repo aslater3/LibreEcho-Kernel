@@ -2240,6 +2240,65 @@ class CommittedRuntimeLifecycleTests(unittest.TestCase):
                 self.tmp.cleanup()
                 self.setUp()
 
+    def test_fallback_retains_verified_v1_bridge_install_record(self) -> None:
+        self.assertEqual(self.invoke("prepare-boot").returncode, 0)
+        self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")
+        (self.proc / "cmdline").write_text("androidboot.slot_suffix=_a\n")
+        (self.parts / "boot_a").write_bytes(self.boot)
+        installed = self.update / "installed"
+        record = f"schema=1\nversion=bridge-0.13.11\nslot=a\nboot_sha256={hashlib.sha256(self.boot).hexdigest()}\nupdate_channel=dev\nfeature_policy=community-noncommercial\nchannel=dev\n"
+        installed.write_text(record)
+        malformed = [record + "slot=a\n", record + "unknown=value\n", record.replace("version=bridge-0.13.11\n", ""), record.replace("update_channel=dev\n", ""), record.replace("feature_policy=community-noncommercial\n", ""), record.replace("channel=dev", "channel=bogus"), record.replace("feature_policy=community-noncommercial", "feature_policy=preserve")]
+        for bad in malformed:
+            installed.write_text(bad)
+            refused = self.invoke("fallback")
+            self.assertNotEqual(refused.returncode, 0, bad)
+            self.assertTrue((self.update / "pending").exists())
+            self.assertTrue((self.update / "feature-commit").exists())
+            self.assertTrue(self.staging.exists())
+        installed.write_text(record)
+        for bad in [record.replace("schema=1", "schema=2"), record.replace("slot=a", "slot=b"), record.replace(hashlib.sha256(self.boot).hexdigest(), "0" * 64)]:
+            installed.write_text(bad)
+            refused = self.invoke("fallback")
+            self.assertNotEqual(refused.returncode, 0, refused.stdout)
+            self.assertTrue((self.update / "pending").exists())
+            self.assertTrue((self.update / "feature-commit").exists())
+            self.assertTrue(self.staging.exists())
+        installed.write_text(record)
+        fallback = self.invoke("fallback")
+        self.assertEqual(fallback.returncode, 0, fallback.stderr)
+        self.assertEqual(installed.read_text(), record)
+        self.assertFalse((self.update / "pending").exists())
+        self.assertFalse((self.update / "feature-commit").exists())
+        self.assertFalse(self.staging.exists())
+        self.assertTrue((self.update / "rolled-back").is_file())
+        self.assertEqual(self.base_payload.read_bytes(), b"base-payload")
+
+    def test_fallback_accepts_v1_preserve_sizes_without_v2_limits(self) -> None:
+        self.assertEqual(self.invoke("prepare-boot").returncode, 0)
+        self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")
+        (self.proc / "cmdline").write_text("androidboot.slot_suffix=_a\n")
+        (self.parts / "boot_a").write_bytes(self.boot)
+        record = f"schema=1\nversion=bridge\nslot=a\nboot_sha256={hashlib.sha256(self.boot).hexdigest()}\nupdate_channel=dev\nfeature_policy=preserve\n"
+        for feature_id, size in zip(FEATURE_IDS, (0, 536870912, 536870913, 10000000000, 18446744073709551616)):
+            record += f"feature_{feature_id}_payload_size={size}\n"
+            for field in ("payload_sha256", "manifest_sha256", "daemon_sha256"):
+                record += f"feature_{feature_id}_{field}={'a' * 64}\n"
+        installed = self.update / "installed"
+        for invalid in ("-1", "1.5", "1e9", "1oops", ""):
+            installed.write_text(record.replace("payload_size=0\n", f"payload_size={invalid}\n"))
+            self.assertNotEqual(self.invoke("fallback").returncode, 0)
+            self.assertTrue((self.update / "pending").exists())
+            self.assertTrue((self.update / "feature-commit").exists())
+            self.assertTrue(self.staging.exists())
+        installed.write_text(record)
+        result = self.invoke("fallback")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(installed.read_text(), record)
+        self.assertFalse(self.staging.exists())
+        self.assertFalse((self.update / "pending").exists())
+        self.assertTrue((self.update / "rolled-back").exists())
+
     def test_fallback_cleans_only_when_bcb_proves_old_slot_is_confirmed(self) -> None:
         self.assertEqual(self.invoke("prepare-boot").returncode, 0)
         self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")
