@@ -2246,7 +2246,16 @@ class CommittedRuntimeLifecycleTests(unittest.TestCase):
         (self.proc / "cmdline").write_text("androidboot.slot_suffix=_a\n")
         (self.parts / "boot_a").write_bytes(self.boot)
         installed = self.update / "installed"
-        record = f"schema=1\nslot=a\nboot_sha256={hashlib.sha256(self.boot).hexdigest()}\n"
+        record = f"schema=1\nversion=bridge-0.13.11\nslot=a\nboot_sha256={hashlib.sha256(self.boot).hexdigest()}\nupdate_channel=dev\nfeature_policy=community-noncommercial\nchannel=dev\n"
+        installed.write_text(record)
+        malformed = [record + "slot=a\n", record + "unknown=value\n", record.replace("version=bridge-0.13.11\n", ""), record.replace("update_channel=dev\n", ""), record.replace("feature_policy=community-noncommercial\n", ""), record.replace("channel=dev", "channel=bogus"), record.replace("feature_policy=community-noncommercial", "feature_policy=preserve")]
+        for bad in malformed:
+            installed.write_text(bad)
+            refused = self.invoke("fallback")
+            self.assertNotEqual(refused.returncode, 0, bad)
+            self.assertTrue((self.update / "pending").exists())
+            self.assertTrue((self.update / "feature-commit").exists())
+            self.assertTrue(self.staging.exists())
         installed.write_text(record)
         for bad in [record.replace("schema=1", "schema=2"), record.replace("slot=a", "slot=b"), record.replace(hashlib.sha256(self.boot).hexdigest(), "0" * 64)]:
             installed.write_text(bad)
