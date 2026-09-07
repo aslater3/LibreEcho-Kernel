@@ -2246,6 +2246,186 @@ class CommittedRuntimeLifecycleTests(unittest.TestCase):
                 self.tmp.cleanup()
                 self.setUp()
 
+    def prepare_fallback_with_history(self, old: bytes = b"schema=1\nversion=older\n") -> bytes:
+        result = self.invoke("prepare-boot")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")
+        (self.update / "rolled-back").write_bytes(old)
+        return (self.update / "pending").read_bytes()
+
+    def assert_fallback_retained(self) -> None:
+        for name in ("pending", "feature-commit", "staging"):
+            self.assertTrue((self.update / name).exists(), name)
+        self.assertEqual(self.base_payload.read_bytes(), b"base-payload")
+
+    def test_fallback_archives_previous_record_and_updates_latest(self) -> None:
+        old = b"schema=1\nversion=older\n"
+        pending = self.prepare_fallback_with_history(old)
+        result = self.invoke("fallback")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        archive = self.update / ("rolled-back-history." + hashlib.sha256(old).hexdigest())
+        self.assertEqual(archive.read_bytes(), old)
+        self.assertEqual((self.update / "rolled-back").read_bytes(), pending)
+        self.assertFalse(self.staging.exists())
+        self.assertEqual(self.invoke("fallback").returncode, 0)
+        self.assertEqual(archive.read_bytes(), old)
+
+    def test_fallback_handles_three_distinct_signed_attempts(self) -> None:
+        from feature_manifest import parse_manifest, serialize_manifest
+        staged = {p.relative_to(self.staging): p.read_bytes()
+                  for p in self.staging.rglob("*") if p.is_file()}
+        records = []
+        for generation in range(3):
+            for relative, data in staged.items():
+                target = self.staging / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            manifest_path = self.staging / "manifest"
+            value = parse_manifest(manifest_path.read_bytes())
+            value["transaction_id"] = f"fallback-generation-{generation}"
+            manifest_path.write_bytes(serialize_manifest(value))
+            (self.staging / "manifest.sig").write_text(
+                self.signing_key.sign(manifest_path.read_bytes()).signature.hex() + "\n")
+            self.bcb.write_text("selected_slot=b\nslot_b_success=0\nslot_a_success=1\n")
+            prepared = self.invoke("prepare-boot")
+            self.assertEqual(prepared.returncode, 0, prepared.stderr)
+            records.append((self.update / "pending").read_bytes())
+            self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")
+            result = self.invoke("fallback")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.update / "rolled-back").read_bytes(), records[-1])
+        for record in records[:-1]:
+            archive = self.update / ("rolled-back-history." + hashlib.sha256(record).hexdigest())
+            self.assertEqual(archive.read_bytes(), record)
+        self.assertEqual(len(list(self.update.glob("rolled-back-history.*"))), 2)
+
+    def test_fallback_rejects_unsafe_or_oversized_history(self) -> None:
+        pending = self.prepare_fallback_with_history()
+        latest = self.update / "rolled-back"
+        for shape in ("symlink", "directory", "oversized"):
+            latest.unlink()
+            if shape == "symlink":
+                latest.symlink_to(self.update / "missing")
+            elif shape == "directory":
+                latest.mkdir()
+            else:
+                latest.write_bytes(b"x" * 8193)
+            result = self.invoke("fallback")
+            self.assertNotEqual(result.returncode, 0, shape)
+            self.assert_fallback_retained()
+            self.assertEqual((self.update / "pending").read_bytes(), pending)
+            if latest.is_dir():
+                latest.rmdir()
+            else:
+                latest.unlink()
+            latest.write_bytes(b"older")
+
+    def test_fallback_rejects_corrupt_archive_and_full_history(self) -> None:
+        self.prepare_fallback_with_history()
+        corrupt = self.update / ("rolled-back-history." + "0" * 64)
+        corrupt.write_bytes(b"not the named hash")
+        self.assertNotEqual(self.invoke("fallback").returncode, 0)
+        self.assert_fallback_retained()
+        corrupt.unlink()
+        for generation in range(16):
+            data = f"history-{generation}".encode()
+            (self.update / ("rolled-back-history." + hashlib.sha256(data).hexdigest())).write_bytes(data)
+        result = self.invoke("fallback")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fallback-history-full", result.stderr)
+        self.assert_fallback_retained()
+
+    def test_fallback_recovers_history_publication_interruptions(self) -> None:
+        old = b"prior fallback bytes\n"
+        pending = self.prepare_fallback_with_history(old)
+        archive = self.update / ("rolled-back-history." + hashlib.sha256(old).hexdigest())
+        for boundary in ("archive", "latest"):
+            faulty = self.root / "busybox-history-fault"
+            operation = "ln" if boundary == "archive" else "mv"
+            target = str(archive if boundary == "archive" else self.update / "rolled-back")
+            faulty.write_text(
+                "#!/bin/sh\n"
+                f'if [ "$1" = {operation} ]; then\n'
+                '  last=; for arg do last=$arg; done\n'
+                f'  if [ "$last" = {shlex.quote(target)} ]; then\n'
+                '    /bin/busybox "$@" || exit $?\n'
+                '    exit 97\n  fi\nfi\nexec /bin/busybox "$@"\n')
+            faulty.chmod(0o755)
+            env = self.env | {"BB": str(faulty)}
+            result = run([str(transaction_fixture(self.root, env)), "fallback"], env=env)
+            self.assertNotEqual(result.returncode, 0, boundary)
+            self.assert_fallback_retained()
+            self.assertEqual(archive.read_bytes(), old)
+        recovered = self.invoke("fallback")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertEqual((self.update / "rolled-back").read_bytes(), pending)
+        self.assertEqual(archive.read_bytes(), old)
+        self.assertFalse(self.staging.exists())
+
+    def test_fallback_history_never_bypasses_signature_or_bcb_gates(self) -> None:
+        old = b"previous evidence"
+        self.prepare_fallback_with_history(old)
+        signature = self.staging / "manifest.sig"
+        original = signature.read_bytes()
+        signature.write_text("0" * 128 + "\n")
+        result = self.invoke("fallback")
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_fallback_retained()
+        signature.write_bytes(original)
+        self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=0\n")
+        self.assertNotEqual(self.invoke("fallback").returncode, 0)
+        self.assert_fallback_retained()
+        self.assertEqual((self.update / "rolled-back").read_bytes(), old)
+        self.assertEqual(list(self.update.glob("rolled-back-history.*")), [])
+
+    def test_fallback_archives_different_bytes_even_with_same_transaction_id(self) -> None:
+        pending = self.prepare_fallback_with_history()
+        old = pending.replace(b"phase=prepared", b"phase=older")
+        self.assertNotEqual(old, pending)
+        (self.update / "rolled-back").write_bytes(old)
+        result = self.invoke("fallback")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.update / "rolled-back").read_bytes(), pending)
+        self.assertEqual((self.update / ("rolled-back-history." + hashlib.sha256(old).hexdigest())).read_bytes(), old)
+
+    def test_fallback_rejects_unsafe_temp_and_archive_shapes(self) -> None:
+        self.prepare_fallback_with_history()
+        temp = self.update / "rolled-back.tmp"
+        os.link(self.update / "rolled-back", temp)
+        self.assertNotEqual(self.invoke("fallback").returncode, 0)
+        self.assert_fallback_retained()
+        temp.unlink()
+        for path in (temp, self.update / ("rolled-back-history." + "0" * 64)):
+            for shape in ("symlink", "directory"):
+                if shape == "symlink":
+                    path.symlink_to(self.root / "absent")
+                else:
+                    path.mkdir()
+                self.assertNotEqual(self.invoke("fallback").returncode, 0)
+                self.assert_fallback_retained()
+                if shape == "symlink":
+                    path.unlink()
+                else:
+                    path.rmdir()
+
+    def test_fallback_flat_history_survives_userdata_cleanup(self) -> None:
+        old = b"old rollback evidence"
+        self.prepare_fallback_with_history(old)
+        result = self.invoke("fallback")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = self.root / "cleanup-data"
+        destination = data / "libreecho/update"
+        destination.mkdir(parents=True)
+        for path in self.update.glob("rolled-back*"):
+            (destination / path.name).write_bytes(path.read_bytes())
+        cleanup = Path(__file__).resolve().parents[1] / "initramfs/libreecho-data-cleanup"
+        result = run(["/bin/busybox", "sh", str(cleanup)],
+                     env=os.environ | {"DATA_ROOT": str(data), "LIBREECHO_DATA_TEST_MODE": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DATA_CLEANUP_OK", result.stdout)
+        archive = destination / ("rolled-back-history." + hashlib.sha256(old).hexdigest())
+        self.assertEqual(archive.read_bytes(), old)
+
     def test_fallback_retains_verified_v1_bridge_install_record(self) -> None:
         self.assertEqual(self.invoke("prepare-boot").returncode, 0)
         self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")

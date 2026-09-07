@@ -1374,8 +1374,49 @@ verify_prior_v1_install() {
     [ "$actual" = "$expected" ] || fail fallback-installed-hash
 }
 
+# History is inert evidence, never authorization for cleanup. Keep flat files
+# for compatibility with older slots' userdata cleanup contract. Bound retention
+# without deleting evidence; a full archive requires explicit operator export.
+record_fallback() {
+    local rolled_back=$ROOT/rolled-back entry digest archive count=0
+    regular "$PENDING" pending
+    [ "$($BB stat -c %s "$PENDING")" -le 8192 ] || fail fallback-record-size
+    safe_path "$rolled_back"; safe_path "$rolled_back.tmp"
+    if [ -e "$rolled_back.tmp" ]; then
+        regular "$rolled_back.tmp" rolled-back-temp
+        [ "$($BB stat -c %h "$rolled_back.tmp")" = 1 ] || fail fallback-temp-links
+        [ "$($BB stat -c %s "$rolled_back.tmp")" -le 8192 ] || fail fallback-record-size
+    fi
+    for entry in "$ROOT"/rolled-back-history.*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        count=$((count + 1))
+        [ "$count" -le 16 ] || fail fallback-history-full
+        regular "$entry" fallback-history
+        [ "$($BB stat -c %s "$entry")" -le 8192 ] || fail fallback-record-size
+        digest=${entry##*/rolled-back-history.}
+        valid_hash "$digest" || fail fallback-history-name
+        [ "$(hash_state "$entry")" = "$digest" ] || fail fallback-history-hash
+    done
+    if [ -e "$rolled_back" ]; then
+        regular "$rolled_back" rolled-back
+        [ "$($BB stat -c %s "$rolled_back")" -le 8192 ] || fail fallback-record-size
+        # Exact bytes, not a reused transaction ID, identify a completed publish.
+        if ! $BB cmp -s "$rolled_back" "$PENDING"; then
+            digest=$(hash_state "$rolled_back")
+            archive=$ROOT/rolled-back-history.$digest
+            if [ ! -e "$archive" ]; then
+                [ "$count" -lt 16 ] || fail fallback-history-full
+                # Atomic, no-clobber preservation; no partial archive on a crash.
+                $BB ln "$rolled_back" "$archive" || fail fallback-history-link
+            fi
+            sync_file
+        fi
+    fi
+    atomic_copy "$PENDING" "$rolled_back"
+}
+
 fallback() {
-    local rolled_back tx ids feature
+    local tx ids feature
     safe_path "$ROOT"; safe_path "$STAGING"; safe_path "$FEATURES"; safe_path "$JOURNAL"; safe_path "$PENDING"; safe_path "$INSTALLED"
     [ -e "$JOURNAL" ] && [ -e "$PENDING" ] || exit 0
     regular "$JOURNAL" journal; regular "$PENDING" pending
@@ -1389,13 +1430,7 @@ fallback() {
     ids=$(value feature_ids "$JOURNAL")
     for feature in $(printf '%s' "$ids" | $BB tr ',' ' '); do abort_operation_untouched "$feature"; done
     no_symlinks_tree
-    rolled_back=$ROOT/rolled-back
-    if [ -e "$rolled_back" ]; then
-        regular "$rolled_back" rolled-back
-        [ "$(value transaction_id "$rolled_back")" = "$(value transaction_id "$JOURNAL")" ] || fail fallback-identity
-    else
-        atomic_copy "$PENDING" "$rolled_back"
-    fi
+    record_fallback
     tx=$(value transaction_id "$JOURNAL")
     $BB rm -f "$PENDING" "$JOURNAL" || fail fallback-cleanup
     [ ! -e "$STAGING" ] || $BB rm -rf "$STAGING" || fail fallback-cleanup

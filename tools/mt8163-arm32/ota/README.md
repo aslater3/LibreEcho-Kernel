@@ -54,6 +54,29 @@ the first sector, clears those 15 marker bytes, syncs, and verifies the complete
 sector. No other `expdb` content is changed. OTA-profile images do not write
 the marker again.
 
+## Repeated v2 fallback history
+
+After the existing signed-intent, confirmed fallback-slot, prior installation,
+and untouched-feature gates pass, v2 recovery preserves the previous
+`update/rolled-back` bytes as `update/rolled-back-history.<sha256>` before
+atomically publishing the current pending record as `rolled-back`. These flat
+regular files survive older slots' userdata cleanup without a new directory
+allowlist. History is opaque diagnostic evidence, not signed authority and not
+an input to cleanup authorization; historical v1 and v2 records need no schema
+conversion.
+
+The archive uses an atomic no-clobber hard link followed by sync, then the
+existing atomic latest-record copy. Retries after either publication boundary
+reuse matching bytes without losing older evidence. Archive names bind complete
+record hashes, not transaction IDs. Symlinks, nonregular files, hash mismatches,
+and hard-linked temporary output are rejected before transaction cleanup.
+
+Retention is bounded to 16 archived records, at most 8192 bytes per record.
+A full archive refuses a new distinct historical record with
+`fallback-history-full` and retains pending/journal/staging. There is no automatic
+history pruning: export and any removal require a separate operator decision.
+`rolled-back` remains the latest record consumed by existing status readers.
+
 ## Signed bundle v1
 
 The transport is a deterministic POSIX tar with these exact members:
