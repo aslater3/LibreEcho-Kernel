@@ -2274,6 +2274,31 @@ class CommittedRuntimeLifecycleTests(unittest.TestCase):
         self.assertTrue((self.update / "rolled-back").is_file())
         self.assertEqual(self.base_payload.read_bytes(), b"base-payload")
 
+    def test_fallback_accepts_v1_preserve_sizes_without_v2_limits(self) -> None:
+        self.assertEqual(self.invoke("prepare-boot").returncode, 0)
+        self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")
+        (self.proc / "cmdline").write_text("androidboot.slot_suffix=_a\n")
+        (self.parts / "boot_a").write_bytes(self.boot)
+        record = f"schema=1\nversion=bridge\nslot=a\nboot_sha256={hashlib.sha256(self.boot).hexdigest()}\nupdate_channel=dev\nfeature_policy=preserve\n"
+        for feature_id, size in zip(FEATURE_IDS, (0, 536870912, 536870913, 10000000000, 18446744073709551616)):
+            record += f"feature_{feature_id}_payload_size={size}\n"
+            for field in ("payload_sha256", "manifest_sha256", "daemon_sha256"):
+                record += f"feature_{feature_id}_{field}={'a' * 64}\n"
+        installed = self.update / "installed"
+        for invalid in ("-1", "1.5", "1e9", "1oops", ""):
+            installed.write_text(record.replace("payload_size=0\n", f"payload_size={invalid}\n"))
+            self.assertNotEqual(self.invoke("fallback").returncode, 0)
+            self.assertTrue((self.update / "pending").exists())
+            self.assertTrue((self.update / "feature-commit").exists())
+            self.assertTrue(self.staging.exists())
+        installed.write_text(record)
+        result = self.invoke("fallback")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(installed.read_text(), record)
+        self.assertFalse(self.staging.exists())
+        self.assertFalse((self.update / "pending").exists())
+        self.assertTrue((self.update / "rolled-back").exists())
+
     def test_fallback_cleans_only_when_bcb_proves_old_slot_is_confirmed(self) -> None:
         self.assertEqual(self.invoke("prepare-boot").returncode, 0)
         self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")

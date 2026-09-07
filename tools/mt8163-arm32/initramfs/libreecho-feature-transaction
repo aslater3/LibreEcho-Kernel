@@ -1335,7 +1335,7 @@ verify_prior_v1_install() {
         $1 == "update_channel" || $1 == "channel" { if ($2 !~ /^(dev|stable)$/) bad=1; next }
         $1 == "feature_policy" { if ($2 !~ /^(preserve|redistributable|community-noncommercial|exclude)$/) bad=1; next }
         $1 ~ /^feature_(airplay2|tts|wakeword|stt|assistant)_(payload_sha256|manifest_sha256|daemon_sha256)$/ { if (!hash($2)) bad=1; features++; next }
-        $1 ~ /^feature_(airplay2|tts|wakeword|stt|assistant)_payload_size$/ { if ($2 !~ /^[1-9][0-9]*$/ || length($2)>10 || $2+0>536870912) bad=1; features++; next }
+        $1 ~ /^feature_(airplay2|tts|wakeword|stt|assistant)_payload_size$/ { if ($2 !~ /^[0-9]+$/) bad=1; features++; next }
         { bad=1 }
         END {
             split("schema version slot boot_sha256 update_channel feature_policy", required, " ")
