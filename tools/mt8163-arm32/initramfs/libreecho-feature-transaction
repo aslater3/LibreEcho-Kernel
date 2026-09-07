@@ -1318,15 +1318,33 @@ bcb_fallback_safe() {
     [ "$(value slot_${selected}_success "$BCB_FILE")" = 1 ] || return 1
 }
 
+verify_prior_v1_install() {
+    local selected expected actual
+    [ -e "$INSTALLED" ] || return 0
+    regular "$INSTALLED" installed
+    [ "$(value schema "$INSTALLED")" = 1 ] || fail fallback-installed
+    selected=$(value selected_slot "$BCB_FILE")
+    [ "$(value slot "$INSTALLED")" = "$selected" ] &&
+        [ "$(running_slot)" = "$selected" ] || fail fallback-installed-slot
+    expected=$(value boot_sha256 "$INSTALLED")
+    valid_hash "$expected" || fail fallback-installed-hash
+    boot_partition "$selected"
+    actual=$($BB dd if="$BOOT_PARTITION" bs=4096 count=4096 2>/dev/null | $BB sha256sum | $BB awk '{print $1}')
+    [ "$actual" = "$expected" ] || fail fallback-installed-hash
+}
+
 fallback() {
     local rolled_back tx ids feature
     safe_path "$ROOT"; safe_path "$STAGING"; safe_path "$FEATURES"; safe_path "$JOURNAL"; safe_path "$PENDING"; safe_path "$INSTALLED"
     [ -e "$JOURNAL" ] && [ -e "$PENDING" ] || exit 0
     regular "$JOURNAL" journal; regular "$PENDING" pending
-    [ ! -e "$INSTALLED" ] || fail fallback-installed
     [ "$(value phase "$JOURNAL")" = prepared ] || fail fallback-confirmed
     validate_intent
     bcb_fallback_safe || fail fallback-bcb-ambiguous
+    # A successful v1 bridge is prior-slot history, not proof that this v2
+    # transaction committed. Retain it, but only after verifying the currently
+    # running confirmed fallback slot and its full boot-image digest.
+    verify_prior_v1_install
     ids=$(value feature_ids "$JOURNAL")
     for feature in $(printf '%s' "$ids" | $BB tr ',' ' '); do abort_operation_untouched "$feature"; done
     no_symlinks_tree

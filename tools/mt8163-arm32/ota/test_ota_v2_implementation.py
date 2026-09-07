@@ -2240,6 +2240,31 @@ class CommittedRuntimeLifecycleTests(unittest.TestCase):
                 self.tmp.cleanup()
                 self.setUp()
 
+    def test_fallback_retains_verified_v1_bridge_install_record(self) -> None:
+        self.assertEqual(self.invoke("prepare-boot").returncode, 0)
+        self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")
+        (self.proc / "cmdline").write_text("androidboot.slot_suffix=_a\n")
+        (self.parts / "boot_a").write_bytes(self.boot)
+        installed = self.update / "installed"
+        record = f"schema=1\nslot=a\nboot_sha256={hashlib.sha256(self.boot).hexdigest()}\n"
+        installed.write_text(record)
+        for bad in [record.replace("schema=1", "schema=2"), record.replace("slot=a", "slot=b"), record.replace(hashlib.sha256(self.boot).hexdigest(), "0" * 64)]:
+            installed.write_text(bad)
+            refused = self.invoke("fallback")
+            self.assertNotEqual(refused.returncode, 0, refused.stdout)
+            self.assertTrue((self.update / "pending").exists())
+            self.assertTrue((self.update / "feature-commit").exists())
+            self.assertTrue(self.staging.exists())
+        installed.write_text(record)
+        fallback = self.invoke("fallback")
+        self.assertEqual(fallback.returncode, 0, fallback.stderr)
+        self.assertEqual(installed.read_text(), record)
+        self.assertFalse((self.update / "pending").exists())
+        self.assertFalse((self.update / "feature-commit").exists())
+        self.assertFalse(self.staging.exists())
+        self.assertTrue((self.update / "rolled-back").is_file())
+        self.assertEqual(self.base_payload.read_bytes(), b"base-payload")
+
     def test_fallback_cleans_only_when_bcb_proves_old_slot_is_confirmed(self) -> None:
         self.assertEqual(self.invoke("prepare-boot").returncode, 0)
         self.bcb.write_text("selected_slot=a\nslot_b_success=0\nslot_a_success=1\n")
