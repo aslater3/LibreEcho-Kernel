@@ -1445,6 +1445,190 @@ status() {
     [ -e "$INSTALLED" ] && { printf 'installed=1\n'; $BB cat "$INSTALLED"; } || true
 }
 
+# Read-only, fail-closed provenance reporting.  This deliberately has no
+# temporary files or updater-state side effects: the UI may run it while the
+# normal updater is idle, but it must never become another transaction writer.
+provenance_regular_size() {
+    local path=$1 limit=$2 label=$3 size
+    safe_path "$path"
+    [ ! -L "$path" ] && [ -f "$path" ] || fail "provenance-$label-not-regular"
+    size=$($BB stat -c %s "$path" 2>/dev/null) || fail "provenance-$label-stat"
+    valid_uint "$size" || fail "provenance-$label-size"
+    [ "$size" -le "$limit" ] || fail "provenance-$label-too-large"
+}
+
+provenance_hash() {
+    local path=$1 limit=$2 label=$3 before after digest
+    provenance_regular_size "$path" "$limit" "$label"
+    before=$($BB stat -c '%d:%i:%s:%Y:%h' "$path" 2>/dev/null) || fail "provenance-$label-stat"
+    digest=$($BB sha256sum "$path" 2>/dev/null | $BB awk '{print $1}') || fail "provenance-$label-read"
+    valid_hash "$digest" || fail "provenance-$label-hash"
+    after=$($BB stat -c '%d:%i:%s:%Y:%h' "$path" 2>/dev/null) || fail "provenance-$label-stat"
+    [ "$before" = "$after" ] || fail "provenance-$label-changed"
+    printf '%s\n' "$digest"
+}
+
+provenance_manifest() {
+    local manifest=$1 signature=$2 label=$3 manifest_hash signature_hash
+    provenance_regular_size "$manifest" 65536 "$label-manifest"
+    provenance_regular_size "$signature" 8192 "$label-signature"
+    manifest_hash=$(provenance_hash "$manifest" 65536 "$label-manifest")
+    signature_hash=$(provenance_hash "$signature" 8192 "$label-signature")
+    check_manifest "$manifest" "$signature"
+    [ "$(provenance_hash "$manifest" 65536 "$label-manifest")" = "$manifest_hash" ] || fail "provenance-$label-changed"
+    [ "$(provenance_hash "$signature" 8192 "$label-signature")" = "$signature_hash" ] || fail "provenance-$label-signature-changed"
+    PROVENANCE_MANIFEST_HASH=$manifest_hash
+    PROVENANCE_SIGNATURE_HASH=$signature_hash
+}
+
+provenance_record() {
+    local path=$1
+    provenance_regular_size "$path" 8192 installed
+    $BB awk -F= '
+        BEGIN { n=split("schema transaction_id version slot manifest_sha256 manifest_sig_sha256 feature_ids phase", want, " "); ok=1 }
+        { if (NF != 2 || $1 != want[NR] || seen[$1]++) ok=0 }
+        END { if (NR != n) ok=0; exit ok ? 0 : 1 }
+    ' "$path" || fail provenance-installed-record
+    [ "$(value schema "$path")" = 2 ] || fail provenance-installed-schema
+    valid_token "$(value transaction_id "$path")" || fail provenance-installed-transaction
+    valid_token "$(value version "$path")" || fail provenance-installed-version
+    case "$(value slot "$path")" in a|b) ;; *) fail provenance-installed-slot;; esac
+    valid_hash "$(value manifest_sha256 "$path")" || fail provenance-installed-manifest-hash
+    valid_hash "$(value manifest_sig_sha256 "$path")" || fail provenance-installed-signature-hash
+    [ "$(value feature_ids "$path")" = "airplay2,tts,wakeword,stt,assistant" ] || fail provenance-installed-features
+    [ "$(value phase "$path")" = installed ] || fail provenance-installed-phase
+}
+
+provenance_present() { [ -e "$1" ] || [ -L "$1" ]; }
+
+provenance_runtime() {
+    local feature=$1 current=$2 authority authority_sig action field runtime_payload runtime_manifest
+    authority=$ROOT/committed-runtime-$feature.manifest
+    authority_sig=$ROOT/committed-runtime-$feature.sig
+    runtime_payload=$FEATURES/$feature/runtime.squashfs
+    runtime_manifest=$FEATURES/$feature/runtime-manifest.json
+    provenance_present "$authority" || fail "provenance-$feature-runtime-authority-missing"
+    provenance_present "$authority_sig" || fail "provenance-$feature-runtime-authority-incomplete"
+    provenance_present "$runtime_payload" || fail "provenance-$feature-runtime-incomplete"
+    provenance_present "$runtime_manifest" || fail "provenance-$feature-runtime-incomplete"
+    provenance_manifest "$authority" "$authority_sig" "runtime-$feature"
+    action=$(value "feature_${feature}_action" "$authority")
+    [ "$action" = runtime ] || fail "provenance-$feature-runtime-action"
+    for field in base_payload_sha256 base_manifest_sha256 daemon_path daemon_sha256; do
+        [ "$(value "feature_${feature}_$field" "$authority")" = "$(value "feature_${feature}_$field" "$current")" ] || fail "provenance-$feature-runtime-authority-conflict"
+    done
+    PROVENANCE_RUNTIME_PAYLOAD=$(provenance_hash "$runtime_payload" 9223372036854775807 "runtime-$feature-payload")
+    PROVENANCE_RUNTIME_MANIFEST=$(provenance_hash "$runtime_manifest" 262144 "runtime-$feature-manifest")
+    [ "$PROVENANCE_RUNTIME_PAYLOAD" = "$(value "feature_${feature}_sha256" "$authority")" ] || fail "provenance-$feature-runtime-payload-hash"
+    [ "$PROVENANCE_RUNTIME_MANIFEST" = "$(value "feature_${feature}_manifest_sha256" "$authority")" ] || fail "provenance-$feature-runtime-manifest-hash"
+}
+
+provenance_collect() {
+    local installed_hash manifest_hash signature_hash ids feature action daemon_path daemon expected_payload expected_manifest
+    local base_payload base_manifest payload_hash manifest_hash_observed runtime_hash runtime_manifest_hash
+    local authority authority_sig authority_state signature_state runtime_state runtime_manifest_state kind release source_commit
+    local authority_hash authority_sig_hash
+    PROVENANCE_AUX_HASHES=
+    provenance_present "$PENDING" && fail provenance-pending-present
+    provenance_present "$JOURNAL" && fail provenance-feature-commit-present
+    installed_hash=$(provenance_hash "$INSTALLED" 8192 installed)
+    provenance_record "$INSTALLED"
+    provenance_manifest "$COMMITTED_MANIFEST" "$COMMITTED_SIGNATURE" committed
+    manifest_hash=$PROVENANCE_MANIFEST_HASH
+    signature_hash=$PROVENANCE_SIGNATURE_HASH
+    PROVENANCE_INSTALLED_HASH=$installed_hash
+    PROVENANCE_COMMITTED_MANIFEST_HASH=$manifest_hash
+    PROVENANCE_COMMITTED_SIGNATURE_HASH=$signature_hash
+    [ "$(value schema "$INSTALLED")" = 2 ] || fail provenance-installed-schema
+    [ "$(value transaction_id "$INSTALLED")" = "$(value transaction_id "$COMMITTED_MANIFEST")" ] || fail provenance-installed-transaction-mismatch
+    [ "$(value version "$INSTALLED")" = "$(value version "$COMMITTED_MANIFEST")" ] || fail provenance-installed-version-mismatch
+    [ "$(value manifest_sha256 "$INSTALLED")" = "$manifest_hash" ] || fail provenance-installed-manifest-mismatch
+    [ "$(value manifest_sig_sha256 "$INSTALLED")" = "$signature_hash" ] || fail provenance-installed-signature-mismatch
+    ids=$(value feature_ids "$COMMITTED_MANIFEST")
+    [ "$ids" = "airplay2,tts,wakeword,stt,assistant" ] || fail provenance-feature-set
+    PROVENANCE_OUTPUT="schema=libreecho-feature-provenance-v1\ntransaction_id=$(value transaction_id "$COMMITTED_MANIFEST")\ninstalled_sha256=$installed_hash\nmanifest_sha256=$manifest_hash\nmanifest_sig_sha256=$signature_hash\nfeature_ids=$ids"
+    for feature in $(printf '%s' "$ids" | $BB tr ',' ' '); do
+        action=$(value "feature_${feature}_action" "$COMMITTED_MANIFEST")
+        daemon_path=$(value "feature_${feature}_daemon_path" "$COMMITTED_MANIFEST")
+        case "$feature:$daemon_path" in
+            airplay2:usr/local/sbin/libreecho-audio-engine|tts:usr/local/sbin/libreecho-ttsd|wakeword:usr/local/sbin/libreecho-waked|stt:usr/local/sbin/libreecho-sttd|assistant:usr/local/sbin/libreecho-agentd) ;;
+            *) fail provenance-daemon-path;;
+        esac
+        base_payload=$FEATURES/$feature/payload.squashfs
+        base_manifest=$FEATURES/$feature/manifest.json
+        case "$action" in
+            preserve|runtime)
+                expected_payload=$(value "feature_${feature}_base_payload_sha256" "$COMMITTED_MANIFEST")
+                expected_manifest=$(value "feature_${feature}_base_manifest_sha256" "$COMMITTED_MANIFEST")
+                kind=base; release=$(value "feature_${feature}_release" "$COMMITTED_MANIFEST"); source_commit=$(value "feature_${feature}_source_commit" "$COMMITTED_MANIFEST")
+                ;;
+            replace)
+                expected_payload=$(value "feature_${feature}_sha256" "$COMMITTED_MANIFEST")
+                expected_manifest=$(value "feature_${feature}_manifest_sha256" "$COMMITTED_MANIFEST")
+                kind=base; release=$(value "feature_${feature}_release" "$COMMITTED_MANIFEST"); source_commit=$(value "feature_${feature}_source_commit" "$COMMITTED_MANIFEST")
+                ;;
+            *) fail provenance-feature-action;;
+        esac
+        payload_hash=$(provenance_hash "$base_payload" 9223372036854775807 "$feature-payload")
+        manifest_hash_observed=$(provenance_hash "$base_manifest" 262144 "$feature-manifest")
+        [ "$payload_hash" = "$expected_payload" ] || fail "provenance-$feature-payload-mismatch"
+        [ "$manifest_hash_observed" = "$expected_manifest" ] || fail "provenance-$feature-manifest-mismatch"
+        runtime_hash=none; runtime_manifest_hash=none
+        authority=$ROOT/committed-runtime-$feature.manifest
+        authority_sig=$ROOT/committed-runtime-$feature.sig
+        runtime_state=$(provenance_present "$FEATURES/$feature/runtime.squashfs" && printf 1 || printf 0)
+        runtime_manifest_state=$(provenance_present "$FEATURES/$feature/runtime-manifest.json" && printf 1 || printf 0)
+        authority_state=$(provenance_present "$authority" && printf 1 || printf 0)
+        signature_state=$(provenance_present "$authority_sig" && printf 1 || printf 0)
+        case "$action:$authority_state:$signature_state:$runtime_state:$runtime_manifest_state" in
+            runtime:1:1:1:1)
+                provenance_runtime "$feature" "$COMMITTED_MANIFEST"
+                authority_hash=$(provenance_hash "$authority" 65536 "runtime-$feature-authority")
+                authority_sig_hash=$(provenance_hash "$authority_sig" 8192 "runtime-$feature-authority-signature")
+                PROVENANCE_AUX_HASHES="$PROVENANCE_AUX_HASHES$feature=$authority_hash:$authority_sig_hash "
+                runtime_hash=$PROVENANCE_RUNTIME_PAYLOAD; runtime_manifest_hash=$PROVENANCE_RUNTIME_MANIFEST; kind=runtime
+                ;;
+            preserve:1:1:1:1)
+                provenance_runtime "$feature" "$COMMITTED_MANIFEST"
+                authority_hash=$(provenance_hash "$authority" 65536 "runtime-$feature-authority")
+                authority_sig_hash=$(provenance_hash "$authority_sig" 8192 "runtime-$feature-authority-signature")
+                PROVENANCE_AUX_HASHES="$PROVENANCE_AUX_HASHES$feature=$authority_hash:$authority_sig_hash "
+                release=$(value "feature_${feature}_release" "$authority"); source_commit=$(value "feature_${feature}_source_commit" "$authority")
+                runtime_hash=$PROVENANCE_RUNTIME_PAYLOAD; runtime_manifest_hash=$PROVENANCE_RUNTIME_MANIFEST; kind=runtime
+                ;;
+            preserve:0:0:0:0) ;;
+            replace:0:0:0:0) ;;
+            *) fail "provenance-$feature-runtime-incomplete";;
+        esac
+        daemon=$RUN_ROOT/libreecho/features/$feature/root/$daemon_path
+        daemon_hash=$(provenance_hash "$daemon" 9223372036854775807 "$feature-daemon")
+        [ "$daemon_hash" = "$(value "feature_${feature}_daemon_sha256" "$COMMITTED_MANIFEST")" ] || fail "provenance-$feature-daemon-mismatch"
+        PROVENANCE_OUTPUT="$PROVENANCE_OUTPUT\nfeature_${feature}_action=$action\nfeature_${feature}_release=$release\nfeature_${feature}_source_commit=$source_commit\nfeature_${feature}_kind=$kind\nfeature_${feature}_payload_sha256=$payload_hash\nfeature_${feature}_manifest_sha256=$manifest_hash_observed\nfeature_${feature}_runtime_sha256=$runtime_hash\nfeature_${feature}_runtime_manifest_sha256=$runtime_manifest_hash\nfeature_${feature}_daemon_sha256=$daemon_hash"
+    done
+    [ "${#PROVENANCE_OUTPUT}" -le 8192 ] || fail provenance-output-too-large
+}
+
+provenance() {
+    local first second first_aux second_aux installed_hash manifest_hash signature_hash
+    provenance_collect
+    first=$PROVENANCE_OUTPUT
+    first_aux=$PROVENANCE_AUX_HASHES
+    installed_hash=$(provenance_hash "$INSTALLED" 8192 installed)
+    manifest_hash=$(provenance_hash "$COMMITTED_MANIFEST" 65536 committed-manifest)
+    signature_hash=$(provenance_hash "$COMMITTED_SIGNATURE" 8192 committed-signature)
+    [ "$installed_hash" = "$PROVENANCE_INSTALLED_HASH" ] || fail provenance-installed-changed
+    [ "$manifest_hash" = "$PROVENANCE_COMMITTED_MANIFEST_HASH" ] || fail provenance-manifest-changed
+    [ "$signature_hash" = "$PROVENANCE_COMMITTED_SIGNATURE_HASH" ] || fail provenance-signature-changed
+    provenance_collect
+    second=$PROVENANCE_OUTPUT
+    second_aux=$PROVENANCE_AUX_HASHES
+    [ "$first" = "$second" ] || fail provenance-observation-changed
+    [ "$first_aux" = "$second_aux" ] || fail provenance-observation-changed
+    provenance_present "$PENDING" && fail provenance-pending-appeared
+    provenance_present "$JOURNAL" && fail provenance-feature-commit-appeared
+    printf '%b\n' "$second"
+}
+
 case "${1:-}" in
  preflight) [ "$#" -ge 2 ] && [ "$#" -le 3 ] || fail usage; preflight "$2" "${3:-prewrite}";;
  prepare-boot) [ "$#" -eq 1 ] || fail usage; prepare_boot;;
@@ -1454,6 +1638,7 @@ case "${1:-}" in
  recover-installed) [ "$#" -eq 1 ] || fail usage; recover_installed;;
  commit-after-confirm) [ "$#" -eq 1 ] || fail usage; commit;;
  status) [ "$#" -eq 1 ] || fail usage; status;;
+ provenance) [ "$#" -eq 1 ] || fail usage; provenance;;
  abort-before-activation) [ "$#" -eq 1 ] || fail usage; abort;;
  fallback) [ "$#" -eq 1 ] || fail usage; fallback;;
  *) fail usage;;
