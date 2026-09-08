@@ -54,6 +54,7 @@ jobs:
             test_recovery_image_tools.py \
             test_source_offer_tools.py \
             ota/test_ota_v2_implementation.py \
+            ota/test_feature_provenance.py \
             ota/test_service_identity.py \
             ota/test_dev_discovery.py
 
