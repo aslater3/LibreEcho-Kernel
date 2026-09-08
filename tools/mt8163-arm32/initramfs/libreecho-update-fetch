@@ -972,8 +972,10 @@ download_and_inspect()
     check_status_write downloading "" "" true
     [ ! -L "$PART" ] || die download_type
     RESET_USED=0
-    if [ "$channel" = dev ] && { [ -e "$PACKAGE" ] || [ -L "$PACKAGE" ]; }; then
-        if [ -f "$PACKAGE" ] && [ ! -L "$PACKAGE" ] &&
+    if [ -e "$PACKAGE" ] || [ -L "$PACKAGE" ]; then
+        # Only immutable dev discovery binds a cached package to this check.
+        # Stable must refresh its mutable alias and retain the previous bytes.
+        if [ "$channel" = dev ] && [ -f "$PACKAGE" ] && [ ! -L "$PACKAGE" ] &&
             [ "$(stat -c %s "$PACKAGE")" -le "$MAX_BYTES" ] &&
             [ "$(sha256sum "$PACKAGE" | $BB awk '{print $1}')" = "$DEV_OTA_SHA256" ]; then
             inspection=$("$UPDATE" inspect "$PACKAGE") || die downloaded_package_invalid true
