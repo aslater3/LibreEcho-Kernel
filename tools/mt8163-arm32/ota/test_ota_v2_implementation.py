@@ -1418,8 +1418,10 @@ esac
             ]
             self.assertEqual(leftovers, [], leftovers)
 
-        def run_case(mode: str, part: bytes | None) -> subprocess.CompletedProcess[str]:
+        def run_case(mode: str, part: bytes | None, cached: bytes | None = None) -> subprocess.CompletedProcess[str]:
             reset_stage()
+            if cached is not None:
+                (self.update_root / "incoming/github-update.ota.tar").write_bytes(cached)
             if part is not None:
                 (self.update_root / "incoming/github-update.ota.tar.part").write_bytes(part)
             env = base_env | {"SCENARIO": mode}
@@ -1429,6 +1431,15 @@ esac
             return run(["/bin/busybox", "sh", str(fetcher), "check"], env=env)
 
         raw = self.package.read_bytes()
+        # Stable checks must refresh a retained dev/stable control package.
+        for cached in (b"previous-dev-control", raw):
+            for partial in (None, raw[: len(raw) // 2]):
+                result = run_case("206", partial, cached=cached)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertEqual((self.update_root / "incoming/github-update.ota.tar").read_bytes(), raw)
+                retained = self.update_root / ("quarantine-" + hashlib.sha256(cached).hexdigest() + ".bad")
+                self.assertEqual(retained.read_bytes(), cached)
+                assert_no_control_temps()
         for mode in ("206", "redirect206", "200-length", "200-nolength", "416"):
             result = run_case(mode, raw[: len(raw) // 2] if mode != "416" else b"corrupt")
             self.assertEqual(result.returncode, 0, mode + ": " + result.stderr + result.stdout)
