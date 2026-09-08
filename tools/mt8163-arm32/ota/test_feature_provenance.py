@@ -254,6 +254,9 @@ class ProvenanceFixture:
         old_signature_hash = hashlib.sha256(self.signature.read_bytes()).hexdigest()
         self.committed.write_bytes(raw)
         self.signature.write_bytes(sign(self.key, raw))
+        wakeword_authority = self.update / "committed-runtime-wakeword.manifest"
+        wakeword_authority.write_bytes(raw)
+        (self.update / "committed-runtime-wakeword.sig").write_bytes(sign(self.key, raw))
         installed = (self.update / "installed").read_text()
         installed = installed.replace(
             f"manifest_sha256={old_manifest_hash}",
@@ -293,6 +296,67 @@ class ProvenanceTests(unittest.TestCase):
         self.assertIn("feature_stt_runtime_manifest_sha256=" + hashlib.sha256(b"stt-inherited-runtime-manifest").hexdigest(), lines)
         after = snapshot_tree(self.fixture.root)
         self.assertEqual(before, after)
+
+    def test_current_runtime_rejects_an_older_signed_authority_and_runtime(self) -> None:
+        older_runtime = b"wakeword-older-runtime"
+        older_runtime_manifest = b"wakeword-older-runtime-manifest"
+        authority = self.fixture.current_manifest
+        replacements = {
+            "transaction_id": ("txn-provenance-current", "txn-provenance-runtime-wakeword"),
+            "feature_wakeword_release": ("0.13.14", "0.13.13"),
+            "feature_wakeword_asset": (
+                "libreecho-radar-puffin-0.13.14-wakeword.runtime.squashfs",
+                "libreecho-radar-puffin-0.13.13-wakeword.runtime.squashfs",
+            ),
+            "feature_wakeword_size": (str(len(b"wakeword-runtime")), str(len(older_runtime))),
+            "feature_wakeword_sha256": (
+                hashlib.sha256(b"wakeword-runtime").hexdigest(),
+                hashlib.sha256(older_runtime).hexdigest(),
+            ),
+            "feature_wakeword_manifest_asset": (
+                "libreecho-radar-puffin-0.13.14-wakeword.runtime-manifest.json",
+                "libreecho-radar-puffin-0.13.13-wakeword.runtime-manifest.json",
+            ),
+            "feature_wakeword_manifest_size": (
+                str(len(b"wakeword-runtime-manifest")),
+                str(len(older_runtime_manifest)),
+            ),
+            "feature_wakeword_manifest_sha256": (
+                hashlib.sha256(b"wakeword-runtime-manifest").hexdigest(),
+                hashlib.sha256(older_runtime_manifest).hexdigest(),
+            ),
+        }
+        for key, (old, new) in replacements.items():
+            authority = authority.replace(f"{key}={old}\n".encode(), f"{key}={new}\n".encode())
+        (self.fixture.features / "wakeword/runtime.squashfs").write_bytes(older_runtime)
+        (self.fixture.features / "wakeword/runtime-manifest.json").write_bytes(older_runtime_manifest)
+        authority_path = self.fixture.update / "committed-runtime-wakeword.manifest"
+        authority_path.write_bytes(authority)
+        (self.fixture.update / "committed-runtime-wakeword.sig").write_bytes(sign(self.fixture.key, authority))
+
+        result = self.invoke()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_current_runtime_authority_is_accepted(self) -> None:
+        result = self.invoke()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "feature_wakeword_runtime_sha256=" + hashlib.sha256(b"wakeword-runtime").hexdigest(),
+            result.stdout.splitlines(),
+        )
+
+    def test_older_preserved_runtime_authority_is_accepted(self) -> None:
+        result = self.invoke()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("feature_stt_release=0.13.13", result.stdout.splitlines())
+        self.assertIn(
+            "feature_stt_runtime_sha256=" + hashlib.sha256(b"stt-inherited-runtime").hexdigest(),
+            result.stdout.splitlines(),
+        )
 
     def test_feature_metadata_accepts_256k_bound_and_rejects_one_byte_over(self) -> None:
         large = b'{"payload":"' + (b"x" * 200000) + b'"}'
