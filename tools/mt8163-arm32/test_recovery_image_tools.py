@@ -3339,6 +3339,53 @@ feature_daemon_required tts
             cleanup,
         )
 
+    def test_fetch_quarantine_survives_current_and_prior_cleanup(self) -> None:
+        """Run the real writer, then boot cleanup on its persistent output."""
+        fetch = (TOOLS_DIR / "initramfs/libreecho-update-fetch").read_text()
+        function = 'quarantine_file()\n' + fetch.split('quarantine_file()\n', 1)[1].split('\ninspect_control_part()', 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            data = Path(temporary) / 'data'
+            root = data / 'libreecho/update'
+            root.mkdir(parents=True)
+            package = root / 'github-update.ota.tar'
+            package.write_bytes(b'previous verified candidate')
+            script = 'BB=busybox\ndie() { exit 1; }\n' + function + '\nquarantine_file "$ROOT/github-update.ota.tar"\n'
+            result = subprocess.run(['/bin/sh', '-c', script], env={**os.environ, 'ROOT': str(root)}, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            retained = list(root.glob('quarantine-*.bad'))
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0].read_bytes(), b'previous verified candidate')
+            self.assertFalse((root / 'quarantine').exists())
+            for _ in range(2):  # candidate boot and fallback share userdata
+                result = self._run_cleanup(data)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(retained[0].read_bytes(), b'previous verified candidate')
+
+            # Repeated identical evidence is deduplicated, never overwritten.
+            package.write_bytes(b'previous verified candidate')
+            result = subprocess.run(['/bin/sh', '-c', script], env={**os.environ, 'ROOT': str(root)}, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(package.exists())
+            self.assertEqual(len(list(root.glob('quarantine-*.bad'))), 1)
+            # Reject a substituted target while preserving both source and link.
+            retained[0].unlink()
+            outside = Path(temporary) / 'outside'
+            outside.write_bytes(b'untouched')
+            retained[0].symlink_to(outside)
+            package.write_bytes(b'previous verified candidate')
+            result = subprocess.run(['/bin/sh', '-c', script], env={**os.environ, 'ROOT': str(root)}, capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(outside.read_bytes(), b'untouched')
+            self.assertTrue(package.exists())
+            retained[0].unlink()
+            # Capacity exhaustion is explicit and does not evict history.
+            for i in range(8):
+                (root / ('quarantine-' + str(i) * 64 + '.bad')).write_bytes(b'history')
+            result = subprocess.run(['/bin/sh', '-c', script], env={**os.environ, 'ROOT': str(root)}, capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(package.exists())
+            self.assertEqual(len(list(root.glob('quarantine-*.bad'))), 8)
+
     def test_userdata_cleanup_preserves_persisted_ota_channel(self) -> None:
         cleanup = TOOLS_DIR / "initramfs/libreecho-data-cleanup"
         with tempfile.TemporaryDirectory() as temporary:

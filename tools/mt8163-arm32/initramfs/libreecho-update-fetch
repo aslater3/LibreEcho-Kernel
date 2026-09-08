@@ -599,6 +599,9 @@ cleanup_locks()
 
 fetch_lock()
 {
+    # Transport serialization is boot-local, not persistent recovery evidence.
+    # A power loss must not leave a directory that blocks fallback cleanup.
+    LOCK=$RUN_ROOT/libreecho/fetch.lock
     $BB mkdir "$LOCK" 2>/dev/null || die download_busy
     FETCH_LOCK_HELD=1
     recover_stale_download_artifacts
@@ -766,11 +769,34 @@ probe_range()
 
 quarantine_file()
 {
+    local source target digest entry count size
     source=$1
-    [ -f "$source" ] && [ ! -L "$source" ] || return 0
-    $BB mkdir -p "$ROOT/quarantine" || die quarantine_create
-    target=$ROOT/quarantine/${source##*/}.bad
-    $BB rm -f "$target" 2>/dev/null
+    [ -e "$source" ] || [ -L "$source" ] || return 0
+    [ -f "$source" ] && [ ! -L "$source" ] || die quarantine_type
+    [ "$($BB stat -c %h "$source")" = 1 ] || die quarantine_type
+    size=$($BB stat -c %s "$source") || die quarantine_size
+    [ "$size" -le 33554432 ] || die quarantine_size
+    digest=$($BB sha256sum "$source" | $BB awk '{print $1}')
+    printf '%s\n' "$digest" | $BB grep -Eq '^[a-f0-9]{64}$' || die quarantine_identity
+    # Flat inert evidence is compatible with the older slot's cleanup contract.
+    # Never create a new persistent directory on shared userdata.
+    target=$ROOT/quarantine-$digest.bad
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        [ -f "$target" ] && [ ! -L "$target" ] || die quarantine_type
+        [ "$($BB stat -c %h "$target")" = 1 ] || die quarantine_type
+        [ "$($BB stat -c %s "$target")" = "$size" ] || die quarantine_identity
+        [ "$($BB sha256sum "$target" | $BB awk '{print $1}')" = "$digest" ] || die quarantine_identity
+        $BB rm "$source" || die quarantine_commit
+        return 0
+    fi
+    count=0
+    for entry in "$ROOT"/quarantine-*.bad; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        count=$((count + 1))
+    done
+    # Preserve history and stop explicitly rather than silently evicting it.
+    [ "$count" -lt 8 ] || die quarantine_capacity
+    $BB chmod 600 "$source" || die quarantine_mode
     $BB mv "$source" "$target" || die quarantine_commit
 }
 

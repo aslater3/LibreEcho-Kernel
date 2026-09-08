@@ -1238,7 +1238,7 @@ cp "$src" "$out" || exit 23
         self.assertIn("UPDATE_AVAILABLE version=0.13.11", corrupt.stdout)
         self.assertIn("range=0-0", (self.root / "control-part.log").read_text())
         self.assertNotIn("resume=--", (self.root / "control-part.log").read_text())
-        self.assertTrue((self.update_root / "quarantine/github-update.ota.tar.part.bad").is_file())
+        self.assertEqual((self.update_root / ("quarantine-" + hashlib.sha256(b"X" * self.package.stat().st_size).hexdigest() + ".bad")).read_bytes(), b"X" * self.package.stat().st_size)
         self.assertEqual((self.update_root / "incoming/github-update.ota.tar").read_bytes(), self.package.read_bytes())
 
         reset_stage()
@@ -1433,7 +1433,8 @@ esac
             result = run_case(mode, raw[: len(raw) // 2] if mode != "416" else b"corrupt")
             self.assertEqual(result.returncode, 0, mode + ": " + result.stderr + result.stdout)
             self.assertEqual((self.update_root / "incoming/github-update.ota.tar").read_bytes(), raw)
-            if mode == "416": self.assertTrue((self.update_root / "quarantine/github-update.ota.tar.part.bad").is_file())
+            if mode == "416":
+                self.assertEqual((self.update_root / ("quarantine-" + hashlib.sha256(b"corrupt").hexdigest() + ".bad")).read_bytes(), b"corrupt")
             assert_no_control_temps()
         for mode in ("malformed206", "contradictory206", "interrupted", "transport-tls", "oversized-chunked", "oversized-length"):
             original = b"partial-control"
@@ -1684,7 +1685,7 @@ done
         locked_regular.write_text("must-survive")
         locked_manifest = self.update_root / ".control-owned.424249"
         locked_manifest.write_text(f"{locked_regular}\n")
-        lock = self.update_root / "fetch.lock"
+        lock = self.run_root / "libreecho/fetch.lock"
         lock.mkdir()
         locked = invoke()
         self.assertNotEqual(locked.returncode, 0)
