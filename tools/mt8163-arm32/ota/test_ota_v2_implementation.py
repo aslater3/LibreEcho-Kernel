@@ -272,7 +272,7 @@ def manifest(features: list[dict[str, object]]) -> dict[str, object]:
         "minimum_updater_schema": 2,
         "feature_asset_base": "github-release-channel",
         "commit_policy": "after-slot-confirm",
-        "feature_ids": ",".join(str(f["feature_id"]) for f in records),                                               
+        "feature_ids": ",".join(str(f["feature_id"]) for f in records),
         "boot_filename": "boot.img",
         "boot_size": BOOT_SIZE,
         "boot_sha256": "f" * 64,
