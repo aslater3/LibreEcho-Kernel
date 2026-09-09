@@ -52,6 +52,7 @@ jobs:
             test_build_wifi_dtb.py \
             test_verify_radar_puffin_dtb.py \
             test_recovery_image_tools.py \
+            test_vendor_import_compat.py \
             test_source_offer_tools.py \
             ota/test_ota_v2_implementation.py \
             ota/test_feature_provenance.py \
@@ -67,6 +68,7 @@ jobs:
           python -m py_compile \
             tools/mt8163-arm32/build_recovery_image.py \
             tools/mt8163-arm32/verify_recovery_image.py \
+            tools/mt8163-arm32/verify_recovery_image_0_13_14.py \
             tools/mt8163-arm32/ota/make_ota_bundle.py \
             tools/mt8163-arm32/ota/feature_manifest.py \
             tools/mt8163-arm32/feature_runtime/package_runtime.py \
