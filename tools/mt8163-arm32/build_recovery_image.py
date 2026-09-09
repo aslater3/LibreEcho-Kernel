@@ -1034,7 +1034,7 @@ def add_ui_bundle(stage: Path, bundle: Path, source: Path,
     for binary in (
         "libreecho-web", "libreecho-logd", "libreecho-networkd",
         "libreecho-timed", "libreecho-audiod", "libreecho-micd",
-        "libreecho-ledd", "libreecho-buttond", "libreecho-btd",
+        "libreecho-ledd", "libreecho-buttond", "libreecho-radiod", "libreecho-btd",
         "libreecho-airplayd", "libreecho-wyomingd",
         "libreecho-sttd-wyoming", "libreecho-ttsd-wyoming",
     ):
@@ -1043,7 +1043,7 @@ def add_ui_bundle(stage: Path, bundle: Path, source: Path,
         "libreecho-web.init", "libreecho-logd.init", "libreecho-networkd.init",
         "libreecho-timed.init", "libreecho-audiod.init",
         "libreecho-micd.init", "libreecho-ledd.init", "libreecho-buttond.init",
-        "libreecho-btd.init",
+        "libreecho-radiod.init", "libreecho-btd.init",
         "libreecho-airplayd.init", "libreecho-ttsd.init", "libreecho-waked.init",
         "libreecho-sttd.init", "libreecho-agentd.init", "libreecho-wyomingd.init",
     ):
