@@ -44,7 +44,7 @@ BOOT_ENVELOPE_SHA256 = "e83e11b9ef8338cf3262144870790d2b005df16baf4d119849658943
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
-CONNECTIVITY_IMPORTER_SHA256 = "7601145a15750abce6a4c21d20326ecbdc1e4dc36e5670c0ca3cc9d1bf1f1326"
+CONNECTIVITY_IMPORTER_SHA256 = "aa00c0fbfd6889168e0bd72627c5e5e187c6cab72c8953b90d53cc51cccadbd5"
 WPA_SUPPLICANT_VERSION = "2.10"
 WPA_SOURCE_SHA256 = "20df7ae5154b3830355f8ab4269123a87affdea59fe74fe9292a91d0d7e17b2f"
 WPA_SOURCE_URL = "https://w1.fi/releases/wpa_supplicant-2.10.tar.gz"
@@ -406,6 +406,9 @@ def add_overlay(stage: Path, overlay: Path, busybox: Path, loader: Path,
         ),
         "vendor-assets/mt8163-v181-stock-v1.tsv": (
             "etc/libreecho/vendor-assets/mt8163-v181-stock-v1.tsv", 0o644,
+        ),
+        "vendor-assets/mt8163-v181-stock-v2.tsv": (
+            "etc/libreecho/vendor-assets/mt8163-v181-stock-v2.tsv", 0o644,
         ),
         "libreecho-update": ("usr/local/sbin/libreecho-update", 0o755),
         "libreecho-update-fetch": ("usr/local/sbin/libreecho-update-fetch", 0o755),
@@ -810,8 +813,6 @@ def validate_ui_startup_contract(bundle: Path) -> None:
             "unmount_runtime()",
             "mount_runtime || return 1",
             "start) start_service",
-            # AirPlay is enabled by default; the persisted integration bit is
-            # the explicit, user-controlled disable (not a boot-time default).
             "airplay_enabled_at_boot=1",
             "integrations & 16",
             "persistent AirPlay disable",
@@ -1800,9 +1801,6 @@ def validate_stage(stage: Path) -> None:
         if ident is not None and ident != (1, 40):
             raise SystemExit(f"ERROR: non-ARM32 ELF in initramfs: {path} class={ident[0]} machine={ident[1]}")
 
-    # /init is intentionally a script.  Only the native helper is required
-    # to be a static ARM32 ELF here; treating the script as an ELF was the
-    # stale-builder bug that allowed the stock PID 1 back into the image.
     output = subprocess.run(
         ["readelf", "-l", str(stage / "sbin/adbd")], check=True,
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
