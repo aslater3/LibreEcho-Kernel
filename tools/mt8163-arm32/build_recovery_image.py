@@ -44,7 +44,7 @@ BOOT_ENVELOPE_SHA256 = "e83e11b9ef8338cf3262144870790d2b005df16baf4d119849658943
 PROVEN_ZIMAGE_SHA256 = "4e144959eb0ffaee91b37d05a0f871863a74f4abb1bad0474c2fec358d5176a6"
 PROVEN_SYSTEM_MAP_SHA256 = "527292112edd28e8facf2998eefe2224b08a05b193efc73634cd998e9113ba95"
 CONNECTIVITY_BUNDLE_ID = "mt8163-v181-stock-v1"
-CONNECTIVITY_IMPORTER_SHA256 = "aa00c0fbfd6889168e0bd72627c5e5e187c6cab72c8953b90d53cc51cccadbd5"
+CONNECTIVITY_IMPORTER_SHA256 = "e9d98d059d7f0082d28bad134bf72fa6b6c4318a104d7de4001d9984df0e0854"
 WPA_SUPPLICANT_VERSION = "2.10"
 WPA_SOURCE_SHA256 = "20df7ae5154b3830355f8ab4269123a87affdea59fe74fe9292a91d0d7e17b2f"
 WPA_SOURCE_URL = "https://w1.fi/releases/wpa_supplicant-2.10.tar.gz"
@@ -2528,8 +2528,7 @@ def main() -> None:
         if stt_payload_enabled:
             add_stt_external_payload(
                 args.stt_payload.resolve(),
-                args.stt_payload_manifest.resolve(),
-                manifest,
+                args.stt_payload_manifest.resolve(), manifest,
             )
         if assistant_payload_enabled:
             add_assistant_external_payload(

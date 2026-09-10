@@ -13,7 +13,7 @@ import verify_recovery_image_0_13_14 as _impl
 
 
 CONNECTIVITY_IMPORTER_SHA256 = (
-    "aa00c0fbfd6889168e0bd72627c5e5e187c6cab72c8953b90d53cc51cccadbd5"
+    "e9d98d059d7f0082d28bad134bf72fa6b6c4318a104d7de4001d9984df0e0854"
 )
 V2_MANIFEST = "vendor-assets/mt8163-v181-stock-v2.tsv"
 V2_TARGET = "etc/libreecho/vendor-assets/mt8163-v181-stock-v2.tsv"
