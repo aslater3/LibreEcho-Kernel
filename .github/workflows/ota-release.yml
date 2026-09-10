@@ -39,7 +39,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y device-tree-compiler
-          python -m pip install --disable-pip-version-check PyNaCl==1.5.0
+          python -m pip install --disable-pip-version-check PyNaCl==1.6.2
 
       - name: Run maintained Platform suites
         shell: bash
