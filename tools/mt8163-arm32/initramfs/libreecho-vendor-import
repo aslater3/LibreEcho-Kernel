@@ -308,6 +308,21 @@ select_source_layout()
     if [ "$enrolled_present" -eq 1 ]; then
         fail VENDOR_IMPORT_ENROLLED_SET_MISMATCH
     fi
+
+    # No globally approved or device-enrolled revision matched. Before calling
+    # this a generic hash miss, determine whether one safe stock layout contains
+    # the complete expected four-file MT8163 set and passes the same structural
+    # checks used by the explicit one-boot force path. This is discovery only:
+    # no bytes are copied and no local trust record is created until the owner
+    # explicitly opts in through the authenticated setup flow.
+    for candidate_layout in $SOURCE_LAYOUTS; do
+        if layout_is_safe "$candidate_layout" && \
+                layout_matches "$candidate_layout" forced "$SPEC"; then
+            SELECTED_LAYOUT=$candidate_layout
+            fail VENDOR_IMPORT_UNKNOWN_COMPATIBLE_SET
+        fi
+    done
+
     fail VENDOR_IMPORT_NO_HASH_PINNED_SET
 }
 
