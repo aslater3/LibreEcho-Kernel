@@ -173,7 +173,7 @@ class VendorImporterCompatTests(unittest.TestCase):
             self.assertIn("VENDOR_IMPORT_NO_HASH_PINNED_SET", result.stderr)
             self.assertIn("error=VENDOR_IMPORT_NO_HASH_PINNED_SET\n", status.read_text())
 
-    def test_safe_unknown_layout_is_not_misreported_as_a_symlink_failure(self) -> None:
+    def test_safe_structurally_compatible_unknown_set_is_offerable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "system-a"
@@ -187,6 +187,22 @@ class VendorImporterCompatTests(unittest.TestCase):
             result, _, status = self.run_importer(root, source)
             self.assertEqual(result.returncode, 2)
             self.assertNotIn("VENDOR_IMPORT_SOURCE_PATH_SYMLINK", result.stderr)
+            self.assertIn("VENDOR_IMPORT_UNKNOWN_COMPATIBLE_SET", result.stderr)
+            status_text = status.read_text()
+            self.assertIn("error=VENDOR_IMPORT_UNKNOWN_COMPATIBLE_SET\n", status_text)
+            self.assertIn("source_layout=system/vendor/firmware\n", status_text)
+
+    def test_malformed_unknown_set_is_not_offerable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "system-a"
+            payloads = unknown_payloads()
+            payloads["ROMv2_lm_patch_1_0_hdr.bin"] = patch_payload(b"broken", 0x31)
+            write_payloads(source, payloads)
+
+            result, _, status = self.run_importer(root, source)
+            self.assertEqual(result.returncode, 2)
+            self.assertNotIn("VENDOR_IMPORT_UNKNOWN_COMPATIBLE_SET", result.stderr)
             self.assertIn("VENDOR_IMPORT_NO_HASH_PINNED_SET", result.stderr)
             self.assertIn("error=VENDOR_IMPORT_NO_HASH_PINNED_SET\n", status.read_text())
 
