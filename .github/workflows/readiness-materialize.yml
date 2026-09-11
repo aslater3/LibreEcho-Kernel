@@ -1,0 +1,15 @@
+name: Materialize reviewed 0.14 source objects
+on:
+  push:
+    branches: ['fix/014-readiness-materialize']
+    paths: ['.github/workflows/readiness-materialize.yml']
+permissions:
+  contents: write
+jobs:
+  materialize:
+    uses: aslater3/LibreEcho-UI/.github/workflows/materialize-source-objects.yml@ce4b02c6aae35b338eb8f9bf0d53315c925fca37
+    with:
+      base_commit: 8a65ab28166c85bd0998461ca229969422fa700d
+      delta_blobs: 060fa737c60e3cb25c813cb5a7d41a07e4bdf200
+      delta_sha256: d8ada2751ca5513cee811b346960adb1ab1dd227c945b447da525bbe612d9acc
+      expected_tree: 57cf4175ece9eea25a0c08375e98a42f31b51214
