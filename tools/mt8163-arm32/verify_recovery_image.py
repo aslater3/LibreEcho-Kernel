@@ -1785,6 +1785,9 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         b"FASTBOOT_PLEASE", b"/tmp/runme", b"functionfs", b"/dev/stpwmt", b"/dev/stpbt",
         b"PARTNAME=expdb", b"/sys/class/block/mmcblk0p7", b"20480", b"bs=15 count=1",
         b"stat -c '%t:%T'",
+        b"for role_sx in /sys/class/usb_role/*/role; do",
+        b'printf device > "$role_sx"', b"usb-role-pinned-device:",
+        b"usb-role-pin-failed:",
     ):
         if marker not in control.data:
             fail(f"libreecho-init lacks {marker!r}")
