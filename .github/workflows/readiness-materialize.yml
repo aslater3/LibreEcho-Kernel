@@ -7,9 +7,102 @@ permissions:
   contents: write
 jobs:
   materialize:
-    uses: aslater3/LibreEcho-UI/.github/workflows/materialize-source-objects.yml@ce4b02c6aae35b338eb8f9bf0d53315c925fca37
-    with:
-      base_commit: 8a65ab28166c85bd0998461ca229969422fa700d
-      delta_blobs: 060fa737c60e3cb25c813cb5a7d41a07e4bdf200
-      delta_sha256: d8ada2751ca5513cee811b346960adb1ab1dd227c945b447da525bbe612d9acc
-      expected_tree: 57cf4175ece9eea25a0c08375e98a42f31b51214
+    if: github.repository == 'aslater3/LibreEcho-Platform' && github.ref == 'refs/heads/fix/014-readiness-materialize'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: 8a65ab28166c85bd0998461ca229969422fa700d
+          persist-credentials: false
+          path: candidate
+      - name: Verify the three tested files and preserve all other Git entries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess, urllib.request
+          root = pathlib.Path('candidate').resolve()
+          repo = 'aslater3/LibreEcho-Platform'
+          base_commit = '8a65ab28166c85bd0998461ca229969422fa700d'
+          base_tree = '0f814409416cbaec734bd253d8c26e08dfcc9e51'
+          expected = {
+              'tools/mt8163-arm32/test_verify_radar_puffin_dtb.py': ('100644', '76d766a027730f9c4814400ad2a67b43166a84ea'),
+              'tools/mt8163-arm32/verify_radar_puffin_dtb.py': ('100644', '4a00f311ac114d49e554f2afc79d5c628d148414'),
+              'tools/mt8163-arm32/verify_recovery_image.py': ('100755', '70488c2b9135d814615ce5fcf09022736b9f9528'),
+          }
+          def api(endpoint, data=None):
+              # Immutable source objects only; no commits, refs or releases.
+              assert endpoint.split('/')[0] in ('blobs', 'trees')
+              request = urllib.request.Request('https://api.github.com/repos/' + repo + '/git/' + endpoint,
+                  data=None if data is None else json.dumps(data).encode(),
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
+                           'X-GitHub-Api-Version': '2022-11-28'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+          def git(*args):
+              return subprocess.check_output(['git', *args], cwd=root, timeout=20).decode().strip()
+          assert git('rev-parse', 'HEAD') == base_commit
+          assert git('rev-parse', 'HEAD^{tree}') == base_tree
+          packed = base64.b64decode(api('blobs/060fa737c60e3cb25c813cb5a7d41a07e4bdf200')['content'])
+          assert len(packed) < 100000
+          assert hashlib.sha256(packed).hexdigest() == 'd8ada2751ca5513cee811b346960adb1ab1dd227c945b447da525bbe612d9acc'
+          decoder = lzma.LZMADecompressor(memlimit=128*1024*1024)
+          raw = decoder.decompress(packed, max_length=1000000)
+          assert decoder.eof and not decoder.unused_data
+          spec = json.loads(raw)
+          assert spec['repository'] == repo and spec['base_commit'] == base_commit
+          # The exported local snapshot does not contain the entire Git tree.
+          # Bind each tested output blob explicitly; preserve untouched entries
+          # from the independently read, exact remote base tree above.
+          assert len(spec['changes']) == len(expected)
+          seen = set()
+          entries = []
+          for item in spec['changes']:
+              name = item['path']
+              assert name in expected and name not in seen
+              seen.add(name)
+              mode, want = expected[name]
+              assert item['mode'] == mode
+              target = root / name
+              assert target.is_file() and not target.is_symlink() and target.resolve().is_relative_to(root)
+              old = target.read_bytes()
+              assert hashlib.sha256(old).hexdigest() == item['old_sha256']
+              end = 0
+              for begin, stop, text in item['edits']:
+                  assert type(begin) is int and type(stop) is int and end <= begin <= stop <= len(old)
+                  assert isinstance(text, str)
+                  end = stop
+              data = old
+              for begin, stop, text in reversed(item['edits']):
+                  data = data[:begin] + text.encode() + data[stop:]
+              assert len(data) < 2000000
+              digest = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+              assert digest == want, name
+              target.write_bytes(data)
+              target.chmod(int(mode, 8) & 0o777)
+              git('add', '--', name)
+              assert git('rev-parse', ':' + name) == want
+              sha = api('blobs', {'content': base64.b64encode(data).decode(), 'encoding': 'base64'})['sha']
+              assert sha == want
+              entries.append({'path': name, 'mode': mode, 'type': 'blob', 'sha': sha})
+          assert seen == set(expected)
+          git('diff', '--cached', '--check')
+          assert set(git('diff', '--cached', '--name-only').splitlines()) == set(expected)
+          tree = api('trees', {'base_tree': base_tree, 'tree': entries})['sha']
+          assert tree == git('write-tree')
+          receipt = {'repository': repo, 'base_commit': base_commit, 'base_tree': base_tree,
+                     'tree': tree, 'changed_entries': entries, 'refs_changed': False,
+                     'tests_run_by_helper': False}
+          pathlib.Path('receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps(receipt))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: readiness-source-receipt
+          path: receipt.json
+          retention-days: 1
+          if-no-files-found: error
