@@ -1046,6 +1046,10 @@ def add_ui_bundle(stage: Path, bundle: Path, source: Path,
     copy_file("etc/libreecho/web-config.json", "etc/libreecho/web-config.json", 0o600)
     copy_file("etc/libreecho/airplay2.conf", "etc/libreecho/airplay2.conf", 0o644)
     copy_file("etc/libreecho/ntp.conf", "etc/libreecho/ntp.conf", 0o644)
+    copy_file(
+        "etc/libreecho/avahi-services/wyoming.service",
+        "etc/libreecho/avahi-services/wyoming.service", 0o644,
+    )
     if "etc/libreecho/users" in bundled_files:
         users_file = pinned_source(bundle, "etc/libreecho/users", "UI users file")
         if users_file.stat().st_mode & 0o077 or not read(users_file).strip():
