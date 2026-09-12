@@ -1819,7 +1819,7 @@ def validate_stage(stage: Path) -> None:
 
     init_script = read(stage / "libreecho-init")
     for marker in (
-        b"FASTBOOT_PLEASE", b"/tmp/runme", b"functionfs", b"/dev/stpwmt", b"/dev/stpbt",
+        b"FASTBOOT_PLEASE", b"/run/libreecho-control/runme", b"functionfs", b"/dev/stpwmt", b"/dev/stpbt",
         b"PARTNAME=expdb", b"/sys/class/block/mmcblk0p7", b"20480", b"bs=15 count=1",
         b"stat -c '%t:%T'",
     ):
