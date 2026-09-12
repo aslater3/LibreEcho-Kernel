@@ -969,6 +969,14 @@ class SourceTests(unittest.TestCase):
         init_hash = hashlib.sha256(
             (TOOLS_DIR / "initramfs/libreecho-init").read_bytes()
         ).hexdigest()
+        init = (TOOLS_DIR / "initramfs/libreecho-init").read_text()
+        builder = (TOOLS_DIR / "build_recovery_image.py").read_text()
+        verifier = (TOOLS_DIR / "verify_recovery_image.py").read_text()
+        self.assertIn("/run/libreecho-control/runme", init)
+        self.assertIn('b"/run/libreecho-control/runme"', builder)
+        self.assertNotIn('b"/tmp/runme"', builder)
+        self.assertIn('b"/run/libreecho-control/runme"', verifier)
+        self.assertNotIn('b"/tmp/runme"', verifier)
         pins = {
             "build_recovery_image.py": "RECOVERY_INIT_SHA256",
             "verify_recovery_image.py": "INIT_SHA256",
