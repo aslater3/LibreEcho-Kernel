@@ -127,6 +127,7 @@ UI_FIXED_NAMES = UI_BINARY_NAMES | UI_INIT_NAMES | {
     "etc/libreecho/web-config.json",
     "etc/libreecho/airplay2.conf",
     "etc/libreecho/ntp.conf",
+    "etc/libreecho/avahi-services/wyoming.service",
     "usr/local/share/libreecho/ui-manifest.txt",
     "usr/local/share/libreecho/sounds/action-1.raw",
     "usr/local/share/libreecho/sounds/action-2.raw",
@@ -1776,7 +1777,7 @@ def validate_initramfs(ramdisk: bytes, manifest: dict[str, object],
         if marker not in reconcile.data:
             fail(f"feature reconciliation helper lacks {marker!r}")
     for marker in (
-        b"FASTBOOT_PLEASE", b"/tmp/runme", b"functionfs", b"/dev/stpwmt", b"/dev/stpbt",
+        b"FASTBOOT_PLEASE", b"/run/libreecho-control/runme", b"functionfs", b"/dev/stpwmt", b"/dev/stpbt",
         b"PARTNAME=expdb", b"/sys/class/block/mmcblk0p7", b"20480", b"bs=15 count=1",
         b"stat -c '%t:%T'",
     ):
