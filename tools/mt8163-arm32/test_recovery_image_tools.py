@@ -2640,11 +2640,14 @@ start_feature_service_if_enabled
     def test_home_assistant_discovery_service_is_packaged_with_ui(self) -> None:
         ui_builder = (TOOLS_DIR / "ui/build_ui_bundle.sh").read_text()
         image_builder = (TOOLS_DIR / "build_recovery_image.py").read_text()
+        image_verifier = (TOOLS_DIR / "verify_recovery_image.py").read_text()
         service = "etc/libreecho/avahi-services/wyoming.service"
-
         self.assertIn("config/wyoming.service", ui_builder)
         self.assertIn(service, ui_builder)
         self.assertIn(service, image_builder)
+        self.assertIn(service, image_verifier)
+        self.assertIn("<type>_wyoming._tcp</type>", ui_builder)
+        self.assertIn("<port>10700</port>", ui_builder)
 
     def test_first_install_confirmation_requires_startup_ready_and_led_handoff(self) -> None:
         init_script = (TOOLS_DIR / "initramfs/libreecho-init").read_text()

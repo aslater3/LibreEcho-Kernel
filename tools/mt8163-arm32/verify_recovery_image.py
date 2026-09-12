@@ -127,6 +127,7 @@ UI_FIXED_NAMES = UI_BINARY_NAMES | UI_INIT_NAMES | {
     "etc/libreecho/web-config.json",
     "etc/libreecho/airplay2.conf",
     "etc/libreecho/ntp.conf",
+    "etc/libreecho/avahi-services/wyoming.service",
     "usr/local/share/libreecho/ui-manifest.txt",
     "usr/local/share/libreecho/sounds/action-1.raw",
     "usr/local/share/libreecho/sounds/action-2.raw",
