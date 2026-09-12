@@ -139,7 +139,8 @@ do
 done
 
 mkdir -p "$OUTPUT/sbin" "$OUTPUT/share/libreecho/web" \
-    "$OUTPUT/share/libreecho/sounds" "$OUTPUT/etc/init.d" "$OUTPUT/etc/libreecho"
+    "$OUTPUT/share/libreecho/sounds" "$OUTPUT/etc/init.d" \
+    "$OUTPUT/etc/libreecho/avahi-services"
 
 for binary in \
     libreecho-web libreecho-logd libreecho-networkd libreecho-timed \
@@ -170,6 +171,8 @@ install -m 0644 "$UI_SOURCE/config/airplay2.conf" \
     "$OUTPUT/etc/libreecho/airplay2.conf"
 install -m 0644 "$UI_SOURCE/config/ntp.conf" \
     "$OUTPUT/etc/libreecho/ntp.conf"
+install -m 0644 "$UI_SOURCE/config/wyoming.service" \
+    "$OUTPUT/etc/libreecho/avahi-services/wyoming.service"
 for sound in action-1.raw action-2.raw action-3.raw; do
     path="$UI_SOURCE/sounds/$sound"
     [[ -f "$path" && ! -L "$path" && -s "$path" ]] || {
