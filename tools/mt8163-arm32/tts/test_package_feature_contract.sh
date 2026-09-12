@@ -9,7 +9,11 @@ payload="$root/tts.squashfs"
 payload_url="https://github.com/aslater3/LibreEcho/releases/download/"
 payload_url+="radar-puffin-build-70bcb92-8ef37f6bfbdc8cab-177f49b75ac9ce88/"
 payload_url+="libreecho-radar-puffin-build-70bcb92-8ef37f6bfbdc8cab-177f49b75ac9ce88-tts.squashfs"
-curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "$payload" "$payload_url"
+curl_args=(-fsSL --retry 6 --retry-all-errors --retry-delay 10)
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  curl_args+=(--header "Authorization: Bearer $GITHUB_TOKEN")
+fi
+curl "${curl_args[@]}" -o "$payload" "$payload_url"
 printf '%s  %s\n' \
   53033508bd7e70048a2b89d214de93cbcbf9901753ef211af84077c39f051160 \
   "$payload" | sha256sum -c -
